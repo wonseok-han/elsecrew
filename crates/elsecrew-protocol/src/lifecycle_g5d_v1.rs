@@ -141,7 +141,15 @@ fn parse_followup_status(
     let mut catalog = false;
     let mut install = false;
     let mut output = false;
+    let mut preview = false;
     let extended = capabilities.is_some_and(|capabilities| {
+        // Result preview: an optional pair right after the installation suffix.
+        if capabilities.len() >= 2
+            && capabilities[capabilities.len() - 2].as_str() == Some("preview.resolve")
+            && capabilities.last().and_then(Value::as_str) == Some("preview.readAsset") {
+            capabilities.truncate(capabilities.len() - 2);
+            preview = true;
+        }
         if capabilities.last().and_then(Value::as_str) == Some("provider.install") {
             capabilities.pop();
             install = true;
@@ -174,6 +182,9 @@ fn parse_followup_status(
     let mut parsed = baseline(&normalized)?;
     if output && !extended {
         return Err(G5DAdmissionContractError::new("output requires followup baseline"));
+    }
+    if preview && !install {
+        return Err(G5DAdmissionContractError::new("preview requires installation baseline"));
     }
     if install && !catalog {
         return Err(G5DAdmissionContractError::new("installation requires catalog baseline"));
@@ -219,6 +230,9 @@ fn parse_followup_status(
     }
     if install {
         parsed.sidecar.capabilities.push("provider.install".to_owned());
+    }
+    if preview {
+        parsed.sidecar.capabilities.extend(crate::preview_v1::PREVIEW_METHODS_V1.iter().map(|method| (*method).to_owned()));
     }
     Ok(parsed)
 }

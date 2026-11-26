@@ -1,5 +1,7 @@
 pub(crate) mod automation_permissions;
 pub(crate) mod workspace_cleanup;
+pub(crate) mod chat_erasure;
+pub(crate) mod project_deletion;
 // Requires native Windows recovery QA and explicit product activation.
 pub(crate) const WINDOWS_SAVE_RECOVERY_MUTATIONS_ENABLED: bool = false;
 // Installation consent is not product activation; native integration review remains required.
@@ -8,8 +10,19 @@ pub(crate) const WINDOWS_GIT_EXECUTION_ENABLED: bool = false;
 #[cfg(not(any(unix, windows)))]
 use crate::process_spawn::SpawnGuarded as _;
 mod app_roles;
+mod preview;
+#[cfg(test)]
+pub(crate) use preview::set_preview_test_hook;
+mod latest_apply;
 mod app_connections;
+mod write_scope;
+pub(crate) use write_scope::WriteScope;
+#[cfg(test)]
+pub(crate) use write_scope::path_within as write_scope_path_within;
+mod app_run_limits;
 mod empty_project;
+mod git_worktree;
+mod git_merge;
 #[cfg(any(windows, test))]
 mod git_selection;
 #[cfg(any(windows, test))]
@@ -84,7 +97,6 @@ use crate::{AppendOutcome, SidecarError, Storage};
 use cap_fs_ext::OsMetadataExt;
 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt, OpenOptionsMaybeDirExt};
 use cap_std::ambient_authority;
-#[cfg(windows)]
 use cap_std::fs::OpenOptionsExt as _;
 #[cfg(unix)]
 use cap_std::fs::PermissionsExt;
@@ -95,9 +107,11 @@ use elsecrew_protocol::project_v1::{
     SNAPSHOT_DISK_RESERVE_BYTES_V1, SNAPSHOT_ENTRIES_MAX_V1,
     SNAPSHOT_MATERIALIZED_TOTAL_MAX_BYTES_V1, SNAPSHOT_SINGLE_BLOB_MAX_BYTES_V1,
     SNAPSHOT_TRANSPORT_V1, SOURCE_MUTATION_POLICY_V1, TREE_PAGE_MAX_ENTRIES_V1, WORKSPACE_KIND_V1,
-    WORKTREE_HEAD_MODE_V1,
+    WORKTREE_HEAD_MODE_V1, PROJECT_SCHEMA_VERSION_V2, WORKSPACE_KIND_GIT_WORKTREE_V2,
+    WORKTREE_HEAD_MODE_V2, TASK_BRANCH_PREFIX_V2,
 };
 use elsecrew_protocol::MAX_TEXT_CHUNK_BYTES;
+use elsecrew_protocol::project_v1::manifest_source_root;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -257,6 +271,30 @@ enum SnapshotCreation {
     #[cfg(any(unix, windows))]
     #[allow(dead_code)]
     ApplicationCandidate,
+    // A task's own clean-source copy: records the baseline like
+    // `ApplicationCandidate` but, like `FreshChat`, never becomes the
+    // project's own copy.
+    #[cfg(any(unix, windows))]
+    ChatApplicationCandidate,
+}
+
+impl SnapshotCreation {
+    fn captures_baseline(self) -> bool {
+        #[cfg(any(unix, windows))]
+        { matches!(self, Self::ApplicationCandidate | Self::ChatApplicationCandidate) }
+        #[cfg(not(any(unix, windows)))]
+        { false }
+    }
+
+    /// Each task works in a copy of its own. The project keeps its own copy
+    /// for the project view, so a task that stops badly never stops the
+    /// project from opening.
+    fn keeps_project_copy(self) -> bool {
+        #[cfg(any(unix, windows))]
+        { matches!(self, Self::FreshChat | Self::ChatApplicationCandidate) }
+        #[cfg(not(any(unix, windows)))]
+        { matches!(self, Self::FreshChat) }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -292,7 +330,12 @@ impl PendingSave {
 }
 
 struct PreparedTarget {
+    /// The held rename root: the app's data root (v1 copy), or the task
+    /// worktree folder itself.
     data_root: Dir,
+    /// For a task worktree: its recorded folder, whose identity must still
+    /// be the held root at the rename boundary. `None` is the data root.
+    stable_root: Option<PathBuf>,
     temp_parent: Dir,
     temp_name: String,
     temp_relative: PathBuf,
@@ -337,13 +380,29 @@ struct WatchState {
 
 enum WorkspaceLockAdmission {
     Ready,
+    /// Discarding a review-ready task: as `Ready`, and a task of a plain
+    /// folder's earlier record (which can do nothing else) is accepted.
+    Discard,
     Cleanup,
+    /// A run that stopped without its engine is being ended: the lock may
+    /// still carry that run's own hold or recovery mark, and nothing else.
+    InterruptedRun(String),
     #[cfg(windows)]
     SaveRecovery(String),
 }
 
+/// What a task's workspace is (docs/proposals/m5-real-worktrees.md).
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum WorkspaceKind {
+    /// v1: a standalone copy with a detached HEAD at its base.
+    Snapshot,
+    /// v2: a real `git worktree` of the user's repository on its own branch.
+    GitWorktree { branch: String, base_ref: Option<String> },
+}
+
 #[derive(Clone, PartialEq, Eq)]
 struct ActiveProject {
+    kind: WorkspaceKind,
     project_id: String,
     canonical_git_root: PathBuf,
     worktree_id: String,
@@ -468,9 +527,15 @@ pub struct ProjectManager {
     application_job: Option<application_review::intent::execution::ApplicationJob>,
     #[cfg(any(unix, windows))]
     application_confirmations: application_review::confirmation::Confirmations,
+    /// Result preview roots verified at `preview.resolve` (identity only, no handle kept).
+    preview_roots: preview::PreviewRoots,
     data_root: PathBuf,
     data_dir: Dir,
     worktrees_root: PathBuf,
+    /// Task workspaces are real Git worktrees (2026-11-18 design), on by
+    /// default now that merging, conflict hand-off, cleanup and recovery
+    /// exist. `ELSECREW_GIT_WORKTREES=0` keeps the v1 copies.
+    git_worktrees_enabled: bool,
     manifests_root: PathBuf,
     worktrees_dir: Dir,
     manifests_dir: Dir,
@@ -635,6 +700,11 @@ impl ProjectManager {
         #[cfg(not(any(target_os = "macos", windows)))]
         { let _ = (storage, project, application_id, fingerprint, request); Err(ProjectFailure::recovery("restoration unavailable on this platform")) }
     }
+    /// The project and task a save in progress writes to.
+    pub(crate) fn pending_save_target(&self, save_id: &str) -> Option<(String, Option<String>)> {
+        self.pending_saves.get(save_id).map(|save| (save.project_id.clone(), save.chat_id.clone()))
+    }
+
     pub(crate) fn application_running(&self) -> bool {
         #[cfg(any(target_os = "macos", windows))]
         { self.application_job.is_some() }
@@ -810,13 +880,14 @@ impl ProjectManager {
             Err(ProjectFailure::recovery("chat application preview unavailable on this platform"))
         }
     }
+    #[cfg(test)]
     pub(crate) fn prepare_application_workspace(&mut self, storage: &mut Storage, project_id: &str, request_id: &str) -> Result<ProjectAction, ProjectFailure> {
         #[cfg(any(unix, windows))]
         {
             // Reject unsupported/dirty input before reserving a recovery lock.
             // Creation captures again under its durable launch fence.
             let project = required_project(storage, project_id)?;
-            let source = self.open_source_repository(Path::new(value_string(&project, "canonical_path")?))?;
+            let source = self.open_project_source(&project)?;
             #[cfg(unix)]
             application::git_baseline::raw_baseline::capture_clean_baseline(self, &source)?;
             #[cfg(windows)]
@@ -834,6 +905,50 @@ impl ProjectManager {
             Err(ProjectFailure::recovery("application workspace unavailable on this platform"))
         }
     }
+    /// Opens the original of a saved project and insists that the saved
+    /// folder is still the root of its own Git repository. Looking for a
+    /// repository walks up through parent folders, so a project folder that
+    /// lost its `.git` must never let a parent folder's repository stand in.
+    fn open_project_source(&self, project: &Map<String, Value>) -> Result<SourceRepository, ProjectFailure> {
+        let saved = value_string(project, "canonical_path")?;
+        let source = self.open_source_repository(Path::new(saved))?;
+        if canonical_protocol_path(&source.canonical_root)? != saved {
+            return Err(ProjectFailure::manifest(
+                "saved project folder is no longer the root of its Git repository",
+            ));
+        }
+        Ok(source)
+    }
+
+    /// A task's own clean-source copy. The project keeps its own copy.
+    pub(crate) fn prepare_chat_application_workspace(&mut self, storage: &mut Storage, project_id: &str, request_id: &str) -> Result<ProjectAction, ProjectFailure> {
+        // A real worktree needs no clean original: it starts from the last
+        // commit and the user's uncommitted edits stay in their folder.
+        // Repositories a worktree cannot serve yet (LFS, merge drivers, no
+        // branch to merge into) keep the v1 copy instead of failing.
+        #[cfg(target_os = "macos")]
+        if self.git_worktrees_enabled && self.task_worktrees_supported(storage, project_id)? {
+            return self.create_git_worktree(storage, project_id, request_id);
+        }
+        #[cfg(any(unix, windows))]
+        {
+            // Reject unsupported/dirty input before reserving a recovery lock.
+            let project = required_project(storage, project_id)?;
+            let source = self.open_project_source(&project)?;
+            #[cfg(unix)]
+            application::git_baseline::raw_baseline::capture_clean_baseline(self, &source)?;
+            #[cfg(windows)]
+            windows_git_baseline::capture_windows_clean_baseline(self, &source)?;
+            self.create_worktree_inner(storage, project_id, request_id, None, None, SnapshotCreation::ChatApplicationCandidate)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = (storage, project_id, request_id);
+            Err(ProjectFailure::recovery("application workspace unavailable on this platform"))
+        }
+    }
+    /// Only the baseline tests still read the project-level preview.
+    #[cfg(all(test, not(windows)))]
     pub(crate) fn application_preview(&self, storage: &Storage, project_id: &str) -> Result<ProjectAction, ProjectFailure> {
         #[cfg(any(unix, windows))]
         {
@@ -990,9 +1105,12 @@ impl ProjectManager {
             application_job: None,
             #[cfg(any(unix, windows))]
             application_confirmations: Default::default(),
+            preview_roots: Default::default(),
             data_root,
             data_dir,
             worktrees_root,
+            git_worktrees_enabled: cfg!(target_os = "macos")
+                && !std::env::var("ELSECREW_GIT_WORKTREES").is_ok_and(|value| value == "0"),
             manifests_root,
             worktrees_dir,
             manifests_dir,
@@ -1030,7 +1148,9 @@ impl ProjectManager {
         let path = storage
             .project_catalog_path(project_id)?
             .ok_or_else(|| ProjectFailure::manifest("saved project was not found"))?;
-        if project_id_for_root(&path) != project_id {
+        // IDs start as a hash of the path but a re-added folder gets a fresh
+        // one; deleted projects carry a marker instead of a path.
+        if path.starts_with("deleted:") || storage.project_id_by_path(&path)?.as_deref() != Some(project_id) {
             return Err(ProjectFailure::manifest("saved project ID and root differ"));
         }
         let selected = canonical_existing_directory(Path::new(&path))?;
@@ -1081,95 +1201,6 @@ impl ProjectManager {
         })
     }
 
-    /// Hide metadata only. No source, snapshot, history, or recovery data is deleted.
-    pub fn change_catalog_visibility(
-        &mut self, storage: &mut Storage, project_id: &str, chat_id: Option<&str>,
-        action: &str, request_id: &str,
-    ) -> Result<ProjectAction, ProjectFailure> {
-        let mut project = required_project(storage, project_id)?;
-        #[cfg(any(unix, windows))]
-        if self.application_confirmations.has_pending() {
-            return Err(ProjectFailure::recovery("close the application confirmation before list removal"));
-        }
-
-        if !matches!(project.get("lifecycle").and_then(Value::as_str), Some("opened" | "active" | "abandoned"))
-            || self.application_running() || self.preparation_cancel.is_some() || !self.pending_saves.is_empty()
-            || project.get("application_intent").is_some_and(|intent| !matches!(intent["state"].as_str(), Some("abandoned" | "restored")))
-        { return Err(ProjectFailure::recovery("finish project work or recovery before removing it from lists")); }
-        if project.get("prepared_workspaces").is_some_and(|value| value.as_object().is_none_or(|items| items.values().any(|item| !matches!(item["bindingState"].as_str(), Some("bound" | "abandoned")))) ) {
-            return Err(ProjectFailure::recovery("finish pending workspace preparation before list removal"));
-        }
-        let chats = storage.projection_records("chat")?;
-        let selected = if action == "removeChat" {
-            let id = chat_id.ok_or_else(|| ProjectFailure::manifest("chat identity missing"))?;
-            Some(chats.iter().find(|chat| chat.get("chat_id").and_then(Value::as_str) == Some(id)
-                && chat.get("project_id").and_then(Value::as_str) == Some(project_id))
-                .ok_or_else(|| ProjectFailure::manifest("chat does not belong to project"))?)
-        } else { None };
-        let selected_worktree = selected.map(|chat| chat.get("worktree_id").and_then(Value::as_str)
-            .ok_or_else(|| ProjectFailure::manifest("chat workspace identity missing"))).transpose()?;
-        let in_scope = |chat: &Map<String, Value>| chat.get("project_id").and_then(Value::as_str) == Some(project_id)
-            && selected.is_none_or(|selected| chat.get("chat_id") == selected.get("chat_id"));
-        for chat in &chats {
-            if in_scope(chat)
-                && crate::orchestration::load(chat)?.is_some_and(|state| state.status == "running") {
-                return Err(ProjectFailure::recovery("finish team orchestration before list removal"));
-            }
-        }
-        if chats.iter().any(|chat| in_scope(chat)
-            && (chat.get("state").and_then(Value::as_str) == Some("recoveryRequired")
-                || chat.get("save_sessions").is_some_and(|sessions| sessions.as_object().is_none_or(|items| !items.is_empty())))) {
-            return Err(ProjectFailure::recovery("finish saved chat recovery before list removal"));
-        }
-        let ids: Vec<&str> = chats.iter().filter(|chat| in_scope(chat))
-            .filter_map(|chat| chat.get("chat_id").and_then(Value::as_str)).collect();
-        if chat_id.is_some_and(|id| !ids.contains(&id)) { return Err(ProjectFailure::manifest("chat does not belong to project")); }
-        for run in storage.projection_records("run")? {
-            if run.get("chat_id").and_then(Value::as_str).is_some_and(|id| ids.contains(&id))
-                && (!matches!(run.get("state").and_then(Value::as_str), Some("succeeded" | "failed" | "canceled"))
-                    || run.get("recovery").is_some_and(|value| {
-                        let resolved = if run.get("source_kind").and_then(Value::as_str) == Some("actualAgent") {
-                            "resolvedAbandoned"
-                        } else {
-                            "resolved"
-                        };
-                        !value.is_null() && value["state"] != resolved
-                    }))
-            { return Err(ProjectFailure::recovery("finish agent execution or recovery before removing list entries")); }
-        }
-        for lock in storage.projection_records("lock")? {
-            if lock.get("project_id").and_then(Value::as_str) == Some(project_id)
-                && selected_worktree.is_none_or(|worktree| {
-                    // Unknown lock ownership remains blocking; only a positively
-                    // identified sibling workspace can be excluded.
-                    let id = lock.get("lock_id").and_then(Value::as_str);
-                    id == Some(format!("lock_{worktree}").as_str()) || !chats.iter().any(|chat| {
-                        chat.get("project_id").and_then(Value::as_str) == Some(project_id)
-                            && chat.get("worktree_id").and_then(Value::as_str).is_some_and(|other| id == Some(format!("lock_{other}").as_str()))
-                    })
-                })
-                && (lock.get("poisoned").and_then(Value::as_bool) != Some(false)
-                    || lock.get("recovery_required").and_then(Value::as_bool) != Some(false)
-                    || lock.get("writer_run_id").is_some_and(|value| !value.is_null()))
-            { return Err(ProjectFailure::recovery("project lock needs attention before list removal")); }
-        }
-        match action {
-            "removeProject" => { project.insert("catalog_hidden".into(), json!(true)); }
-            "removeChat" => {
-                let id = chat_id.ok_or_else(|| ProjectFailure::manifest("chat identity missing"))?;
-                let hidden = project.entry("catalog_hidden_chats").or_insert_with(|| json!([])).as_array_mut()
-                    .ok_or_else(|| ProjectFailure::manifest("invalid hidden chat list"))?;
-                if !hidden.iter().any(|value| value == id) { hidden.push(json!(id)); }
-            }
-            "restoreChats" => { project.insert("catalog_hidden_chats".into(), json!([])); }
-            _ => return Err(ProjectFailure::manifest("unknown catalog mutation")),
-        }
-        append_object(storage, "project", project_id, &format!("op_catalog_{request_id}"), request_id, Value::Object(project))?;
-        let mut result = json!({"schemaVersion":1,"action":action,"projectId":project_id});
-        if let Some(id) = chat_id { result["chatId"] = json!(id); }
-        Ok(ProjectAction { result, ..Default::default() })
-    }
-
     /// Detach watchers only; durable snapshots and chat bindings remain reusable.
     pub fn release_project_view(
         &mut self,
@@ -1204,9 +1235,25 @@ impl ProjectManager {
                 "picker-approved path is outside the capability-held Git root",
             ));
         }
+        // A project inside a task's workspace, or holding one, would let a
+        // merge into it and that task's agent write the same files (PR #18
+        // review B1).
+        self.refuse_workspace_overlap(storage, &source.canonical_root, "the project folder")?;
         let canonical_text = canonical_protocol_path(&source.canonical_root)?;
         let selected_text = canonical_protocol_path(selected)?;
-        let project_id = project_id_for_root(&canonical_text);
+        // A folder that belonged to a deleted project starts over under a new
+        // ID. Projects hidden by the old "remove from list" are deleted now.
+        let mut found = storage.project_id_by_path(&canonical_text)?;
+        if let Some(id) = found.clone() {
+            if registered_project(storage, &id)?.get("catalog_hidden") == Some(&json!(true)) {
+                self.delete_project(storage, &id, request_id)?;
+                found = None;
+            }
+        }
+        let project_id = match found {
+            Some(id) => id,
+            None => fresh_project_id(storage, &canonical_text)?,
+        };
 
         if let Some(mut existing) = storage.projection_record("project", &project_id)? {
             if existing.contains_key(path_binding::FIELD) {
@@ -1223,27 +1270,41 @@ impl ProjectManager {
                     &format!("op_project_path_binding_{request_id}"), request_id,
                     Value::Object(existing.clone()))?;
             }
-            if existing.get("catalog_hidden") == Some(&json!(true)) {
-                existing.insert("catalog_hidden".into(), json!(false));
-                append_object(storage, "project", &project_id, &format!("op_catalog_restore_{request_id}"), request_id, Value::Object(existing.clone()))?;
-            }
             let lifecycle = value_string(&existing, "lifecycle")?;
             if lifecycle == "recoveryRequired" {
                 return Err(ProjectFailure::recovery(
                     "project has durable recovery state from an interrupted snapshot operation",
                 ));
             }
-            if lifecycle == "active" {
+            // Older data: the project still points at a task's copy. That copy
+            // is the task's own business (it may even need recovery) and must
+            // not stop the project from opening. Such a project is opened
+            // afresh below: the original's current state is recorded and the
+            // pointer is dropped, so `create_worktree` gives the project view a
+            // copy of its own. The task keeps its copy through its own address.
+            if lifecycle == "active" && !is_task_copy(storage, &existing)? {
                 let active = self.validate_active_project(storage, &project_id)?;
                 if active.canonical_git_root != source.canonical_root {
                     return Err(ProjectFailure::manifest(
                         "persisted project root differs from the picker-approved root",
                     ));
                 }
-                return Ok(ProjectAction {
-                    result: project_identity(&project_id, &selected_text, &canonical_text),
-                    ..ProjectAction::default()
-                });
+                // The original moved on since this view copy was made (a task
+                // merged into it, or the user's own commit). A copy holding
+                // nothing of the user's is replaced so the project shows the
+                // folder as it is now; one with edits stays as it is.
+                let outdated = active.base_commit != source.base_commit
+                    && self.project_copy_untouched(storage, &existing, &active);
+                // A copy that cannot be closed is simply reused (review M21).
+                if !outdated || self.close_project(storage, &project_id, &format!("{request_id}_outdated")).is_err() {
+                    return Ok(ProjectAction {
+                        result: project_identity(&project_id, &selected_text, &canonical_text),
+                        ..ProjectAction::default()
+                    });
+                }
+                // Nothing of the user's is in it (checked just now): its files
+                // in app data go at once instead of piling up. Best effort.
+                let _ = self.remove_worktree_files(&active.worktree_id);
             }
         }
 
@@ -1323,6 +1384,48 @@ impl ProjectManager {
         )
     }
 
+    #[cfg(test)]
+    fn prepare_chat_workspace_with_pre_export_hook<F>(
+        &mut self,
+        storage: &mut Storage,
+        project_id: &str,
+        request_id: &str,
+        mut hook: F,
+    ) -> Result<ProjectAction, ProjectFailure>
+    where
+        F: FnMut(),
+    {
+        self.create_worktree_inner(
+            storage,
+            project_id,
+            request_id,
+            None,
+            Some(&mut hook),
+            SnapshotCreation::FreshChat,
+        )
+    }
+
+    #[cfg(all(test, unix))]
+    fn prepare_chat_application_workspace_with_pre_export_hook<F>(
+        &mut self,
+        storage: &mut Storage,
+        project_id: &str,
+        request_id: &str,
+        mut hook: F,
+    ) -> Result<ProjectAction, ProjectFailure>
+    where
+        F: FnMut(),
+    {
+        self.create_worktree_inner(
+            storage,
+            project_id,
+            request_id,
+            None,
+            Some(&mut hook),
+            SnapshotCreation::ChatApplicationCandidate,
+        )
+    }
+
     fn create_worktree_inner(
         &mut self,
         storage: &mut Storage,
@@ -1333,19 +1436,34 @@ impl ProjectManager {
         creation: SnapshotCreation,
     ) -> Result<ProjectAction, ProjectFailure> {
         let project = required_project(storage, project_id)?;
-        if !storage.blocker_ids()?.is_empty() {
+        if !snapshot_export_blockers(storage)?.is_empty() {
             return Err(ProjectFailure::recovery(
                 "durable recovery blockers must be resolved before another snapshot export",
             ));
         }
+        if project.get("application_intent").is_some_and(|intent| {
+            !matches!(intent["state"].as_str(), Some("applied" | "restored" | "abandoned"))
+        }) {
+            return Err(ProjectFailure::recovery(
+                "an unfinished update of the original must be resolved before another snapshot export",
+            ));
+        }
         let lifecycle = value_string(&project, "lifecycle")?;
-        if lifecycle == "active" && creation == SnapshotCreation::ReuseActive {
+        // Older projects pointed at the latest task's copy. The project view
+        // never reuses a task's copy: it gets a copy of its own instead.
+        let task_copy = is_task_copy(storage, &project)?;
+        if lifecycle == "active" && creation == SnapshotCreation::ReuseActive && !task_copy {
             let active = self.validate_active_project(storage, project_id)?;
             return Ok(ProjectAction {
                 result: manifest_value(&active, "active")?,
                 ..ProjectAction::default()
             });
         }
+        let project_copy = (creation.keeps_project_copy()
+            && lifecycle == "active"
+            && !task_copy
+            && self.validate_active_project(storage, project_id).is_ok())
+        .then(|| project.clone());
         if lifecycle == "recoveryRequired" {
             return Err(ProjectFailure::recovery(
                 "snapshot creation was interrupted and cannot be retried automatically",
@@ -1357,18 +1475,22 @@ impl ProjectManager {
             ));
         }
 
-        let source =
-            self.open_source_repository(Path::new(value_string(&project, "canonical_path")?))?;
-        for (field, actual) in [
-            ("base_commit", source.base_commit.as_str()),
-            ("base_tree", source.base_tree.as_str()),
-            ("object_format", source.object_format.as_str()),
-            ("source_identity", source.source_identity.as_str()),
-        ] {
-            if project.get(field).and_then(Value::as_str) != Some(actual) {
-                return Err(ProjectFailure::manifest(
-                    "source identity changed after project.open",
-                ));
+        let source = self.open_project_source(&project)?;
+        // The project's own copy must be what `project.open` recorded. A
+        // task's copy is made from the original as it is now (new commits
+        // included) and carries its own base in its manifest and receipt.
+        if !creation.keeps_project_copy() {
+            for (field, actual) in [
+                ("base_commit", source.base_commit.as_str()),
+                ("base_tree", source.base_tree.as_str()),
+                ("object_format", source.object_format.as_str()),
+                ("source_identity", source.source_identity.as_str()),
+            ] {
+                if project.get(field).and_then(Value::as_str) != Some(actual) {
+                    return Err(ProjectFailure::manifest(
+                        "source identity changed after project.open",
+                    ));
+                }
             }
         }
 
@@ -1391,6 +1513,14 @@ impl ProjectManager {
             ));
         }
         let lock_id = format!("lock_{worktree_id}");
+        // Taken before anything is recorded: another Git command busy in the
+        // original is an ordinary "try again", with nothing to undo.
+        let before = source_digest(&source.git_dir)?;
+        if before.lock_count != 0 {
+            return Err(ProjectFailure::dirty(
+                "another Git command is working in the original; nothing was prepared",
+            ));
+        }
         let worktree_text = canonical_protocol_path_without_existing(&worktree_path)?;
         let root_text = canonical_protocol_path(&source.canonical_root)?;
         let manifest_text = canonical_protocol_path_without_existing(&manifest_path)?;
@@ -1430,42 +1560,59 @@ impl ProjectManager {
             ));
         }
 
-        self.worktrees_dir
-            .create_dir(&staging_name)
-            .map_err(|error| {
-                ProjectFailure::recovery(format!(
-                    "could not create managed snapshot staging child: {error}"
-                ))
-            })?;
-        let staging = open_real_child_dir(&self.worktrees_dir, &staging_name)?;
-        let before = source_digest(&source.git_dir)?;
-        if before.lock_count != 0 {
-            return Err(ProjectFailure::recovery(
-                "source Git directory contains lock files before snapshot export",
-            ));
+        // Until the copy is handed over for activation, everything made so far
+        // lives in one staging folder that is never used again once dropped
+        // (its name is new every time), and nothing is written to the
+        // original. Each helper Git command has ended, or its whole process
+        // group has been stopped, whenever one of these steps returns. So a
+        // failure here is undone on the spot (see `fail_unfinished_copy`)
+        // instead of leaving the project needing recovery. The injected
+        // failure points model the app dying and keep their durable state.
+        let mut held_staging: Option<Dir> = None;
+        macro_rules! undo {
+            ($step:expr) => {
+                match $step {
+                    Ok(value) => value,
+                    Err(error) => {
+                        return Err(self.fail_unfinished_copy(
+                            storage, &project, &lock_id, &workspace_identity, &staging_name,
+                            held_staging.as_ref(), request_id, error,
+                        ))
+                    }
+                }
+            };
         }
+        undo!(self.worktrees_dir.create_dir(&staging_name).map_err(|error| {
+            ProjectFailure::recovery(format!(
+                "could not create managed snapshot staging child: {error}"
+            ))
+        }));
+        let staging = undo!(open_real_child_dir(&self.worktrees_dir, &staging_name));
+        held_staging = Some(undo!(staging.try_clone().map_err(|error| {
+            ProjectFailure::recovery(format!("could not retain snapshot staging: {error}"))
+        })));
         if let Some(hook) = &mut pre_export_hook {
             hook();
         }
         let mut launching = preparation_lock;
         launching["evidence"]["phase"] = json!("snapshotExportStarting");
-        append_object(storage, "lock", &lock_id, &format!("op_snapshot_launch_{worktree_id}"), request_id, launching)?;
+        undo!(append_object(storage, "lock", &lock_id, &format!("op_snapshot_launch_{worktree_id}"), request_id, launching));
         #[cfg(unix)]
-        let baseline = if creation == SnapshotCreation::ApplicationCandidate {
-            Some(application::git_baseline::raw_baseline::capture_clean_baseline(self, &source)?)
+        let baseline = if creation.captures_baseline() {
+            Some(undo!(application::git_baseline::raw_baseline::capture_clean_baseline(self, &source)))
         } else {
             None
         };
         #[cfg(windows)]
-        let raw_source = if creation == SnapshotCreation::ApplicationCandidate {
-            Some(windows_git_baseline::capture_windows_clean_baseline(self, &source)?)
+        let raw_source = if creation.captures_baseline() {
+            Some(undo!(windows_git_baseline::capture_windows_clean_baseline(self, &source)))
         } else { None };
-        let bundle_bytes = self.export_bundle(&source.git_dir, &staging)?;
-        let after = source_digest(&source.git_dir)?;
+        let bundle_bytes = undo!(self.export_bundle(&source.git_dir, &staging));
+        let after = undo!(source_digest(&source.git_dir));
         if before != after || after.lock_count != 0 {
-            return Err(ProjectFailure::recovery(
+            undo!(Err(ProjectFailure::recovery(
                 "source Git identity changed during snapshot export",
-            ));
+            )));
         }
         if failure == Some(WorktreeFailurePoint::AfterBundleBeforeMaterialization) {
             return Err(ProjectFailure::recovery(
@@ -1475,30 +1622,37 @@ impl ProjectManager {
 
         #[cfg(unix)]
         if let Some(expected) = &baseline {
-            if *expected != application::git_baseline::raw_baseline::capture_clean_baseline(self, &source)? {
-                return Err(ProjectFailure::dirty("source baseline changed during snapshot export"));
+            if *expected != undo!(application::git_baseline::raw_baseline::capture_clean_baseline(self, &source)) {
+                undo!(Err(ProjectFailure::dirty("source baseline changed during snapshot export")));
             }
         }
 
         #[cfg(windows)]
         if let Some(expected) = &raw_source {
-            let observed = windows_git_baseline::capture_windows_clean_baseline(self, &source)?;
+            let observed = undo!(windows_git_baseline::capture_windows_clean_baseline(self, &source));
             if *expected != observed {
-                return Err(ProjectFailure::dirty("Windows source changed during snapshot export"));
+                undo!(Err(ProjectFailure::dirty("Windows source changed during snapshot export")));
             }
         }
 
-        self.initialize_snapshot_repository(&staging, &source)?;
-        let mut stats = self.materialize_snapshot(&staging, &source)?;
+        // Unpacking refuses what the copy cannot hold (paths that differ only
+        // in case, too many or too large files): the same every time, so it
+        // must not leave the project stuck either.
+        undo!(self.initialize_snapshot_repository(&staging, &source));
+        let mut stats = undo!(self.materialize_snapshot(&staging, &source));
         stats.bundle_bytes = bundle_bytes;
-        let disk_bytes_after = available_space(&staging)?;
+        let disk_bytes_after = undo!(available_space(&staging));
         if disk_bytes_after < SNAPSHOT_DISK_RESERVE_BYTES_V1 {
-            return Err(ProjectFailure::recovery(
+            undo!(Err(ProjectFailure::recovery(
                 "snapshot materialization would violate the 512 MiB disk reserve",
-            ));
+            )));
         }
+        // From here on the copy gets durable pieces outside its staging folder
+        // (receipt, manifest, final name): those failures stay fenced.
+        drop(held_staging);
 
         let active = ActiveProject {
+            kind: WorkspaceKind::Snapshot,
             project_id: project_id.to_string(),
             canonical_git_root: source.canonical_root,
             worktree_id,
@@ -1610,7 +1764,12 @@ impl ProjectManager {
         )
         .map_err(|error| ProjectFailure::manifest(format!("snapshot sizing failed: {error}")))?;
 
-        self.persist_active(storage, &active, &project, request_id)?;
+        match &project_copy {
+            // One write: the task copy turns active and the project keeps
+            // pointing at its own copy. No moment in between can be left behind.
+            Some(view) => self.persist_task_copy_active(storage, &active, view, request_id)?,
+            None => self.persist_active(storage, &active, &project, request_id)?,
+        }
         Ok(ProjectAction {
             result: manifest,
             ..ProjectAction::default()
@@ -2016,6 +2175,124 @@ impl ProjectManager {
         )
     }
 
+    /// App-owned write of a read-only role's report into the chat working copy.
+    /// Agents stay read-only; the app creates the file (no-follow, exclusive,
+    /// non-blocking opens) and replaces it through the editor's staged,
+    /// version-checked save path. A file the app did not write (no `marker`
+    /// first line) is never replaced: the next free `<stem>-N.md` is used.
+    /// The original project is never touched: applying it remains a review step.
+    pub(crate) fn workspace_write_report(
+        &mut self,
+        storage: &mut Storage,
+        address: &WorkspaceAddress,
+        directory: &str,
+        stem: &str,
+        marker: &str,
+        text: &str,
+        request_id: &str,
+    ) -> Result<String, ProjectFailure> {
+        let total = text.len() as u64;
+        if total == 0 || total > FILE_MAX_BYTES_V1 || !text.starts_with(marker) {
+            return Err(ProjectFailure::manifest("report must be marked non-empty UTF-8 within the file limit"));
+        }
+        let active = self.validate_workspace_address(storage, address)?;
+        let worktree = self.worktree_capability(&active)?;
+        create_parent_directories(&worktree, &format!("{directory}/{stem}.md"))?;
+        let mut chosen = None;
+        for index in 1..=9 {
+            let relative_path = if index == 1 { format!("{directory}/{stem}.md") } else { format!("{directory}/{stem}-{index}.md") };
+            validate_relative_path(&relative_path, false)?;
+            let (parent, name) = open_parent_capability(&worktree, &relative_path)?;
+            let mut options = CapOpenOptions::new();
+            options.write(true).create_new(true).follow(FollowSymlinks::No);
+            match parent.open_with(&name, &options) {
+                Ok(_) => { chosen = Some((relative_path, true)); break; }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    // Only a regular file that starts with the app's marker is ours.
+                    let mut head = vec![0_u8; marker.len()];
+                    let ours = open_real_file_at(&parent, &name)
+                        .and_then(|mut file| file.read_exact(&mut head).map_err(|error| {
+                            ProjectFailure::manifest(format!("could not inspect report file: {error}"))
+                        }))
+                        .is_ok_and(|()| head == marker.as_bytes());
+                    if ours { chosen = Some((relative_path, false)); break; }
+                }
+                Err(error) => {
+                    return Err(ProjectFailure::recovery(format!("could not create report file: {error}")))
+                }
+            }
+        }
+        let (relative_path, created) = chosen
+            .ok_or_else(|| ProjectFailure::manifest("no free report file name is available"))?;
+        let result = self.replace_report_text(storage, address, &active, &relative_path, text, request_id);
+        if result.as_ref().is_err_and(|error| !error.outcome_unknown) && created {
+            // Leave no empty placeholder behind when the replacement never committed.
+            // An unknown commit outcome keeps the work copy untouched for recovery.
+            if let Ok((parent, name)) = open_parent_capability(&worktree, &relative_path) {
+                if parent.metadata(&name).is_ok_and(|meta| meta.is_file() && meta.len() == 0) {
+                    let _ = parent.remove_file(&name);
+                }
+            }
+        }
+        result.map(|()| relative_path)
+    }
+
+    fn replace_report_text(
+        &mut self,
+        storage: &mut Storage,
+        address: &WorkspaceAddress,
+        active: &ActiveProject,
+        relative_path: &str,
+        text: &str,
+        request_id: &str,
+    ) -> Result<(), ProjectFailure> {
+        let total = text.len() as u64;
+        let current = self.read_file_from_active(active, &address.project_id, relative_path)?;
+        if current.result["classification"] != "utf8" {
+            return Err(ProjectFailure::manifest("an existing non-text report file is not replaced"));
+        }
+        let version = current.result["version"]
+            .as_str()
+            .ok_or_else(|| ProjectFailure::recovery("report file version is unavailable"))?
+            .to_owned();
+        let begin = self.workspace_begin_save(storage, address, relative_path, &version, total, "utf8")?;
+        let save_id = begin.result["saveId"]
+            .as_str()
+            .ok_or_else(|| ProjectFailure::recovery("report save omitted its identity"))?
+            .to_owned();
+        let staged = (|| {
+            let mut seq = 0;
+            let mut rest = text;
+            while !rest.is_empty() {
+                let mut end = rest.len().min(MAX_TEXT_CHUNK_BYTES);
+                while !rest.is_char_boundary(end) {
+                    end -= 1;
+                }
+                seq += 1;
+                self.workspace_append_save_chunk(storage, address, &save_id, seq, &rest[..end])?;
+                rest = &rest[end..];
+            }
+            Ok(seq)
+        })();
+        let seq = match staged {
+            Ok(seq) => seq,
+            Err(error) => {
+                // Nothing was committed: release the in-memory save, its staging
+                // file and its durable session so cleanup and removal stay unblocked.
+                if let Some(pending) = self.pending_saves.remove(&save_id) {
+                    remove_capability_temp(&self.save_staging_dir, pending.staging_name);
+                }
+                let _ = self.persist_workspace_save_session(storage, address, &save_id, false);
+                return Err(error);
+            }
+        };
+        let committed = self.workspace_commit_save(storage, address, &save_id, &version, seq, total, request_id)?;
+        if committed.result["outcome"] != "committed" {
+            return Err(ProjectFailure::manifest("report save did not commit"));
+        }
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn workspace_commit_save(
         &mut self,
@@ -2368,14 +2645,22 @@ impl ProjectManager {
         let file = worktree.open_with(&temp_name, &options).map_err(|error| {
             ProjectFailure::recovery(format!("could not create target save temp file: {error}"))
         })?;
-        let temp_relative = PathBuf::from(WORKTREE_DIRECTORY)
-            .join(&active.worktree_id)
-            .join(&temp_name);
-        let target_relative = PathBuf::from(WORKTREE_DIRECTORY)
-            .join(&active.worktree_id)
-            .join(&pending.relative_path);
+        // A v1 copy renames relative to the stable data root; a task worktree
+        // lives wherever the "작업 공간 폴더" setting put it, possibly on
+        // another volume, so it renames inside its own folder.
+        let stable_root = (active.kind != WorkspaceKind::Snapshot).then(|| active.worktree_path.clone());
+        let (rename_root, temp_relative, target_relative) = if active.kind == WorkspaceKind::Snapshot {
+            (
+                &self.data_dir,
+                PathBuf::from(WORKTREE_DIRECTORY).join(&active.worktree_id).join(&temp_name),
+                PathBuf::from(WORKTREE_DIRECTORY).join(&active.worktree_id).join(&pending.relative_path),
+            )
+        } else {
+            (&worktree, PathBuf::from(&temp_name), PathBuf::from(&pending.relative_path))
+        };
         let mut prepared = PreparedTarget {
-            data_root: self.data_dir.try_clone().map_err(|error| {
+            stable_root,
+            data_root: rename_root.try_clone().map_err(|error| {
                 ProjectFailure::recovery(format!(
                     "could not clone stable data-root capability for save: {error}"
                 ))
@@ -2603,7 +2888,10 @@ impl ProjectManager {
         prepared: &PreparedTarget,
         expected_version: &str,
     ) -> Result<(), ProjectFailure> {
-        self.verify_stable_data_root(&prepared.data_root)?;
+        match &prepared.stable_root {
+            None => self.verify_stable_data_root(&prepared.data_root)?,
+            Some(folder) => verify_stable_task_folder(&prepared.data_root, folder)?,
+        }
         let _ = verify_real_parent_and_file(
             &prepared.data_root,
             &prepared.temp_relative,
@@ -2866,8 +3154,7 @@ impl ProjectManager {
             }
             #[cfg(any(unix, windows))]
             if !completed.as_ref().expect("completed watcher").matches_capability(&worktree).unwrap_or(false)
-                || self.verify_snapshot_metadata(&worktree, &active).is_err()
-                || self.verify_snapshot_tree(&worktree, &active).is_err() {
+                || self.verify_watched_repository(&worktree, &active).is_err() {
                 if let Some(mut state) = self.watchers.remove(&project_id) {
                     emitted.push(watch_emission(&mut state, emission_project_id, Vec::new(), true));
                 }
@@ -3061,6 +3348,29 @@ impl ProjectManager {
             }],
             watch_events: Vec::new(),
         })
+    }
+
+    /// A project's own view copy with nothing of the user's in it: no save
+    /// under way, no application in progress, quiet as for a deletion
+    /// (review M22), still at its base (M23), no submodule folder whose
+    /// files Git would not see (M24), and its files exactly its base.
+    fn project_copy_untouched(&self, storage: &Storage, project: &Map<String, Value>, active: &ActiveProject) -> bool {
+        if self.pending_saves.values().any(|save| save.project_id == active.project_id)
+            || project.get("application_intent").is_some_and(|intent| intent["state"] != "abandoned")
+            || self.worktree_is_quiet(storage, &active.worktree_id, &[]).is_err()
+        {
+            return false;
+        }
+        let Ok(copy) = self.worktree_capability(active) else { return false };
+        let at_base = self.git_allow_status_at(&copy, ["rev-parse", "--verify", "HEAD^{commit}"], &[0])
+            .ok()
+            .and_then(|head| trim_output(&head).ok().map(str::to_owned))
+            .is_some_and(|head| head == active.base_commit);
+        let no_gitlinks = self.git_allow_status_at(&copy, ["ls-files", "-s"], &[0])
+            .is_ok_and(|listed| !listed.stdout.split(|byte| *byte == b'\n').any(|line| line.starts_with(b"160000 ")));
+        at_base && no_gitlinks
+            && self.git_allow_status_at(&copy, ["status", "--porcelain", "--untracked-files=all", "--ignored"], &[0])
+                .is_ok_and(|status| status.stdout.is_empty())
     }
 
     pub fn close_project(
@@ -3276,6 +3586,69 @@ impl ProjectManager {
         Ok(())
     }
 
+    /// Puts the workspace of a run that stopped without its engine back into
+    /// use: an interruption ends the run, it never discards the work. The
+    /// manifest must be exactly the run's own (only its recovery mark may
+    /// differ) and the whole chat binding is verified like any admission,
+    /// except that the lock may still carry this run's hold or mark. Returns
+    /// whether the recovery mark was lifted, so a settlement that then fails
+    /// can put it back with `workspace_restore_recovery_required`.
+    pub(crate) fn workspace_resume_interrupted(
+        &mut self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+        run_manifest: &Value,
+        run_id: &str,
+    ) -> Result<bool, ProjectFailure> {
+        let name = format!("{}.json", address.worktree_id);
+        let mut manifest = read_bounded_json(&self.manifests_dir, &name)?;
+        let marked = match manifest.get("lifecycle").and_then(Value::as_str) {
+            Some("active") => false,
+            Some("recoveryRequired") => true,
+            _ => {
+                return Err(ProjectFailure::recovery(
+                    "interrupted workspace is already terminal",
+                ))
+            }
+        };
+        manifest["lifecycle"] = Value::String("active".to_string());
+        if run_manifest.get("lifecycle").and_then(Value::as_str) != Some("active")
+            || manifest != *run_manifest
+        {
+            return Err(ProjectFailure::manifest(
+                "interrupted workspace differs from its run",
+            ));
+        }
+        if marked {
+            write_json_atomic(&self.manifests_dir, &name, &manifest)?;
+        }
+        let verified = self
+            .validate_workspace_binding_with_lock(
+                storage,
+                address,
+                "active",
+                WorkspaceLockAdmission::InterruptedRun(run_id.to_string()),
+            )
+            .and_then(|active| {
+                // The repository itself, as for any run about to use it.
+                let worktree = self.worktree_capability(&active)?;
+                self.verify_snapshot_repository(&worktree, &active)?;
+                manifest_value(&active, "active")
+            });
+        match verified {
+            Ok(value) if value == *run_manifest => Ok(marked),
+            other => {
+                if marked {
+                    manifest["lifecycle"] = Value::String("recoveryRequired".to_string());
+                    let _ = write_json_atomic(&self.manifests_dir, &name, &manifest);
+                }
+                Err(other.err().unwrap_or_else(|| {
+                    ProjectFailure::manifest("interrupted workspace differs from its run")
+                }))
+            }
+        }
+    }
+
     pub fn workspace_restore_recovery_required(
         &mut self,
         address: &WorkspaceAddress,
@@ -3293,13 +3666,14 @@ impl ProjectManager {
                 ));
             }
         }
-        if !matches!(
-            manifest.get("lifecycle").and_then(Value::as_str),
-            Some("active" | "recoveryRequired")
-        ) {
-            return Err(ProjectFailure::manifest(
-                "unclean recovery workspace is already terminal",
-            ));
+        match manifest.get("lifecycle").and_then(Value::as_str) {
+            Some("recoveryRequired") => return Ok(()),
+            Some("active") => {}
+            _ => {
+                return Err(ProjectFailure::manifest(
+                    "unclean recovery workspace is already terminal",
+                ))
+            }
         }
         manifest["lifecycle"] = Value::String("recoveryRequired".to_string());
         write_json_atomic(&self.manifests_dir, &manifest_name, &manifest)
@@ -3377,16 +3751,159 @@ impl ProjectManager {
             &active.lock_id,
             &format!("op_worktree_active_lock_{}", active.worktree_id),
             request_id,
-            json!({
-                "lock_id":active.lock_id,
-                "project_id":active.project_id,
-                "writer_run_id":Value::Null,
-                "worktree_path":canonical_protocol_path(&active.worktree_path)?,
-                "poisoned":false,"recovery_required":false,
-                "evidence":{"phase":"activated","manifest":canonical_protocol_path_without_existing(&active.manifest_path)?,
-                    "workspace_identity":active.workspace_identity},
-            }),
+            activated_lock(active)?,
         )?;
+        Ok(())
+    }
+
+    /// A copy failed before it was handed over for activation: the original
+    /// changed or was busy meanwhile, a helper Git command failed, the copy
+    /// cannot hold what the original contains, or the disk ran short. The
+    /// half-made copy is dropped and the project goes back to where it was.
+    /// Returns the error to report: the original one, with a note that nothing
+    /// needs recovery. If the rollback cannot be recorded, the durable
+    /// recovery state stays exactly as before and the error is unchanged.
+    #[allow(clippy::too_many_arguments)]
+    fn fail_unfinished_copy(
+        &self,
+        storage: &mut Storage,
+        previous: &Map<String, Value>,
+        lock_id: &str,
+        workspace_identity: &str,
+        staging_name: &str,
+        staging: Option<&Dir>,
+        request_id: &str,
+        mut original: ProjectFailure,
+    ) -> ProjectFailure {
+        if self
+            .abandon_unfinished_copy(storage, previous, lock_id, workspace_identity, staging_name, staging, request_id)
+            .is_ok()
+        {
+            original.detail.push_str("; the unfinished copy was dropped and nothing needs recovery");
+        }
+        original
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn abandon_unfinished_copy(
+        &self,
+        storage: &mut Storage,
+        previous: &Map<String, Value>,
+        lock_id: &str,
+        workspace_identity: &str,
+        staging_name: &str,
+        staging: Option<&Dir>,
+        request_id: &str,
+    ) -> Result<(), ProjectFailure> {
+        let project_id = value_string(previous, "project_id")?.to_owned();
+        let mut project = required_project(storage, &project_id)?;
+        let mut lock = storage
+            .projection_record("lock", lock_id)?
+            .ok_or_else(|| ProjectFailure::recovery("preparation lock missing"))?;
+        // Only the exact preparation this call made is ever rolled back, and
+        // only while it has not been handed over for activation.
+        let phase = lock.get("evidence").and_then(|evidence| evidence["phase"].as_str());
+        if project.get("lifecycle") != Some(&json!("recoveryRequired"))
+            || project.get("lock_id") != Some(&json!(lock_id))
+            || project.get("workspace_identity") != Some(&json!(workspace_identity))
+            || !matches!(phase, Some("beforeSnapshotExport" | "snapshotExportStarting"))
+            || lock["evidence"]["workspace_identity"] != workspace_identity
+            || lock.get("project_id") != Some(&json!(project_id))
+            || lock.get("recovery_required") != Some(&json!(true))
+            || lock.get("poisoned") != Some(&json!(false))
+            || lock.get("writer_run_id") != Some(&Value::Null)
+        {
+            return Err(ProjectFailure::recovery("preparation changed before its rollback"));
+        }
+        let expected = [
+            ("project", project_id.as_str(), required_revision(&project)?),
+            ("lock", lock_id, required_revision(&lock)?),
+        ];
+        for field in [
+            "canonical_path", "selected_path", "base_commit", "base_tree", "object_format",
+            "source_identity", "workspace_identity", "lifecycle", "worktree_id", "worktree_path",
+            "manifest_path", "lock_id",
+        ] {
+            match previous.get(field) {
+                Some(value) => { project.insert(field.to_owned(), value.clone()); }
+                None => { project.remove(field); }
+            }
+        }
+        lock.insert("recovery_required".into(), json!(false));
+        lock.insert(
+            "evidence".into(),
+            json!({"phase":"abandonedUnfinishedCopy","request_id":request_id,"workspace_identity":workspace_identity}),
+        );
+        snapshot_recovery::write_pair(
+            storage,
+            &format!("snapshot_abandon_unfinished_{lock_id}"),
+            request_id,
+            Value::Object(project),
+            Value::Object(lock),
+            &expected,
+        )?;
+        // The ledger no longer refers to the half-made copy; removing its
+        // files is housekeeping and may be left to a later cleanup. Erase
+        // through the handle this call opened, and remove the name only while
+        // it still names that very folder.
+        #[cfg(unix)]
+        if let Some(staging) = staging {
+            if workspace_cleanup::walk(staging, true, 0, &mut 0).is_ok()
+                && open_real_child_dir(&self.worktrees_dir, staging_name)
+                    .and_then(|named| Ok(capability_directory_identity(&named)? == capability_directory_identity(staging)?))
+                    .unwrap_or(false)
+            {
+                let _ = self.worktrees_dir.remove_dir(staging_name);
+                let _ = sync_capability_directory(&self.worktrees_dir);
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = (staging_name, staging);
+        Ok(())
+    }
+
+    /// The last step of a task copy: its lock turns active and the project
+    /// record points back at the project's own copy, in one ledger write.
+    fn persist_task_copy_active(
+        &self,
+        storage: &mut Storage,
+        created: &ActiveProject,
+        view: &Map<String, Value>,
+        request_id: &str,
+    ) -> Result<(), ProjectFailure> {
+        let mut project = required_project(storage, &created.project_id)?;
+        for field in [
+            "canonical_path", "selected_path", "base_commit", "base_tree", "object_format",
+            "source_identity", "workspace_identity", "worktree_id", "worktree_path",
+            "manifest_path", "lock_id",
+        ] {
+            match view.get(field) {
+                Some(value) => { project.insert(field.to_owned(), value.clone()); }
+                None => { project.remove(field); }
+            }
+        }
+        project.insert("lifecycle".to_owned(), json!("active"));
+        let lock = activated_lock(created)?
+            .as_object()
+            .cloned()
+            .ok_or_else(|| ProjectFailure::manifest("lock payload must be an object"))?;
+        // All or nothing: a conflicting operation identity is an error here.
+        storage.upsert_projection_records_atomic(vec![
+            crate::storage::ProjectionUpsert {
+                aggregate_type: "project",
+                aggregate_id: created.project_id.clone(),
+                operation_id: format!("op_worktree_keep_project_copy_{}", created.worktree_id),
+                request_id: Some(request_id.to_owned()),
+                payload: project,
+            },
+            crate::storage::ProjectionUpsert {
+                aggregate_type: "lock",
+                aggregate_id: created.lock_id.clone(),
+                operation_id: format!("op_worktree_active_lock_{}", created.worktree_id),
+                request_id: Some(request_id.to_owned()),
+                payload: lock,
+            },
+        ])?;
         Ok(())
     }
 
@@ -3522,7 +4039,8 @@ impl ProjectManager {
             ));
         }
         let worktree_id = value_string(&record, "worktree_id")?.to_string();
-        let worktree_path = self.worktrees_root.join(&worktree_id);
+        let manifest_name = format!("{worktree_id}.json");
+        let worktree_path = self.workspace_path(&worktree_id, &read_bounded_json(&self.manifests_dir, &manifest_name)?)?;
         if record.get("worktree_path").and_then(Value::as_str)
             != Some(canonical_protocol_path(&worktree_path)?.as_str())
         {
@@ -3530,7 +4048,6 @@ impl ProjectManager {
                 "persisted snapshot path is not the exact managed child",
             ));
         }
-        let manifest_name = format!("{worktree_id}.json");
         let manifest_path = self.manifests_root.join(&manifest_name);
         // The ledger stores protocol spelling, while Windows roots can retain
         // the native verbatim prefix. Compare wire spellings, keep native IO.
@@ -3551,7 +4068,11 @@ impl ProjectManager {
                 "managed snapshot overlaps the original project",
             ));
         }
+        // The project may still point at a task's workspace (older records,
+        // or a project with no copy of its own); its manifest says which kind.
+        let manifest = read_bounded_json(&self.manifests_dir, &manifest_name)?;
         let active = ActiveProject {
+            kind: manifest_kind(&manifest)?,
             project_id: project_id.to_string(),
             canonical_git_root,
             worktree_id,
@@ -3565,7 +4086,6 @@ impl ProjectManager {
             lock_id: value_string(&record, "lock_id")?.to_string(),
         };
 
-        let manifest = read_bounded_json(&self.manifests_dir, &manifest_name)?;
         if manifest != manifest_value(&active, "active")? {
             return Err(ProjectFailure::manifest(
                 "persisted manifest differs from the canonical snapshot identity",
@@ -3590,6 +4110,10 @@ impl ProjectManager {
         }
 
         let worktree = self.worktree_capability(&active)?;
+        if active.kind != WorkspaceKind::Snapshot {
+            self.verify_worktree_link(&worktree, &active)?;
+            return Ok(active);
+        }
         let marker = read_bounded_json(&open_real_child_dir(&worktree, ".git")?, SNAPSHOT_MARKER)?;
         if marker != snapshot_identity(&active)? {
             return Err(ProjectFailure::manifest(
@@ -3635,6 +4159,22 @@ impl ProjectManager {
         lifecycle: &str,
         admission: WorkspaceLockAdmission,
     ) -> Result<ActiveProject, ProjectFailure> {
+        self.validate_workspace_binding_with_lock_handle(storage, address, lifecycle, admission)
+            .map(|(active, _)| active)
+    }
+
+    /// The binding check, keeping the workspace directory handle it verified
+    /// (Git link or snapshot marker). A caller that reads files afterwards
+    /// reads through this handle, never a second open of the same path
+    /// (PR #6 review B1).
+    fn validate_workspace_binding_with_lock_handle(
+        &self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+        lifecycle: &str,
+        admission: WorkspaceLockAdmission,
+    ) -> Result<(ActiveProject, Dir), ProjectFailure> {
+        let earlier_record_allowed = matches!(admission, WorkspaceLockAdmission::Discard | WorkspaceLockAdmission::Cleanup);
         let chat = storage
             .projection_record("chat", &address.chat_id)?
             .ok_or_else(|| ProjectFailure::manifest("chat workspace binding is missing"))?;
@@ -3680,7 +4220,8 @@ impl ProjectManager {
             ));
         }
         let canonical_git_root = PathBuf::from(value_string(&project, "canonical_path")?);
-        if manifest.get("canonicalGitRoot").and_then(Value::as_str)
+        let kind = manifest_kind(&manifest)?;
+        if manifest_source_root(&manifest)
             != Some(canonical_protocol_path_without_existing(&canonical_git_root)?.as_str())
         {
             return Err(ProjectFailure::manifest(
@@ -3688,10 +4229,11 @@ impl ProjectManager {
             ));
         }
         let active = ActiveProject {
+            kind,
             project_id: address.project_id.clone(),
             canonical_git_root,
             worktree_id: address.worktree_id.clone(),
-            worktree_path: self.worktrees_root.join(&address.worktree_id),
+            worktree_path: self.workspace_path(&address.worktree_id, &manifest)?,
             base_commit: value_string(
                 manifest.as_object().ok_or_else(|| {
                     ProjectFailure::manifest("workspace manifest is not an object")
@@ -3724,12 +4266,26 @@ impl ProjectManager {
             .projection_record("lock", &active.lock_id)?
             .ok_or_else(|| ProjectFailure::manifest("workspace lock projection is missing"))?;
         match admission {
-            WorkspaceLockAdmission::Ready | WorkspaceLockAdmission::Cleanup => {
+            WorkspaceLockAdmission::Ready | WorkspaceLockAdmission::Discard | WorkspaceLockAdmission::Cleanup => {
                 if lock.get("poisoned").and_then(Value::as_bool) != Some(false)
                     || lock.get("recovery_required").and_then(Value::as_bool) != Some(false)
                 {
                     return Err(ProjectFailure::recovery(
                         "workspace is locked, poisoned, or recovery-required",
+                    ));
+                }
+            }
+            WorkspaceLockAdmission::InterruptedRun(run_id) => {
+                let marked = lock.get("poisoned").and_then(Value::as_bool) != Some(false)
+                    || lock.get("recovery_required").and_then(Value::as_bool) != Some(false);
+                let own = lock.get("writer_run_id").and_then(Value::as_str) == Some(run_id.as_str())
+                    && lock.get("evidence").is_some_and(|evidence| {
+                        evidence["run_id"] == run_id.as_str()
+                            && matches!(evidence["phase"].as_str(), Some("agentWriterHeld" | "agentRecoveryRequired"))
+                    });
+                if marked && !own {
+                    return Err(ProjectFailure::recovery(
+                        "workspace is marked for another recovery",
                     ));
                 }
             }
@@ -3739,13 +4295,21 @@ impl ProjectManager {
             }
         }
         let worktree = self.worktree_capability(&active)?;
+        if active.kind != WorkspaceKind::Snapshot {
+            if let Err(error) = self.verify_worktree_link(&worktree, &active) {
+                if !earlier_record_allowed || !self.is_earlier_record_task(&active) {
+                    return Err(error);
+                }
+            }
+            return Ok((active, worktree));
+        }
         let marker = read_bounded_json(&open_real_child_dir(&worktree, ".git")?, SNAPSHOT_MARKER)?;
         if marker != snapshot_identity(&active)? {
             return Err(ProjectFailure::manifest(
                 "workspace Git marker differs from the durable chat binding",
             ));
         }
-        Ok(active)
+        Ok((active, worktree))
     }
 
     pub(crate) fn verify_discard_workspace(
@@ -3783,8 +4347,7 @@ impl ProjectManager {
                 ))
             }
         };
-        let active =
-            self.validate_workspace_address_binding_lifecycle(storage, address, lifecycle)?;
+        let active = self.validate_workspace_binding_with_lock(storage, address, lifecycle, WorkspaceLockAdmission::Discard)?;
         let lock = storage
             .projection_record("lock", &active.lock_id)?
             .ok_or_else(|| ProjectFailure::recovery("workspace discard lock missing"))?;
@@ -3799,7 +4362,7 @@ impl ProjectManager {
             ));
         }
         let worktree = self.worktree_capability(&active)?;
-        self.verify_snapshot_repository(&worktree, &active)?;
+        self.verify_repository_for_discard(&worktree, &active)?;
         Ok(manifest)
     }
 
@@ -3839,13 +4402,39 @@ impl ProjectManager {
 
     /// Point-in-time admission. Reservation callers recheck while synchronously
     /// holding the sole mutable Storage owner through commit (EXCLUSIVE SQLite).
-    /// Do not cache this result across a scheduler yield as execution authority.
+    /// Do not cache this result across a scheduler yield as execution authority;
+    /// the one bounded exception is the per-event streaming check, which reuses
+    /// only the Git part for a few seconds (`verify_workspace_binding_for_run`).
     pub(crate) fn verify_workspace_for_run(
         &self,
         storage: &Storage,
         address: &WorkspaceAddress,
     ) -> Result<Value, ProjectFailure> {
-        let project = required_project(storage, &address.project_id)?;
+        self.ensure_no_unfinished_application(storage, &address.project_id)?;
+        self.verify_workspace(storage, address)
+    }
+
+    /// `verify_workspace_for_run` without the Git repository checks: the
+    /// application gate, chat binding, ready lock, active manifest and the
+    /// workspace directory are still verified on every call.
+    pub(crate) fn verify_workspace_binding_for_run(
+        &self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+    ) -> Result<Value, ProjectFailure> {
+        self.ensure_no_unfinished_application(storage, &address.project_id)?;
+        let active = self.validate_workspace_address_binding(storage, address)?;
+        let worktree = self.worktree_capability(&active)?;
+        // Without Git, a task worktree is still the folder linked to it.
+        if active.kind != WorkspaceKind::Snapshot {
+            self.verify_worktree_link(&worktree, &active)?;
+        }
+        manifest_value(&active, "active")
+    }
+
+    /// The ledger part of `verify_workspace_for_run`, without the Git checks.
+    pub(crate) fn ensure_no_unfinished_application(&self, storage: &Storage, project_id: &str) -> Result<(), ProjectFailure> {
+        let project = required_project(storage, project_id)?;
         if project
             .get("application_intent")
             .is_some_and(|intent| intent["state"] != "abandoned")
@@ -3854,7 +4443,7 @@ impl ProjectManager {
                 "project has an unfinished source application",
             ));
         }
-        self.verify_workspace(storage, address)
+        Ok(())
     }
 
     /// Point-in-time file admission, not a sandbox or protection against a hostile
@@ -3866,8 +4455,18 @@ impl ProjectManager {
         address: &WorkspaceAddress,
     ) -> Result<(), ProjectFailure> {
         self.verify_managed_paths()?;
-        let root = open_real_child_dir(&self.worktrees_dir, &address.worktree_id)?;
-        runtime_isolation::verify(&root)?;
+        // The kind comes from the stored manifest: no Git runs before the scan.
+        let manifest = read_bounded_json(&self.manifests_dir, &format!("{}.json", address.worktree_id))?;
+        let root = if manifest_kind(&manifest)? == WorkspaceKind::Snapshot {
+            open_real_child_dir(&self.worktrees_dir, &address.worktree_id)?
+        } else {
+            open_absolute_directory_capability(&self.workspace_path(&address.worktree_id, &manifest)?)?
+        };
+        if manifest_kind(&manifest)? == WorkspaceKind::Snapshot {
+            runtime_isolation::verify(&root)?;
+        } else {
+            runtime_isolation::verify_allowing_inner_links(&root)?;
+        }
         self.validate_workspace_address(storage, address)?;
         Ok(())
     }
@@ -3898,7 +4497,7 @@ impl ProjectManager {
             }
         }
         if project.get("canonical_path").and_then(Value::as_str)
-            != manifest.get("canonicalGitRoot").and_then(Value::as_str)
+            != manifest_source_root(&manifest)
         {
             return Err(ProjectFailure::manifest(
                 "snapshot and project canonical roots differ",
@@ -3945,7 +4544,7 @@ impl ProjectManager {
         }
         let project = required_project(storage, project_id)?;
         if project.get("canonical_path").and_then(Value::as_str)
-            != manifest.get("canonicalGitRoot").and_then(Value::as_str)
+            != manifest_source_root(&manifest)
         {
             return Err(ProjectFailure::manifest(
                 "prepared workspace canonical root differs from its project",
@@ -3957,7 +4556,7 @@ impl ProjectManager {
             .ok_or_else(|| ProjectFailure::manifest("prepared workspace lock is missing"))?;
         if lock.get("project_id").and_then(Value::as_str) != Some(project_id)
             || lock.get("worktree_path").and_then(Value::as_str)
-                != Some(canonical_protocol_path(&self.worktrees_root.join(worktree_id))?.as_str())
+                != Some(canonical_protocol_path(&self.workspace_path(worktree_id, &manifest)?)?.as_str())
             || lock.get("poisoned").and_then(Value::as_bool) != Some(false)
             || lock.get("recovery_required").and_then(Value::as_bool) != Some(false)
         {
@@ -3972,7 +4571,24 @@ impl ProjectManager {
         write_json_atomic(&self.manifests_dir, &manifest_name, &manifest)
     }
 
+    /// Where a workspace lives: a v1 copy is the managed child named by its
+    /// id; a task worktree is where it was made (the "작업 공간 폴더" setting
+    /// at that time), as its manifest records.
+    fn workspace_path(&self, worktree_id: &str, manifest: &Value) -> Result<PathBuf, ProjectFailure> {
+        if manifest_kind(manifest)? == WorkspaceKind::Snapshot {
+            return Ok(self.worktrees_root.join(worktree_id));
+        }
+        manifest["worktreePath"].as_str().map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+            .ok_or_else(|| ProjectFailure::manifest("task worktree manifest has no path"))
+    }
+
     fn worktree_capability(&self, active: &ActiveProject) -> Result<Dir, ProjectFailure> {
+        // A task worktree: its recorded folder, reopened without following
+        // links; its `.git` link to the repository is checked by callers.
+        if active.kind != WorkspaceKind::Snapshot {
+            return open_absolute_directory_capability(&active.worktree_path);
+        }
         let expected = self.worktrees_root.join(&active.worktree_id);
         if active.worktree_path != expected {
             return Err(ProjectFailure::manifest(
@@ -3995,12 +4611,19 @@ impl ProjectManager {
             match root.symlink_metadata(".git") {
                 Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
                     let git_dir = open_real_child_dir(&root, ".git")?;
+                    // Its objects and refs live in another repository's Git
+                    // folder (`commondir`): not a repository of its own, and
+                    // two projects would share one (PR #18 re-review B1).
+                    if git_dir.symlink_metadata("commondir").is_ok() {
+                        return Err(ProjectFailure::manifest("source repository must own a real .git directory; one that shares another repository's (commondir) is unsupported"));
+                    }
                     break (path.to_path_buf(), root, git_dir);
                 }
+                // A plain folder this app gave a shadow history (link file).
                 Ok(_) => {
-                    return Err(ProjectFailure::manifest(
-                        "source repository must own a real .git directory; linked worktrees are unsupported",
-                    ));
+                    let shadow = self.repository_git_path(path)?;
+                    let git_dir = open_absolute_directory_capability(&shadow)?;
+                    break (path.to_path_buf(), root, git_dir);
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     candidate = path.parent();
@@ -4334,6 +4957,9 @@ impl ProjectManager {
         workspace: &Dir,
         active: &ActiveProject,
     ) -> Result<(), ProjectFailure> {
+        if active.kind != WorkspaceKind::Snapshot {
+            return self.verify_worktree_repository(workspace, active);
+        }
         // Keep the same checks without caching authority across polls. These
         // four read-only commands overlap; each owned child retains its own
         // bounded pipes, deadline and Drop cleanup. This is not an atomic Git
@@ -4360,10 +4986,9 @@ impl ProjectManager {
         if symbolic.status.success() || !symbolic.stdout.is_empty() {
             return Err(ProjectFailure::manifest("snapshot HEAD is not detached"));
         }
-        // write-tree remains serial, after all read-only checks have finished.
-        // write-tree can acquire index.lock even during validation. Background
-        // watchers defer it to the dispatcher so concurrent requests cannot
-        // conflict with it and cancellation cannot leave its lock behind.
+        // The index/base-tree comparison runs after the read-only checks. It no
+        // longer takes index.lock; background watchers still leave it (and the
+        // metadata scan) to the dispatcher's full validation.
         #[cfg(any(unix, windows))]
         let background_watch = self.watch_cancel.is_some();
         #[cfg(not(any(unix, windows)))]
@@ -4374,6 +4999,16 @@ impl ProjectManager {
         }
         if background_watch { return Ok(()); }
         self.verify_snapshot_metadata(workspace, active)
+    }
+
+    /// The dispatcher's part of a watcher check after the background
+    /// verifier: a v1 copy's metadata and index, or a worktree's links.
+    fn verify_watched_repository(&self, workspace: &Dir, active: &ActiveProject) -> Result<(), ProjectFailure> {
+        if active.kind != WorkspaceKind::Snapshot {
+            return self.verify_worktree_link(workspace, active);
+        }
+        self.verify_snapshot_metadata(workspace, active)?;
+        self.verify_snapshot_tree(workspace, active)
     }
 
     fn verify_snapshot_metadata(&self, workspace: &Dir, active: &ActiveProject) -> Result<(), ProjectFailure> {
@@ -4398,8 +5033,21 @@ impl ProjectManager {
     }
 
     fn verify_snapshot_tree(&self, workspace: &Dir, active: &ActiveProject) -> Result<(), ProjectFailure> {
-        let tree_output = self.git_at(workspace, ["write-tree"])?;
-        if trim_output(&tree_output)? != active.base_tree {
+        // Compare the index with the base tree without taking `.git/index.lock`.
+        // `write-tree` needs that lock, so a provider's own `git status` briefly
+        // holding it made run validation fail mid-run (approvals then stopped
+        // the team task as "input changed"). Exit 0 = identical, 1 = different;
+        // unmerged or extra entries also differ. `--ignore-submodules=none`
+        // stops a `.gitmodules` `ignore = all` from hiding gitlink changes, and
+        // `--ita-invisible-in-index` keeps intent-to-add entries invisible as
+        // `write-tree` did, so the invariant is unchanged.
+        let compared = self.git_allow_status_at(
+            workspace,
+            ["diff-index", "--cached", "--quiet", "--ignore-submodules=none", "--ita-invisible-in-index",
+                active.base_tree.as_str(), "--"],
+            &[0, 1],
+        )?;
+        if compared.status.code() != Some(0) {
             return Err(ProjectFailure::manifest("snapshot index differs from its base tree"));
         }
         Ok(())
@@ -4565,6 +5213,8 @@ impl ProjectManager {
                     old_path: Some(old_path.clone()),
                     base_exists: true,
                     current_exists: true,
+                    // Same content under a new name.
+                    lines: Some((0, 0)),
                 });
             }
         }
@@ -4578,7 +5228,41 @@ impl ProjectManager {
         }
         entries.sort_by(|left, right| left.path.cmp(&right.path));
         base_reader.finish()?;
+        self.attach_line_counts(&worktree, active, &mut entries)?;
         Ok(entries)
+    }
+
+    /// Line counts from Git for tracked changes; a new untracked text file
+    /// counts all its lines as added. Unknown counts stay absent.
+    fn attach_line_counts(
+        &self,
+        worktree: &Dir,
+        active: &ActiveProject,
+        entries: &mut [DiffEntry],
+    ) -> Result<(), ProjectFailure> {
+        let numstat = self.git_limited_bytes_at(
+            worktree,
+            ["diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "--no-textconv",
+                active.base_commit.as_str(), "--"],
+            &[0],
+            DIFF_MAX_BYTES,
+        )?;
+        let mut counts = HashMap::<String, (u64, u64)>::new();
+        for record in numstat.split(|byte| *byte == 0).filter(|record| !record.is_empty()) {
+            let mut parts = record.splitn(3, |byte| *byte == b'\t');
+            let (Some(added), Some(removed), Some(path)) = (parts.next(), parts.next(), parts.next()) else {
+                return Err(ProjectFailure::manifest("Git line counts are malformed"));
+            };
+            let number = |field: &[u8]| std::str::from_utf8(field).ok().and_then(|text| text.parse::<u64>().ok());
+            // Binary files report "-" and get no count.
+            if let (Some(added), Some(removed)) = (number(added), number(removed)) {
+                counts.insert(protocol_git_path(path)?, (added, removed));
+            }
+        }
+        for entry in entries.iter_mut().filter(|entry| entry.lines.is_none() && entry.kind != "binary") {
+            entry.lines = counts.get(&entry.path).copied();
+        }
+        Ok(())
     }
 
     fn classify_diff(
@@ -4606,12 +5290,17 @@ impl ProjectManager {
         };
         let binary = base.as_ref().is_some_and(|value| value.binary)
             || current.as_ref().is_some_and(|value| value.binary);
+        // A new text file is all added lines; tracked changes are counted by Git.
+        let lines = (kind == "added" && !binary && base.is_none())
+            .then(|| current.as_ref().and_then(|value| value.bytes.as_deref()).map(|bytes| (line_count(bytes) as u64, 0)))
+            .flatten();
         Ok(DiffEntry {
             kind: if binary { "binary" } else { kind },
             path,
             old_path: if binary { None } else { old_path },
             base_exists: kind != "added",
             current_exists: kind != "deleted",
+            lines,
         })
     }
 
@@ -4880,7 +5569,16 @@ impl ProjectManager {
             .env("LC_ALL", "C")
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_CONFIG_GLOBAL", null_device())
-            .env("GIT_CONFIG_COUNT", "0")
+            // Command-scope settings outrank the repository's own config: a
+            // user repository (real worktrees, 2026-11-18 design) never runs
+            // its hooks or fsmonitor helper or reaches a remote through us.
+            .env("GIT_CONFIG_COUNT", "3")
+            .env("GIT_CONFIG_KEY_0", "core.hooksPath")
+            .env("GIT_CONFIG_VALUE_0", null_device())
+            .env("GIT_CONFIG_KEY_1", "core.fsmonitor")
+            .env("GIT_CONFIG_VALUE_1", "false")
+            .env("GIT_CONFIG_KEY_2", "protocol.allow")
+            .env("GIT_CONFIG_VALUE_2", "never")
             .env("GIT_OPTIONAL_LOCKS", "0")
             .env("GIT_NO_REPLACE_OBJECTS", "1")
             .env("GIT_NO_LAZY_FETCH", "1")
@@ -4958,6 +5656,9 @@ struct DiffEntry {
     old_path: Option<String>,
     base_exists: bool,
     current_exists: bool,
+    /// Changed line counts for the list (`+added −removed`); absent when unknown
+    /// (binary, too large) so the screen shows no number rather than a wrong one.
+    lines: Option<(u64, u64)>,
 }
 
 // Request-local processes, not a cross-request cache. Each blob is still read
@@ -5017,6 +5718,11 @@ impl DiffBaseReader {
         validate_relative_path(path, false)?; // In particular, no newline request injection.
         let header = self.sizes.header(&format!("{}:{path}", self.commit))?;
         let fields = header.trim_end_matches('\n').split(' ').collect::<Vec<_>>();
+        // A real repository may hold submodules (gitlinks): shown as a
+        // change without content, like a binary file.
+        if fields.len() == 3 && fields[1] == "commit" {
+            return Ok(ContentInfo::too_large(0));
+        }
         if fields.len() != 3 || fields[1] != "blob" {
             return Err(ProjectFailure::manifest("diff base is not a blob"));
         }
@@ -5624,7 +6330,7 @@ impl ContentInfo {
 
 impl DiffEntry {
     fn summary_value(&self) -> Value {
-        if self.kind == "renamed" {
+        let mut value = if self.kind == "renamed" {
             json!({
                 "kind":self.kind,"path":self.path,"oldPath":self.old_path,"binary":false,
             })
@@ -5632,7 +6338,12 @@ impl DiffEntry {
             json!({
                 "kind":self.kind,"path":self.path,"binary":self.kind == "binary",
             })
+        };
+        if let Some((added, removed)) = self.lines {
+            value["added"] = json!(added);
+            value["removed"] = json!(removed);
         }
+        value
     }
 }
 
@@ -5717,6 +6428,18 @@ fn project_id_for_root(root: &str) -> String {
     sha256_file_version_v1(root.as_bytes()).replacen("sha256:", "project_", 1)
 }
 
+/// The path hash for a folder seen first; a later generation once that ID
+/// belongs to a deleted project.
+fn fresh_project_id(storage: &Storage, root: &str) -> Result<String, ProjectFailure> {
+    let first = project_id_for_root(root);
+    if storage.projection_record("project", &first)?.is_none() { return Ok(first); }
+    for generation in 1..10_000u32 {
+        let candidate = sha256_file_version_v1(format!("{root}\0{generation}").as_bytes()).replacen("sha256:", "project_", 1);
+        if storage.projection_record("project", &candidate)?.is_none() { return Ok(candidate); }
+    }
+    Err(ProjectFailure::manifest("no free project identity for this folder"))
+}
+
 fn project_identity(project_id: &str, selected: &str, root: &str) -> Value {
     json!({
         "schemaVersion":PROJECT_SCHEMA_VERSION_V1,
@@ -5726,7 +6449,63 @@ fn project_identity(project_id: &str, selected: &str, root: &str) -> Value {
     })
 }
 
+/// A task worktree save renames inside the worktree folder it holds: that
+/// folder must still be the recorded one (a real directory, same identity).
+#[cfg(target_os = "macos")]
+fn verify_stable_task_folder(held: &Dir, folder: &Path) -> Result<(), ProjectFailure> {
+    let held_metadata = held.metadata(".").map_err(|error| {
+        ProjectFailure::recovery(format!("could not inspect the held task folder: {error}"))
+    })?;
+    let current = fs::symlink_metadata(folder).map_err(|error| {
+        ProjectFailure::recovery(format!("could not inspect the task folder: {error}"))
+    })?;
+    if !current.is_dir() || current.file_type().is_symlink()
+        || held_metadata.dev() != current.dev() || held_metadata.ino() != current.ino()
+    {
+        return Err(ProjectFailure::recovery("task worktree folder changed during the save"));
+    }
+    Ok(())
+}
+
+/// The kind a stored manifest describes; the rest is compared against
+/// `manifest_value` by the caller.
+fn manifest_kind(manifest: &Value) -> Result<WorkspaceKind, ProjectFailure> {
+    match manifest.get("schemaVersion").and_then(Value::as_u64) {
+        Some(PROJECT_SCHEMA_VERSION_V2) if manifest["workspaceKind"] == WORKSPACE_KIND_GIT_WORKTREE_V2 => {
+            Ok(WorkspaceKind::GitWorktree {
+                branch: manifest["branchName"].as_str()
+                    .ok_or_else(|| ProjectFailure::manifest("worktree manifest has no branch"))?.to_owned(),
+                base_ref: manifest["baseRef"].as_str().map(str::to_owned),
+            })
+        }
+        Some(PROJECT_SCHEMA_VERSION_V1) => Ok(WorkspaceKind::Snapshot),
+        _ => Err(ProjectFailure::manifest("unsupported workspace manifest kind")),
+    }
+}
+
 fn manifest_value(active: &ActiveProject, lifecycle: &str) -> Result<Value, ProjectFailure> {
+    if let WorkspaceKind::GitWorktree { branch, base_ref } = &active.kind {
+        let root = canonical_protocol_path_without_existing(&active.canonical_git_root)?;
+        return Ok(json!({
+            "schemaVersion":PROJECT_SCHEMA_VERSION_V2,
+            "projectId":active.project_id,
+            "worktreeId":active.worktree_id,
+            "workspaceIdentity":active.workspace_identity,
+            "sourceIdentity":active.source_identity,
+            "workspaceKind":WORKSPACE_KIND_GIT_WORKTREE_V2,
+            "canonicalSourceRoot":root,
+            "worktreePath":canonical_protocol_path_without_existing(&active.worktree_path)?,
+            "gitDir":format!("{}/.git", root.trim_end_matches('/')),
+            "sourceMutationPolicy":"worktreeRefsOnly",
+            "branchName":branch,
+            "baseRef":base_ref,
+            "objectFormat":active.object_format,
+            "baseCommit":active.base_commit,
+            "baseTree":active.base_tree,
+            "headMode":WORKTREE_HEAD_MODE_V2,
+            "lifecycle":lifecycle,
+        }));
+    }
     Ok(json!({
         "schemaVersion":PROJECT_SCHEMA_VERSION_V1,
         "projectId":active.project_id,
@@ -5838,7 +6617,7 @@ fn preserve_project_extensions(
         .as_object()
         .cloned()
         .ok_or_else(|| ProjectFailure::manifest("project payload must be an object"))?;
-    for field in ["automation_permissions_v1", "workspace_cleanup_v1", "catalog_hidden", "catalog_hidden_chats", "native_path_binding", "role_settings", "prepared_workspaces", "source_baselines", "application_review", "application_chat_reviews", "application_backups", "application_intent", "application_history"] {
+    for field in ["automation_permissions_v1", "workspace_cleanup_v1", chat_erasure::FIELD, project_deletion::CHAT_FIELD, project_deletion::PROJECT_FIELD, "catalog_hidden", "catalog_hidden_chats", "native_path_binding", "role_settings", "prepared_workspaces", "source_baselines", "application_review", "application_chat_reviews", "application_backups", "application_intent", "application_history"] {
         if field == path_binding::FIELD && object.contains_key(field) {
             continue;
         }
@@ -5847,6 +6626,72 @@ fn preserve_project_extensions(
         }
     }
     Ok(Value::Object(object))
+}
+
+/// True when the project's current copy is (or is about to become) a task's
+/// copy rather than the project's own.
+fn is_task_copy(storage: &Storage, project: &Map<String, Value>) -> Result<bool, ProjectFailure> {
+    let Some(worktree_id) = project.get("worktree_id").and_then(Value::as_str) else { return Ok(false) };
+    if project.get("prepared_workspaces").and_then(Value::as_object).is_some_and(|items| {
+        items.values().any(|item| item["manifest"]["worktreeId"] == worktree_id)
+    }) {
+        return Ok(true);
+    }
+    Ok(storage.projection_records("chat")?.iter().any(|chat| {
+        chat.get("worktree_id").and_then(Value::as_str) == Some(worktree_id)
+    }))
+}
+
+/// Recovery that belongs to a task stays inside that task's own copy. A new
+/// copy only reads the original folder, so it waits only for the rest
+/// (for example an interrupted copy that is not a task's).
+fn snapshot_export_blockers(storage: &Storage) -> Result<Vec<String>, ProjectFailure> {
+    let blockers = storage.blocker_ids()?;
+    if blockers.is_empty() {
+        return Ok(blockers);
+    }
+    let task_worktrees: BTreeSet<String> = storage
+        .projection_records("chat")?
+        .iter()
+        .filter_map(|chat| chat.get("worktree_id").and_then(Value::as_str).map(str::to_owned))
+        .collect();
+    let mut remaining = Vec::new();
+    for id in blockers {
+        let task_owned = if let Some(run_id) = id.strip_prefix("run:") {
+            storage.projection_record("run", run_id)?.is_some_and(|run| {
+                run.get("chat_id").and_then(Value::as_str).is_some()
+            })
+        } else if let Some(lock_id) = id.strip_prefix("lock:") {
+            // A lock that guards an update of the original folder keeps
+            // blocking: the original may be half written.
+            let guards_original = storage.projection_record("lock", lock_id)?.is_none_or(|lock| {
+                lock.get("evidence").and_then(|evidence| evidence.get("applicationId")).is_some()
+            });
+            !guards_original
+                && lock_id
+                    .strip_prefix("lock_")
+                    .is_some_and(|worktree| task_worktrees.contains(worktree))
+        } else {
+            false
+        };
+        if !task_owned {
+            remaining.push(id);
+        }
+    }
+    Ok(remaining)
+}
+
+/// The lock record of a freshly activated copy.
+fn activated_lock(active: &ActiveProject) -> Result<Value, ProjectFailure> {
+    Ok(json!({
+        "lock_id":active.lock_id,
+        "project_id":active.project_id,
+        "writer_run_id":Value::Null,
+        "worktree_path":canonical_protocol_path(&active.worktree_path)?,
+        "poisoned":false,"recovery_required":false,
+        "evidence":{"phase":"activated","manifest":canonical_protocol_path_without_existing(&active.manifest_path)?,
+            "workspace_identity":active.workspace_identity},
+    }))
 }
 
 fn required_project(
@@ -5862,6 +6707,30 @@ fn required_project(
 fn registered_project(storage: &Storage, project_id: &str) -> Result<Map<String, Value>, ProjectFailure> {
     storage.projection_record("project", project_id)?
         .ok_or_else(|| ProjectFailure::manifest("project identity is not durably registered"))
+}
+
+/// A recorded identity of one of the original's files as it compares now.
+/// Only for these shapes: a file image (`{.., "identity": [device, inode,
+/// links]}`), an identity pair `[device, inode]`, an identity triple, or a
+/// nine-element stamp whose first element is the device. Records written
+/// before device numbers were left out still carry the number of that time,
+/// and a restart of the computer can change it. Anything else is unchanged.
+pub(crate) fn without_device(value: &Value) -> Value {
+    let mut value = value.clone();
+    let slot = if value.is_object() { value.get_mut("identity") } else { Some(&mut value) };
+    if let Some(items) = slot.and_then(|slot| slot.as_array_mut()) {
+        if matches!(items.len(), 2 | 3 | 9) && items[0].is_number() {
+            items[0] = json!(0);
+        }
+    }
+    value
+}
+
+fn required_revision(record: &Map<String, Value>) -> Result<u64, ProjectFailure> {
+    record
+        .get("last_event_sequence")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| ProjectFailure::manifest("record revision missing"))
 }
 
 fn value_string<'a>(record: &'a Map<String, Value>, name: &str) -> Result<&'a str, ProjectFailure> {
@@ -5994,6 +6863,9 @@ fn open_real_os_child_dir(parent: &Dir, name: &OsStr) -> Result<Dir, ProjectFail
         .read(true)
         .follow(FollowSymlinks::No)
         .maybe_dir(true);
+    // A FIFO planted where a directory is expected must not block the dispatcher.
+    #[cfg(unix)]
+    options.custom_flags(libc::O_NONBLOCK);
     #[cfg(windows)]
     options.custom_flags(windows_fs::OPEN_REPARSE_POINT);
     let opened = parent.open_with(component, &options).map_err(|error| {
@@ -6063,6 +6935,10 @@ fn open_real_file_at(parent: &Dir, name: &str) -> Result<CapFile, ProjectFailure
     }
     let mut options = CapOpenOptions::new();
     options.read(true).follow(FollowSymlinks::No);
+    // Regular files ignore O_NONBLOCK; a FIFO then fails the type check below
+    // instead of blocking the single-threaded dispatcher on open.
+    #[cfg(unix)]
+    options.custom_flags(libc::O_NONBLOCK);
     #[cfg(windows)]
     options.custom_flags(windows_fs::OPEN_REPARSE_POINT);
     let opened = parent.open_with(name, &options).map_err(|error| {

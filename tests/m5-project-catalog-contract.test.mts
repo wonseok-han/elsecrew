@@ -70,6 +70,8 @@ test("preparation recovery binds exact identity and safe revisions", () => {
   assert.doesNotThrow(() => validateProjectCatalogRequest(request));
   assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, ...request }, request));
   assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, action: "inspectPreparation", inspection }, { action: "inspectPreparation", projectId: "project_a" }));
+  assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, action: "inspectPreparation", inspection: null }, { action: "inspectPreparation", projectId: "project_a" }));
+  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "abandonPreparation", inspection: null }, { action: "abandonPreparation", inspection }));
   for (const patch of [{ lockId: "other" }, { projectRevision: 0 }, { lockRevision: 1.5 }, { lockRevision: Number.MAX_SAFE_INTEGER + 1 }, { path: "/other" }, { workspaceIdentity: "../escape" }]) {
     assert.throws(() => validateProjectCatalogRequest({ ...request, inspection: { ...inspection, ...patch } }));
   }
@@ -104,15 +106,12 @@ test("chat preview cannot return another chat's result", () => {
   assert.throws(() => validateProjectCatalogRequest({ ...request, worktreePath: "/private" }));
 });
 
-test("application workspace preparation binds explicit project without paths", () => {
-  const request = { action: "prepareApplicationWorkspace" as const, projectId: "project_a" };
-  assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, ...request, worktreeId: "worktree_a" }, request));
-  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, ...request, projectId: "other", worktreeId: "worktree_a" }, request));
-  assert.throws(() => validateProjectCatalogRequest({ ...request, path: "/tmp/project" }));
+test("the retired manual application actions are rejected at the bridge", () => {
+  for (const action of ["prepareApplicationWorkspace", "applicationPreview"]) assert.throws(() => validateProjectCatalogRequest({ action, projectId: "project_a" }));
 });
 
 test("application preview binds project, relative paths and explicit truncation", () => {
-  const request = { action: "applicationPreview" as const, projectId: "project_a" };
+  const request = { action: "chatApplicationPreview" as const, projectId: "project_a", chatId: "chat_a" };
   const preview = { worktreeId: "worktree_a", total: 1, changes: [{ path: "src/file.ts", kind: "modified" }] };
   const result = { schemaVersion: 1, ...request, preview };
   assert.doesNotThrow(() => validateProjectCatalogResult(result, request));
@@ -190,15 +189,20 @@ test("review discard binds the exact inspected chat and requires explicit consen
   assert.throws(() => validateProjectCatalogRequest({...request,workspaceIdentity:"../escape"}));
 });
 
-test("list removal binds project and chat identities and rejects extra fields", () => {
-  for (const action of ["removeProject", "restoreChats"] as const) {
-    const request = { action, projectId: "project_a" };
-    assert.doesNotThrow(() => validateProjectCatalogRequest(request));
-    assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, ...request }, request));
-    assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, ...request, projectId: "project_b" }, request));
-    assert.throws(() => validateProjectCatalogRequest({ ...request, deleteFiles: true }));
-  }
-  const request = { action: "removeChat" as const, projectId: "project_a", chatId: "chat_a" };
-  assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, ...request }, request));
-  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, ...request, chatId: "chat_b" }, request));
+test("deletion binds project and chat identities, needs confirmation and rejects extra fields", () => {
+  const project = { action: "deleteProject" as const, projectId: "project_a", confirmed: true as const };
+  assert.doesNotThrow(() => validateProjectCatalogRequest(project));
+  assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, action: "deleteProject", projectId: "project_a" }, project));
+  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "deleteProject", projectId: "project_b" }, project));
+  assert.throws(() => validateProjectCatalogRequest({ ...project, confirmed: false }));
+  assert.throws(() => validateProjectCatalogRequest({ action: "deleteProject", projectId: "project_a" }));
+  assert.throws(() => validateProjectCatalogRequest({ ...project, deleteSource: true }));
+  const chat = { action: "deleteChat" as const, projectId: "project_a", chatId: "chat_a", confirmed: true as const };
+  assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, action: "deleteChat", projectId: "project_a", chatId: "chat_a", projectClosed: false }, chat));
+  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "deleteChat", projectId: "project_a", chatId: "chat_b", projectClosed: false }, chat));
+  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "deleteChat", projectId: "project_a", chatId: "chat_a" }, chat));
+  const finish = { action: "finishDeletions" as const };
+  assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, action: "finishDeletions", pending: 2 }, finish));
+  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "finishDeletions", pending: -1 }, finish));
+  for (const retired of ["removeProject", "restoreChats"]) assert.throws(() => validateProjectCatalogRequest({ action: retired, projectId: "project_a" }));
 });

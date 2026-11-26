@@ -2,6 +2,7 @@
 // Requires current .vite/build, renderer and target/debug sidecar artifacts.
 function runOutputSmoke(packagedQa = false) {
 const { app, dialog, powerMonitor } = require('electron');
+const completeAppDefaultTeam = require('./m5-smoke-complete-team.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const cp = require('node:child_process');
@@ -252,6 +253,7 @@ app.on('browser-window-created', (_event, window) => {
         }
         await wait("window.m5?.version === 8 && [...document.querySelectorAll('button')].some(b => b.textContent === '프로젝트 선택' && !b.disabled)");
         await run(`(async () => {
+          await ${completeAppDefaultTeam};
           const p = await window.m5.openProject();
           let settings = await window.m5.getProjectRoleSettings({projectId:p.projectId});
           if (${retentionWithOutputDiff}) settings = await window.m5.updateProjectRoleSettings({projectId:p.projectId,
@@ -276,7 +278,7 @@ app.on('browser-window-created', (_event, window) => {
           const workspace = fs.realpathSync(path.join(workspaceRoot, chat.worktreeId));
           assert.ok(workspace.startsWith(workspaceRoot + path.sep));
           report.fileRetention.diffFixture = require('../tests/m5-native-diff-fixture.cjs').change(workspace);
-          await run("[...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent.trim() === '변경')?.click()");
+          await run("document.querySelector('[data-testid=right-tab-changes]')?.click()");
           await wait("!![...document.querySelectorAll('.m5-changes button')].find(b => b.textContent === '변경 새로 고침' && !b.disabled)");
           await run("[...document.querySelectorAll('.m5-changes button')].find(b => b.textContent === '변경 새로 고침').click()");
           await wait("document.querySelector('.m5-changes')?.textContent.includes('변경 (500)')");
@@ -312,7 +314,7 @@ app.on('browser-window-created', (_event, window) => {
             await wait("!!document.querySelector('.monaco-editor textarea') && !!document.querySelector('.m5-editor-tab-name')", 30000);
             if (retentionWithOutputDiff) {
               // Reopen the same stored result; do not start another fixture run.
-              await run("[...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent.trim() === '변경')?.click()");
+              await run("document.querySelector('[data-testid=right-tab-changes]')?.click()");
               await wait("!![...document.querySelectorAll('.m5-changes button')].find(b => b.textContent === '변경 새로 고침' && !b.disabled)");
               await run("[...document.querySelectorAll('.m5-changes button')].find(b => b.textContent === '변경 새로 고침').click()");
               await wait("document.querySelector('.m5-changes')?.textContent.includes('변경 (500)')");
@@ -379,6 +381,7 @@ app.on('browser-window-created', (_event, window) => {
       report.mainTraceTiming.workloadRequestedAt = Date.now();
       await run(`(async () => {
         const api = window.m5;
+        await ${completeAppDefaultTeam};
         const project = await api.openProject();
         const settings = await api.getProjectRoleSettings({projectId:project.projectId});
         const roles = settings.roles.map(role => role.roleId === 'coding'
@@ -420,7 +423,7 @@ app.on('browser-window-created', (_event, window) => {
         if (combined && index === 0) {
           await wait("document.querySelector('.m5-durable-output')?.dataset.runId === outputSmokeRuns[0].runId && document.querySelector('.m5-timeline h2')?.textContent === 'Output stream 0'");
         } else {
-        if (combined) await run("[...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent.trim() === '채팅').click()");
+        if (combined) await run("document.querySelector('[data-testid=layout-left]').scrollIntoView()");
         await run(`[...document.querySelectorAll('.m5-chat-chip')].find(b => b.querySelector('.m5-chat-goal')?.textContent === 'Output stream ${index}').click()`);
         await wait(`document.querySelector('.m5-durable-output')?.dataset.runId === outputSmokeRuns[${index}].runId &&
           [...document.querySelectorAll('.m5-chat-chip')].some(b => b.getAttribute('aria-current') === 'true' && !b.disabled && b.querySelector('.m5-chat-goal')?.textContent === 'Output stream ${index}')`);
@@ -517,7 +520,7 @@ app.on('browser-window-created', (_event, window) => {
         await wait("document.querySelector('.m5-output-scroll article:first-of-type pre')?.textContent?.split(' [')[0] === 'output 101'");
         const nextHistory = await run("[...document.querySelectorAll('.m5-output-scroll article pre')].map(e => e.textContent.split(' [')[0])");
         assert.deepEqual(nextHistory, Array.from({length:100}, (_, i) => `output ${101+i}`));
-        await run("[...document.querySelectorAll('.m5-durable-output button')].find(b => b.textContent === '최신 대화').click()");
+        await run("[...document.querySelectorAll('.m5-durable-output button')].find(b => b.textContent === '최신 메시지').click()");
         await wait("document.querySelector('.m5-output-scroll article:last-child pre')?.textContent?.split(' [')[0] === 'output 3000'");
         await wait("(() => { const list = document.querySelector('.m5-output-scroll'); return list && list.clientHeight > 0 && list.scrollHeight - list.scrollTop - list.clientHeight <= 2; })()");
         // A scrolled inner list can still be clipped by the outer conversation.
@@ -525,7 +528,7 @@ app.on('browser-window-created', (_event, window) => {
         // Outer conversation scrolling must not remove the explicit latest action,
         // even when the inner output list remains pinned at its bottom.
         await run("document.querySelector('.m5-conversation-scroll').scrollTop = 0");
-        await run("[...document.querySelectorAll('.m5-durable-output button')].find(b => b.textContent === '최신 대화').click()");
+        await run("[...document.querySelectorAll('.m5-durable-output button')].find(b => b.textContent === '최신 메시지').click()");
         if (await run("document.visibilityState === 'visible'")) await wait("outputObservation.latestVisible()");
         report.scrollChecks.push({chat:index,historyTop:true,nextPage:true,latestBottom:true,outerLatestAction:true});
         report.restoredChats.push(index); persist();

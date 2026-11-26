@@ -855,3 +855,43 @@ fn system_identity_of_missing_process_fails() {
     let err = super::identity_of(u32::MAX - 1).unwrap_err();
     assert!(err.contains("already gone"), "{err}");
 }
+
+#[test]
+fn recorded_identities_keep_the_root_and_drop_only_what_was_observed_gone() {
+    let (table, _) = harness(World::spawn_root(100, 1_000, false));
+    let root = ProcIdentity { pid: 100, start_us: 1_000 };
+    let mut tracker = TreeTracker::new(root);
+    for (pid, start_us) in [(201, 2_001), (202, 2_002), (203, 2_003)] {
+        table.0.borrow_mut().apply(Step::Spawn { pid, ppid: 100, start_us, comm: "child", ignores_term: false });
+    }
+    tracker.observe(&table).unwrap();
+    assert_eq!(tracker.recorded_identities().len(), 4);
+    // Children come and go over a long run; only the living stay recorded.
+    table.0.borrow_mut().apply(Step::Exit { pid: 201 });
+    table.0.borrow_mut().apply(Step::Exit { pid: 202 });
+    tracker.observe(&table).unwrap();
+    assert_eq!(tracker.recorded_identities(), [root, ProcIdentity { pid: 203, start_us: 2_003 }]);
+    assert_eq!(tracker.tracked_identities().len(), 4, "the cumulative set stays in memory");
+    // The root stays recorded even once it is gone.
+    table.0.borrow_mut().apply(Step::Exit { pid: 100 });
+    table.0.borrow_mut().apply(Step::Exit { pid: 203 });
+    tracker.observe(&table).unwrap();
+    assert_eq!(tracker.recorded_identities(), [root]);
+}
+
+// Process identities are read on unix only (`identity_of` is an error elsewhere).
+#[cfg(unix)]
+#[test]
+fn after_the_owner_is_gone_a_reused_process_id_proves_the_recorded_process_ended() {
+    let me = super::identity_of(std::process::id()).unwrap();
+    assert!(matches!(SettledProcTable.probe(me), ProbeResult::Alive(_)));
+    let earlier = ProcIdentity { pid: me.pid, start_us: me.start_us - 1 };
+    // A running tracker keeps treating this as a tracking failure...
+    assert!(matches!(SystemProcTable.probe(earlier), ProbeResult::Unconfirmable(_)));
+    // ...but the recorded process is certainly not running: this one holds its ID.
+    assert_eq!(SettledProcTable.probe(earlier), ProbeResult::Gone);
+    // And nothing is signalled for it: a settled tracker sees nothing alive.
+    let mut tracker = TreeTracker::new(earlier);
+    let report = tracker.terminate(&SettledProcTable, &SystemClock::default(), TerminationConfig::default());
+    assert!(report.confirmed());
+}

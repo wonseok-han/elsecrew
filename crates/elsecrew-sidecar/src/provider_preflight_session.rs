@@ -126,6 +126,9 @@ fn codex_version_arguments(home: &std::path::Path) -> std::io::Result<Vec<std::f
         "-c".into(), "features.plugins=false".into(), "--version".into()])
 }
 
+/// How old a discovery may be when a start takes it (its validity is 30 s).
+pub(crate) const START_MARGIN: Duration = Duration::from_secs(25);
+
 /// A bounded, selected-profile observation, not a global provider capability.
 /// Constructed only after the named exchange and confirmed cleanup succeed.
 /// It contains no account response, credentials, or arbitrary vendor payload.
@@ -133,6 +136,7 @@ pub(crate) struct NamedProfileObservation {
     model: String,
     effort: String,
     permission: ExpectedPermission,
+    approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy,
     workspace: std::path::PathBuf,
     home: std::path::PathBuf,
     observed_at: std::time::Instant,
@@ -158,6 +162,13 @@ impl NamedProfileObservation {
         )
     }
 
+    /// Whether a start may still use this observation (ADE multi-project P5):
+    /// beside other runs of the agent a finished discovery can wait for the
+    /// engine longer than it stays valid. Leaves room for the start itself.
+    pub(crate) fn fresh_for_start(&self) -> bool {
+        self.observed_at.elapsed() <= START_MARGIN
+    }
+
     /// Discovery is short-lived and bound to the exact inputs. A fresh start
     /// still repeats the same-connection preflight before sending user input.
     pub(crate) fn matches(
@@ -170,6 +181,7 @@ impl NamedProfileObservation {
         self.model == expected.model
             && self.effort == expected.reasoning_effort
             && self.permission == permission
+            && self.approval == expected.approval
             && self.workspace == workspace
             && self.home == home
             && self.observed_at.elapsed() <= Duration::from_secs(30)
@@ -180,24 +192,47 @@ impl NamedProfileObservation {
 mod named_observation_tests {
     use super::*;
 
+    /// The launch flags carry the run's approval policy, and an observation
+    /// made under one policy does not admit a run under the other (2026-11-27).
+    #[test]
+    fn codex_launch_and_observation_follow_the_approval_policy() {
+        use elsecrew_core::provider::vendor_observation::codex_preflight::{CodexApprovalPolicy, ExpectedProfile};
+        // Codex 0.171 refuses `approval_policy = "untrusted"` as a process
+        // setting, so the flags stay on-request; the thread carries the policy.
+        for approval in [CodexApprovalPolicy::OnRequest, CodexApprovalPolicy::Untrusted] {
+            let expected = ExpectedProfile { model: "test-model", reasoning_effort: "medium", approval };
+            let args = discovery_arguments(std::path::Path::new("/managed/profile"), &expected, ExpectedPermission::WorkspaceWrite).unwrap();
+            assert!(args.iter().any(|arg| arg == "approval_policy=\"on-request\""));
+            assert_eq!(args.iter().filter(|arg| arg.to_string_lossy().starts_with("approval_policy=")).count(), 1);
+        }
+        let asks = ExpectedProfile { model: "test-model", reasoning_effort: "medium", approval: CodexApprovalPolicy::Untrusted };
+        let runs = ExpectedProfile { model: "test-model", reasoning_effort: "medium", approval: CodexApprovalPolicy::OnRequest };
+        let workspace = std::path::Path::new("/managed/snapshot");
+        let home = std::path::Path::new("/managed/profile");
+        let observed = NamedProfileObservation { model: "test-model".into(), effort: "medium".into(), permission: ExpectedPermission::ReadOnly,
+            approval: CodexApprovalPolicy::Untrusted, workspace: workspace.into(), home: home.into(), observed_at: Instant::now() };
+        assert!(observed.matches(&asks, ExpectedPermission::ReadOnly, workspace, home));
+        assert!(!observed.matches(&runs, ExpectedPermission::ReadOnly, workspace, home), "the permission changed since it was observed");
+    }
+
     #[test]
     fn selected_observation_cannot_move_to_another_profile_or_workspace() {
         use elsecrew_core::provider::vendor_observation::codex_preflight::ExpectedProfile;
-        let expected = ExpectedProfile { model: "test-model", reasoning_effort: "medium" };
+        let expected = ExpectedProfile { model: "test-model", reasoning_effort: "medium", approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest };
         let workspace = std::path::Path::new("/managed/snapshot");
         let home = std::path::Path::new("/managed/profile");
         let mut observed = NamedProfileObservation {
             model: expected.model.into(), effort: expected.reasoning_effort.into(),
-            permission: ExpectedPermission::ReadOnly, workspace: workspace.into(),
+            permission: ExpectedPermission::ReadOnly, approval: expected.approval, workspace: workspace.into(),
             home: home.into(), observed_at: Instant::now(),
         };
         assert!(observed.matches(&expected, ExpectedPermission::ReadOnly, workspace, home));
         assert!(!observed.matches(&expected, ExpectedPermission::WorkspaceWrite, workspace, home));
         assert!(!observed.matches(&expected, ExpectedPermission::ReadOnly, std::path::Path::new("/other"), home));
         assert!(!observed.matches(&expected, ExpectedPermission::ReadOnly, workspace, std::path::Path::new("/other")));
-        let other = ExpectedProfile { model: "another-model", reasoning_effort: "medium" };
+        let other = ExpectedProfile { model: "another-model", reasoning_effort: "medium", approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest };
         assert!(!observed.matches(&other, ExpectedPermission::ReadOnly, workspace, home));
-        let other = ExpectedProfile { model: "test-model", reasoning_effort: "high" };
+        let other = ExpectedProfile { model: "test-model", reasoning_effort: "high", approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest };
         assert!(!observed.matches(&other, ExpectedPermission::ReadOnly, workspace, home));
         observed.observed_at = Instant::now() - Duration::from_secs(31);
         assert!(!observed.matches(&expected, ExpectedPermission::ReadOnly, workspace, home));
@@ -282,6 +317,7 @@ pub(crate) fn inspect_named_preflight_display_candidate(
             model: expected.model.into(),
             effort: expected.reasoning_effort.into(),
             permission,
+            approval: expected.approval,
             workspace: workspace.into(),
             home: home.clone(),
             observed_at: Instant::now(),
@@ -479,6 +515,7 @@ pub(crate) fn discovery_arguments(
         "-c",
         "model_provider=\"openai\"",
         "-c",
+        // Codex 0.171 refuses `untrusted` here; the thread carries the run's policy.
         "approval_policy=\"on-request\"",
         "-c",
         &sandbox,
@@ -491,6 +528,10 @@ pub(crate) fn discovery_arguments(
     ]
     .into_iter()
     .map(std::ffi::OsString::from)
+    // Built-in tools nothing here can watch or approve stay off for every run.
+    .chain(elsecrew_core::provider::vendor_observation::codex_preflight::UNSUPERVISED_TOOL_FEATURES.iter()
+        .flat_map(|name| ["-c".into(), format!("features.{name}=false").into()]))
+    .chain(["-c".into(), elsecrew_core::provider::vendor_observation::codex_preflight::WEB_SEARCH_SETTING.into()])
     .collect();
     if permission == ExpectedPermission::WorkspaceWrite {
         for setting in [
@@ -641,8 +682,14 @@ fn check_claimed(
                 process.send_preflight_observed(request, remaining, cancel, &mut |process| {
                     on_action(process, TextAction::ObserveProcess)
                 })?;
-                // Exactly one reply and one thread/started, in either order.
-                for _ in 0..2 {
+                // One reply and one thread/started, in either order, plus one
+                // late account note (in practice the routing-ready one; the
+                // initial note arrives during the checks). If both notes were
+                // late this stops short and fails closed.
+                for _ in 0..3 {
+                    if flow.state() != PreflightState::ThreadStarting {
+                        break;
+                    }
                     let remaining = remaining_preflight_budget(budget, started.elapsed(), flow.diagnostic_stage())?;
                     let response =
                         process.receive_preflight_observed(remaining, cancel, &mut |process| {
@@ -1011,7 +1058,7 @@ mod tests {
             std::fs::write(home.join("config.toml"), &config).unwrap();
             std::fs::set_permissions(home.join("config.toml"), std::fs::Permissions::from_mode(0o600)).unwrap();
             let profile = InspectionProfile { root, home: home.clone(), config };
-            let expected = ExpectedProfile { model: "test-model", reasoning_effort: "medium" };
+            let expected = ExpectedProfile { model: "test-model", reasoning_effort: "medium", approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest };
             let mut args = if version_probe {
                 codex_version_arguments(&home).unwrap()
             } else if login_probe {
@@ -1320,6 +1367,7 @@ mod tests {
         let expected = ExpectedProfile {
             model: "test-model",
             reasoning_effort: "medium",
+            approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
         };
         let mut flow =
             PreflightExchange::configuration_only(&expected, home.to_str().unwrap()).unwrap();
@@ -1456,6 +1504,7 @@ mod tests {
                 &ExpectedProfile {
                     model: "test-model",
                     reasoning_effort: "medium",
+                    approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
                 },
                 home.to_str().unwrap(),
             )
@@ -1544,6 +1593,7 @@ mod tests {
                 &ExpectedProfile {
                     model: "test-model",
                     reasoning_effort: "medium",
+                    approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
                 },
                 &cancel,
             )
@@ -1643,6 +1693,7 @@ IFS= read -r hold
                 &ExpectedProfile {
                     model: "test-model",
                     reasoning_effort: "medium",
+                    approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
                 },
                 &cancel,
             );
@@ -1670,6 +1721,7 @@ IFS= read -r hold
         let profile = ExpectedProfile {
             model: "test-model",
             reasoning_effort: "medium",
+            approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
         };
         let command = discovery_command(
             std::path::Path::new("/verified/codex"),
@@ -1702,7 +1754,21 @@ IFS= read -r hold
                 "-c",
                 "features.apps=false",
                 "-c",
-                "features.plugins=false"
+                "features.plugins=false",
+                "-c",
+                "features.browser_use=false",
+                "-c",
+                "features.browser_use_external=false",
+                "-c",
+                "features.browser_use_full_cdp_access=false",
+                "-c",
+                "features.computer_use=false",
+                "-c",
+                "features.in_app_browser=false",
+                "-c",
+                "features.image_generation=false",
+                "-c",
+                "web_search=\"live\"",
             ]
         );
         assert_eq!(args[args.len() - 2], "-c");
@@ -1726,7 +1792,8 @@ IFS= read -r hold
                 std::path::Path::new("/private/profile"),
                 &ExpectedProfile {
                     model,
-                    reasoning_effort: "medium"
+                    reasoning_effort: "medium",
+                    approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
                 }
             )
             .is_err());
@@ -1751,6 +1818,7 @@ IFS= read -r hold
             "claimed-process",
             "thread",
             "thread-before",
+            "thread-routed",
             "wrong-thread",
             "turn-success",
             "turn-wrong-id",
@@ -1788,6 +1856,7 @@ IFS= read -r hold
                 &ExpectedProfile {
                     model: "test-model",
                     reasoning_effort: "medium",
+                    approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
                 },
                 home.to_str().unwrap(),
             )
@@ -1837,6 +1906,10 @@ printf received > "$7"
 if test "$6" = thread-before; then
   printf '%s\n' '{"method":"thread/started","params":{"thread":{"id":"thread-test"}}}'
   printf '%s\n' "$5"
+elif test "$6" = thread-routed; then
+  printf '%s\n' "$5"
+  printf '%s\n' '{"method":"account/updated","emittedAtMs":2,"params":{"authMode":"chatgpt","planType":"pro","reason":"workspaceRoutingReady"}}'
+  printf '%s\n' '{"method":"thread/started","params":{"thread":{"id":"thread-test"}}}'
 else
   printf '%s\n' "$5"
   printf '%s\n' '{"method":"thread/started","params":{"thread":{"id":"thread-test"}}}'
@@ -2076,6 +2149,7 @@ IFS= read -r hold
                 case,
                 "thread"
                     | "thread-before"
+                    | "thread-routed"
                     | "wrong-thread"
                     | "config-only-thread"
                     | "requirements"
@@ -2088,12 +2162,12 @@ IFS= read -r hold
             let result = observe_with_budget(&mut process, &mut flow, &cancel, budget, thread_cwd);
             assert_eq!(
                 result.is_ok(),
-                matches!(case, "success" | "thread" | "thread-before" | "config-only"),
+                matches!(case, "success" | "thread" | "thread-before" | "thread-routed" | "config-only"),
                 "{case}"
             );
             assert_eq!(
                 flow.state(),
-                if matches!(case, "success" | "thread" | "thread-before" | "config-only") {
+                if matches!(case, "success" | "thread" | "thread-before" | "thread-routed" | "config-only") {
                     PreflightState::Closed
                 } else {
                     PreflightState::Failed

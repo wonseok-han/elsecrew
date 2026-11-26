@@ -203,7 +203,7 @@ fn identity(dir: &Dir, name: &str) -> Result<Value, ProjectFailure> {
     if stamp(&actual) != stamp(&path) {
         return Err(invalid());
     }
-    serde_json::to_value(stamp(&actual)).map_err(|_| invalid())
+    serde_json::to_value(crate::project::application::recorded_stamp(&actual)).map_err(|_| invalid())
 }
 
 #[cfg(windows)]
@@ -260,7 +260,7 @@ fn preview_inner(
     }
     if record["cleanup"]["state"] == "pending"
         && !identity.is_null()
-        && identity != record["cleanup"]["identity"]
+        && identity != crate::project::without_device(&record["cleanup"]["identity"])
     {
         return Err(invalid());
     }
@@ -351,7 +351,7 @@ pub(in crate::project) fn remove(
     let name = current["name"].as_str().ok_or_else(invalid)?;
     let now = identity(&dir, name)?;
     if !now.is_null() {
-        if now != current["cleanup"]["identity"] {
+        if now != crate::project::without_device(&current["cleanup"]["identity"]) {
             return Err(invalid());
         }
         #[cfg(unix)]

@@ -65,7 +65,7 @@ app.on('browser-window-created', (_event, window) => {
         await wait(`Array.from(document.querySelectorAll('.m5-chat-chip')).some(b=>b.querySelector('.m5-chat-goal')?.textContent===${JSON.stringify(goal)})`);
         await run(`Array.from(document.querySelectorAll('.m5-chat-chip')).find(b=>b.querySelector('.m5-chat-goal')?.textContent===${JSON.stringify(goal)}).click()`);
         await wait(`document.querySelector('.m5-timeline h2')?.textContent===${JSON.stringify(goal)}`);
-        await run(`Array.from(document.querySelectorAll('.m5-dock-group-tabs button')).find(b=>b.textContent==='파일')?.click()`);
+        await run(`document.querySelector('[data-testid=right-tab-files]')?.click()`);
         await wait(`Array.from(document.querySelectorAll('.m5-files button')).some(b=>b.textContent.includes('hello.txt'))`);
         await run(`Array.from(document.querySelectorAll('.m5-files button')).find(b=>b.textContent.includes('hello.txt')).click()`);
         app.focus({steal:true}); window.show(); window.focus(); window.webContents.focus();

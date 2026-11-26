@@ -18,14 +18,14 @@ const baselineCommands = [
   {
     id: "rust-regression",
     command: "cargo",
-    args: ["test", "--manifest-path", "src-tauri/Cargo.toml"],
+    args: ["test", "--locked", "-p", "elsecrew-core", "-p", "elsecrew-protocol"],
   },
 ];
 
 const gates = [
   {
     id: "baseline",
-    description: "현재 Tauri/React/Rust 기준선 회귀",
+    description: "Electron 화면·프런트 단위·공용 Rust 코어 기준선 회귀",
     scripts: [],
     cumulativeScripts: [],
   },
@@ -82,8 +82,8 @@ const gates = [
   {
     id: "g6-release",
     description: "보안, 패키징, 성능과 M5.0 완료 게이트",
-    scripts: ["m5:test:security", "m5:test:package", "m5:test:performance"],
-    cumulativeScripts: ["m5:test:security", "m5:test:package", "m5:test:performance"],
+    scripts: ["m5:test:security", "m5:test:preview-isolation", "m5:test:preview-ui", "m5:test:package", "m5:test:performance"],
+    cumulativeScripts: ["m5:test:security", "m5:test:preview-isolation", "m5:test:preview-ui", "m5:test:package", "m5:test:performance"],
   },
 ];
 
@@ -280,6 +280,9 @@ for (const command of commands) {
     env: childEnv,
     maxBuffer: 20 * 1024 * 1024,
     timeout: 20 * 60 * 1000,
+    // Node refuses to spawn Windows .cmd shims directly (EINVAL since the
+    // CVE-2024-27980 fix). The command table is fixed, so a shell is safe here.
+    shell: process.platform === "win32" && command.command.endsWith(".cmd"),
   });
   const entry = {
     id: command.id,
@@ -295,6 +298,7 @@ for (const command of commands) {
   report.results.push(entry);
   if (entry.stdout) process.stdout.write(entry.stdout);
   if (entry.stderr) process.stderr.write(entry.stderr);
+  if (entry.error) process.stderr.write(`[ERROR] ${command.id}: ${entry.error}\n`);
   const after = sameCleanState(initialGitState);
   if (!after.ok) {
     report.status = "FAIL";

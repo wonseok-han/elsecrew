@@ -2,6 +2,8 @@ import { sha256FileVersionV1 } from "./file-v1.ts";
 import {
   AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1,
   AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1,
+  AGENT_RUN_FAILURE_CODES_V1,
+  AGENT_RUN_FAILURE_STAGES_V1,
   METHODS_V1,
   validateAgentPublicEventPayloadV1,
   validateAgentRunStateChangedPayloadV1,
@@ -15,7 +17,8 @@ import {
   G5_PERMISSIONS_V1,
   G5_PUBLIC_MESSAGE_MAX_BYTES_V1,
   G5_REASONING_EFFORT_MAX_BYTES_V1,
-  G5_ROLE_IDS_V2,
+  isRoleIdV3,
+  stageForProfileV3,
   G5_RUN_STAGES_V1,
   G5_RUN_STATES_V1,
   G5_RUNTIMES_V1,
@@ -278,7 +281,12 @@ export interface AgentRunAcceptedV1 extends AgentRunBindingV1 {
   state: "preparing";
 }
 
+export interface AgentRunFailureV1 {
+  stage: "approvalDelivery" | "sessionInput" | "sessionChannel" | "sessionInitialization" | "outputPersistence" | "providerResult" | "eventHandling" | "cleanup";
+  code: "boundaryRejected" | "approvalUnavailable" | "inputChanged" | "storageFailed" | "processObservationFailed" | "providerRejected" | "transportFailed" | "unknown";
+}
 export interface AgentRunRecordV1 {
+  failure?: AgentRunFailureV1;
   schemaVersion: 1;
   runId: string;
   chatId: string;
@@ -451,7 +459,7 @@ export function validateAgentCapabilitiesRequestV1(value: unknown): AgentCapabil
   if (typeof object.refresh !== "boolean") fail("refresh must be boolean");
   if (scoped) {
     id(object.chatId, "chatId");
-    oneOf(object.roleId, G5_ROLE_IDS_V2, "roleId");
+    roleId(object.roleId);
   }
   return object as unknown as AgentCapabilitiesRequestV1;
 }
@@ -466,7 +474,7 @@ export function validateAgentCapabilitySnapshotV1(value: unknown): AgentCapabili
   if (scoped) {
     const scope = exactObject(object.scope, ["chatId", "roleId", "worktreeId", "workspaceIdentity"], "capability scope");
     for (const key of ["chatId", "worktreeId", "workspaceIdentity"]) id(scope[key], key);
-    oneOf(scope.roleId, G5_ROLE_IDS_V2, "roleId");
+    roleId(scope.roleId);
   }
   schema(object.schemaVersion);
   oneOf(object.runtime, G5_RUNTIMES_V1, "runtime");
@@ -513,7 +521,7 @@ export function computeAgentCapabilityFingerprintV1(snapshot: AgentCapabilitySna
 export function validateAgentRunStartRequestV1(value: unknown): AgentRunStartRequestV1 {
   const object = exactObject(value, ["chatId", "roleId", "inputMessageIds", "expectedCapabilityFingerprint"], "agent run start request");
   id(object.chatId, "chatId");
-  oneOf(object.roleId, G5_ROLE_IDS_V2, "roleId");
+  roleId(object.roleId);
   const messageIds = array(object.inputMessageIds, "inputMessageIds", 100);
   if (messageIds.length === 0) fail("inputMessageIds must not be empty");
   for (const [index, messageId] of messageIds.entries()) id(messageId, `inputMessageIds[${index}]`);
@@ -547,7 +555,7 @@ export function validateAgentRunRecordV1(value: unknown): AgentRunRecordV1 {
   const object = exactObject(value, [
     "schemaVersion", "runId", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "selectedProfile",
     "source", "capabilityFingerprint", "state", "stage", "terminationOutcome", "createdAt", "updatedAt",
-  ], "agent run record");
+  ], "agent run record", ["failure"]);
   schema(object.schemaVersion);
   agentRunId(object.runId, "runId");
   for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"] as const) id(object[key], key);
@@ -556,11 +564,17 @@ export function validateAgentRunRecordV1(value: unknown): AgentRunRecordV1 {
   fingerprintDigest(object.capabilityFingerprint, "capabilityFingerprint");
   const state = oneOf(object.state, G5_RUN_STATES_V1, "state");
   const stage = oneOf(object.stage, G5_RUN_STAGES_V1, "stage");
-  const expectedStage: Record<RoleIdV1, RunStageV1> = { coordinator: "planning", design: "planning", planning: "planning", coding: "implementing", review: "verifying" };
-  if (stage !== expectedStage[profile.roleId]) fail("agent run stage does not match selected role snapshot");
+  // The stage is derived from permission (legacy `review` keeps verifying).
+  if (stage !== stageForProfileV3(profile)) fail("agent run stage does not match selected role snapshot");
   const termination = object.terminationOutcome === null
     ? null
     : oneOf(object.terminationOutcome, ["cleanExit", "recoveryRequired"] as const, "terminationOutcome");
+  if ("failure" in object) {
+    const failure = exactObject(object.failure, ["stage", "code"], "run failure");
+    if (!["failed", "recoveryRequired"].includes(state)) fail("failure diagnostic requires a failed run");
+    oneOf(failure.stage, AGENT_RUN_FAILURE_STAGES_V1, "failure stage");
+    oneOf(failure.code, AGENT_RUN_FAILURE_CODES_V1, "failure code");
+  }
   timestamp(object.createdAt, "createdAt");
   timestamp(object.updatedAt, "updatedAt");
   if (["preparing", "running", "cancelling"].includes(state) !== (termination === null)) fail("active and terminal run evidence must agree");
@@ -1251,13 +1265,18 @@ function validateDiscovery(value: unknown): AgentDiscoveryEvidenceV1 {
   return object as unknown as AgentDiscoveryEvidenceV1;
 }
 
+function roleId(value: unknown): void {
+  if (!isRoleIdV3(value)) fail("invalid roleId");
+}
+
 function validateProfile(value: unknown): AgentResolvedProfileV1 {
   const object = exactObject(value, ["roleId", "runtime", "modelSelector", "reasoningEffort", "permission"], "resolved profile");
-  oneOf(object.roleId, G5_ROLE_IDS_V2, "roleId");
+  roleId(object.roleId);
   oneOf(object.runtime, G5_RUNTIMES_V1, "runtime");
   bounded(object.modelSelector, "modelSelector", G5_MODEL_SELECTOR_MAX_BYTES_V1);
   if (object.reasoningEffort !== null) bounded(object.reasoningEffort, "reasoningEffort", G5_REASONING_EFFORT_MAX_BYTES_V1);
   oneOf(object.permission, G5_PERMISSIONS_V1, "permission");
+  if (object.roleId === "coordinator" && object.permission !== "readOnly") fail("coordinator permission must be readOnly");
   return object as unknown as AgentResolvedProfileV1;
 }
 
@@ -1441,7 +1460,7 @@ export function validateAgentRunBindingV1(value: unknown): AgentRunBindingV1 {
 
 function validateAgentRunContextFieldsV1(object: Record<string, unknown>): void {
   for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"] as const) id(object[key], key);
-  oneOf(object.roleId, G5_ROLE_IDS_V2, "roleId");
+  roleId(object.roleId);
   fingerprintDigest(object.capabilityFingerprint, "capabilityFingerprint");
 }
 
@@ -1499,11 +1518,11 @@ function assertSameRecoveryIdentity(
   if (expected.recoveryId !== actual.recoveryId) fail(`${name} changed recoveryId`);
 }
 
-function exactObject(value: unknown, keys: readonly string[], name: string): Record<string, unknown> {
+function exactObject(value: unknown, keys: readonly string[], name: string, optional: readonly string[] = []): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) fail(`${name} must be an object`);
   const object = value as Record<string, unknown>;
   const actual = Object.keys(object).sort();
-  const expected = [...keys].sort();
+  const expected = [...keys, ...optional.filter(key => key in object)].sort();
   if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) fail(`${name} has unknown or missing fields`);
   return object;
 }

@@ -7,7 +7,7 @@ export async function probePackagedApplication(evaluate, until, readSource) {
     await until(() => evaluate(`Boolean(${button(text)} && !${button(text)}.disabled)`));
     await evaluate(`${button(text)}.click()`);
   };
-  await click('이 채팅의 반영 전 변경 목록 보기');
+  await click('이 작업의 반영 전 변경 목록 보기');
   await click('이 변경 묶음으로 확인 준비');
   await click('확인 취소');
   await until(() => evaluate(`!${button('확인 취소')}`));

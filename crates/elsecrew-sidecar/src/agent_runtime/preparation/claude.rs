@@ -17,8 +17,20 @@ pub(crate) struct ClaudeOutputState {
     pending_item: Option<elsecrew_protocol::agent_adapter_v1::output_pages::OutputItemUpdate>,
     completion: Option<Result<TurnOutcome, SidecarError>>,
     terminal_saved: bool,
+    failure: Option<Value>,
     finished: bool,
+    /// Tool uses this app refused while telling the agent to carry on. A result
+    /// listing only these denials is still a clean finish; any other denial
+    /// (another guard, an unknown source) is not.
+    denied_by_app: std::collections::BTreeSet<String>,
+    /// Work history rows of tool uses that were let through, by tool use id,
+    /// until their result says how they ended (bounded).
+    tool_rows: std::collections::BTreeMap<String, (Value, std::time::Instant)>,
+    /// The app's own ids for tool uses (`t1`, `t2`…), never the provider's.
+    next_tool: u64,
 }
+
+const TOOL_ROWS_MAX: usize = 128;
 
 /// Owns the reservation, channel and cleanup together across dispatcher polls.
 /// Construction and prompt queueing require a separately admitted launch.
@@ -43,7 +55,11 @@ struct ClaudePending {
     id: String,
     request: elsecrew_core::provider::vendor_observation::claude_approval::Request,
     declined: bool,
+    /// Every page of the input has been read for the card (PR #19 review B1):
+    /// a large input can only be allowed once the person could see all of it.
     inspected: bool,
+    /// How many pages, from the first, the card has read.
+    pages_read: usize,
     accepted: bool,
 }
 
@@ -109,6 +125,9 @@ impl ClaudeStart {
             let output_budget = output_budget_from_projection(&projection)?;
             self.channel = Some(self.initialization.take().ok_or_else(failure)?
                 .into_profile_channel(&expected, effort)?.with_output_budget(output_budget)?);
+            // The handshake is done: a tool result over the line bound (a large
+            // image) is shortened, not fatal (2026-11-26 D2).
+            running.admit_session_lines(elsecrew_core::provider::oversized_line::OversizedLinePolicy::ClaudeStreamJson)?;
             stage = "owner preparation";
             let mut owner = OwnedClaudeRun::take_prepared(storage, projects, reservation, process, &mut self.channel)?;
             // After this point every failure must restore ownership, not drop it.
@@ -149,14 +168,24 @@ impl OwnedClaudeRun {
     pub(crate) fn polling_finished(&self) -> bool {
         self.output.finished
     }
-    pub(crate) fn approval_request(&mut self, action: &str, id: Option<&str>, identity: &Value) -> Result<Value, SidecarError> {
+    pub(crate) fn approval_request(&mut self, action: &str, id: Option<&str>, page: Option<usize>, identity: &Value) -> Result<Value, SidecarError> {
         let failure = || SidecarError::new("agentApprovalChanged", "Claude approval is no longer live");
         self.approvals.retain(|entry| self.channel.is_permission_pending(&entry.request.request_id));
         let mut inspection = None;
         let mut queued = None;
         if action != "list" {
             let id = id.ok_or_else(failure)?;
-            let entry = self.approvals.iter_mut().find(|entry| entry.id == id && !entry.declined && !entry.accepted).ok_or_else(failure)?;
+            let found = self.approvals.iter_mut().find(|entry| entry.id == id && !entry.declined && !entry.accepted);
+            // Claude may withdraw a request (or the screen may look at one
+            // just answered) between the screen's list and its "view" click.
+            // Viewing then shows nothing waiting; it never answers anything.
+            // Accepting or declining a request that is gone still refuses.
+            let Some(entry) = found else {
+                if action != "inspect" { return Err(failure()); }
+                let pending: Vec<_> = self.approvals.iter().filter(|entry| !entry.declined && !entry.accepted)
+                    .map(|entry| json!({"approvalId":entry.id,"kind":"tool"})).collect();
+                return Ok(json!({"identity":identity,"pending":pending,"queued":null,"inspection":null}));
+            };
             match action {
                 "decline" => { entry.declined = true; queued = Some(id); },
                 "acceptOnce" if entry.inspected && self.tool_admission.is_some()
@@ -164,9 +193,15 @@ impl OwnedClaudeRun {
                     && self.output.initialized && !self.output.finished => {
                     entry.accepted = true; queued = Some(id);
                 },
-                "inspect" => { entry.inspected = true; inspection = Some(json!({"approvalId":id,"kind":"tool","command":null,
-                    "cwd":null,"reason":entry.request.tool_name,"grantRoot":null,"host":null,"protocol":null,
-                    "toolInput":entry.request.inspect_input()})); },
+                "inspect" => {
+                    let page = page.unwrap_or(0);
+                    let view = tool_inspection(id, &entry.request, page).ok_or_else(failure)?;
+                    // Pages are read in order from the first; a page may be read again.
+                    if page > entry.pages_read { return Err(failure()); }
+                    if page == entry.pages_read { entry.pages_read += 1; }
+                    entry.inspected = entry.pages_read >= tool_input_pages(entry.request.inspect_input()).len();
+                    inspection = Some(view);
+                },
                 _ => return Err(failure()),
             }
         }
@@ -180,11 +215,20 @@ impl OwnedClaudeRun {
     pub(crate) fn connection_id(&self) -> Uuid { self.process.connection_id() }
 
     pub(crate) fn registration_identity(&self, storage: &Storage, projects: &ProjectManager) -> Result<RunIdentity, SidecarError> {
+        self.registration_identity_with(storage, projects, false)
+    }
+
+    /// `viewing`: see the Codex owner's `registration_identity_with`.
+    pub(crate) fn registration_identity_with(&self, storage: &Storage, projects: &ProjectManager, viewing: bool) -> Result<RunIdentity, SidecarError> {
         let failure = || SidecarError::new("agentInputChanged", "Claude registration binding differs");
         if self.output.finished || self.output.connection != self.process.connection_id()
             || self.output.run_id != self.reservation.run_id
             || !self.process.matches_startup_run(&self.reservation.run_id) { return Err(failure()); }
-        self.reservation.validate_text_input(storage, projects).map_err(|_| failure())?;
+        if viewing {
+            self.reservation.validate_text_input_streaming(storage, projects).map_err(|_| failure())?;
+        } else {
+            self.reservation.validate_text_input(storage, projects).map_err(|_| failure())?;
+        }
         let run = &self.reservation.run;
         let field = |name| run.get(name).and_then(Value::as_str).map(str::to_owned).ok_or_else(failure);
         Ok(RunIdentity {
@@ -296,33 +340,19 @@ impl OwnedClaudeRun {
             Event,
         ) -> Result<(), SidecarError>,
     ) -> Result<bool, SidecarError> {
-        self.approvals.retain(|entry| self.channel.is_permission_pending(&entry.request.request_id));
-        // Consult stored consent at delivery; automatic permission is never queued across polls.
-        let consent = projects.automation_permissions(storage, self.reservation.run["projectId"].as_str().ok_or_else(|| SidecarError::new("agentApprovalChanged", "project binding unavailable"))?).map_err(|_| SidecarError::new("agentApprovalChanged", "project consent unavailable"))?;
-        let auto_allowed = |entry: &ClaudePending| {
-            use elsecrew_core::provider::vendor_observation::claude_approval::ToolTarget;
-            !entry.declined && match entry.request.target() {
-                ToolTarget::File { .. } | ToolTarget::Search { .. } => consent.files,
-                ToolTarget::Shell => consent.commands,
-                ToolTarget::Unsupported => false,
-            }
-        };
-        if self.channel.can_queue_reply() {
-            if let Some(index) = self.approvals.iter().position(|entry| entry.declined || entry.accepted || auto_allowed(entry)) {
-                let entry = self.approvals.remove(index);
-                let reply = if entry.accepted || auto_allowed(&entry) {
-                    self.allow_tool_once(storage, projects, &entry.request)
-                } else {
-                    self.channel.deny(&mut self.process, &entry.request.request_id, false)
-                };
-                if let Err(error) = reply {
-                    self.output.completion = Some(Err(error));
-                    self.cancel.store(true, std::sync::atomic::Ordering::Release);
-                }
+        if self.output.completion.is_none() {
+            if let Err(error) = self.deliver_approval(storage, projects) {
+                self.output.note_failure("approvalDelivery", &error);
+                self.output.completion = Some(Err(error));
+                self.cancel.store(true, std::sync::atomic::Ordering::Release);
             }
         }
+        // Once the run has ended no request can be answered: let them go now,
+        // with their large-input budget, whether or not the end is recorded
+        // yet (PR #19 review I2).
+        release_unanswerable(&mut self.approvals, self.output.completion.is_some() || self.output.finished);
         let approvals = &mut self.approvals;
-        self.reservation.advance_claude_output(
+        let result = self.reservation.advance_claude_output(
             storage,
             projects,
             &mut self.process,
@@ -337,7 +367,7 @@ impl OwnedClaudeRun {
                         if approvals.len() >= 128 || approvals.iter().any(|entry| entry.request.request_id == request.request_id) {
                             return Err(SidecarError::new("agentApprovalChanged", "Claude approval queue is invalid"));
                         }
-                        approvals.push(ClaudePending {id:format!("approval_{}", Uuid::new_v4().simple()),request,declined:false,inspected:false,accepted:false});
+                        approvals.push(ClaudePending {id:format!("approval_{}", Uuid::new_v4().simple()),request,declined:false,inspected:false,pages_read:0,accepted:false});
                         Ok(())
                     },
                     Event::Permission(Observation::Cancelled) => { approvals.retain(|entry| channel.is_permission_pending(&entry.request.request_id)); Ok(()) },
@@ -345,7 +375,68 @@ impl OwnedClaudeRun {
                     event => handle(process, channel, event),
                 }
             },
-        )
+        );
+        // The same poll may have seen the end. Release right away: if reading
+        // the end then fails the owner is kept, and no later poll would get
+        // here again to release them (PR #19 re-review 2).
+        release_unanswerable(&mut self.approvals, self.output.completion.is_some() || self.output.finished);
+        result
+    }
+
+    fn deliver_approval(&mut self, storage: &mut Storage, projects: &ProjectManager) -> Result<(), SidecarError> {
+        self.approvals.retain(|entry| self.channel.is_permission_pending(&entry.request.request_id));
+        // Consult stored consent at delivery; automatic permission is never queued across polls.
+        let consent = projects.automation_permissions(storage, self.reservation.run["projectId"].as_str().ok_or_else(|| SidecarError::new("agentApprovalChanged", "project binding unavailable"))?).map_err(|_| SidecarError::new("agentApprovalChanged", "project consent unavailable"))?;
+        let auto_allowed = |entry: &ClaudePending| {
+            use elsecrew_core::provider::vendor_observation::claude_approval::ToolTarget;
+            !entry.declined && match entry.request.target() {
+                ToolTarget::File { .. } | ToolTarget::Search { .. } => consent.files,
+                ToolTarget::Shell => consent.commands,
+                ToolTarget::Unsupported => false,
+            }
+        };
+        // A request outside the role's tool boundary (a file that does not
+        // exist, a path outside the workspace or in `.git`, a write or command
+        // from a read-only role) is refused on its own, without asking the
+        // person: the agent is told no and carries on. Only a session that no
+        // longer matches its run still ends the run.
+        let access = match self.reservation.run["selectedProfile"]["permission"].as_str() {
+            Some("workspaceWrite") => crate::provider_claude_session::ToolAccess::Edit,
+            _ => crate::provider_claude_session::ToolAccess::ReadOnly,
+        };
+        let cwd = self.channel.cwd().to_path_buf();
+        // A request too large to keep for review is refused on its own, with
+        // guidance to write in smaller parts; the session carries on.
+        let within = |entry: &ClaudePending| !entry.request.withheld()
+            && crate::provider_claude_session::admission::tool_policy(&cwd, access, &entry.request).is_ok();
+        if self.channel.can_queue_reply() {
+            if let Some(index) = self.approvals.iter().position(|entry| entry.declined || entry.accepted || auto_allowed(entry) || !within(entry)) {
+                let entry = self.approvals.remove(index);
+                let within = within(&entry);
+                let allow = within && (entry.accepted || auto_allowed(&entry));
+                let reply = if allow {
+                    self.allow_tool_once(storage, projects, &entry.request)
+                } else {
+                    self.channel.deny(&mut self.process, &entry.request.request_id, false).map(|()| {
+                        if let Some(id) = &entry.request.tool_use_id { self.output.denied_by_app.insert(id.clone()); }
+                    })
+                };
+                reply?;
+                let key = (allow && entry.request.tool_use_id.is_some()).then(|| { self.output.next_tool += 1; format!("t{}", self.output.next_tool) });
+                let row = super::activity::claude(&entry.request, &cwd, !allow, key.as_deref());
+                if key.is_some() {
+                    if let Some(id) = &entry.request.tool_use_id {
+                        if self.output.tool_rows.len() >= TOOL_ROWS_MAX {
+                            let oldest = self.output.tool_rows.iter().min_by_key(|(_, (_, at))| *at).map(|(id, _)| id.clone());
+                            if let Some(oldest) = oldest { self.output.tool_rows.remove(&oldest); }
+                        }
+                        self.output.tool_rows.insert(id.clone(), (row.clone(), std::time::Instant::now()));
+                    }
+                }
+                self.reservation.record_activity(storage, row);
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn into_cleanup_parts(
@@ -402,7 +493,7 @@ impl RunReservation {
         let profile: AgentResolvedProfileV1 = serde_json::from_value(self.run["selectedProfile"].clone()).map_err(|_| failure())?;
         let manifest = projects.verify_workspace_for_run(storage, &address_from_chat(&self.run).map_err(|_| failure())?).map_err(|_| failure())?;
         let workspace = Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
-        let source = Path::new(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?);
+        let source = Path::new(elsecrew_protocol::project_v1::manifest_source_root(&manifest).ok_or_else(failure)?);
         let home = process.claude_preflight_home()?;
         let effort = profile.reasoning_effort.as_deref();
         let access = if profile.permission == "workspaceWrite" { ToolAccess::Edit } else { ToolAccess::ReadOnly };
@@ -434,7 +525,7 @@ impl RunReservation {
             "readOnly" => ToolAccess::ReadOnly, "workspaceWrite" => ToolAccess::Edit, _ => return Err(failure()),
         };
         Admission::new(Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?),
-            &process.claude_preflight_home()?, Path::new(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?),
+            &process.claude_preflight_home()?, Path::new(elsecrew_protocol::project_v1::manifest_source_root(&manifest).ok_or_else(failure)?),
             &preflight.profile.model_selector, preflight.profile.reasoning_effort.as_deref(), access)
     }
 
@@ -461,7 +552,7 @@ impl RunReservation {
             let requested = crate::provider_claude_session::requested_policy_digest(
                 self.run["selectedProfile"]["modelSelector"].as_str().ok_or_else(failure)?,
                 self.run["selectedProfile"]["reasoningEffort"].as_str(), access,
-                &home, Path::new(workspace), Path::new(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?),
+                &home, Path::new(workspace), Path::new(elsecrew_protocol::project_v1::manifest_source_root(&manifest).ok_or_else(failure)?),
             )?;
             if requested != preflight.requested_launch_policy_digest || !preflight.credentials_present
                 || serde_json::to_value(&preflight.profile).map_err(|_| failure())? != self.run["selectedProfile"]
@@ -505,7 +596,7 @@ impl RunReservation {
         let manifest = projects.verify_workspace_for_run(storage, &address).map_err(|_| failure())?;
         let workspace = Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
         let home = process.claude_preflight_home()?;
-        let source = Path::new(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?);
+        let source = Path::new(elsecrew_protocol::project_v1::manifest_source_root(&manifest).ok_or_else(failure)?);
         if let Some(preflight) = &self.claude_preflight {
             if executable.public_identity(&preflight.executable.cli_version)? != preflight.executable
                 || crate::provider_claude_session::requested_policy_digest(model, effort, access, &home, workspace, source)?
@@ -555,7 +646,11 @@ impl RunReservation {
             pending_item: None,
             completion: None,
             terminal_saved: false,
+            failure: None,
             finished: false,
+            denied_by_app: Default::default(),
+            tool_rows: Default::default(),
+            next_tool: 0,
         })
     }
 
@@ -584,12 +679,12 @@ impl RunReservation {
             return Err(failure());
         }
         if state.completion.is_none() {
-            let mut checkpoint = "session input";
+            let mut checkpoint = "sessionInput";
             let next = self
-                .validate_text_input(storage, projects)
+                .validate_text_input_streaming(storage, projects)
                 .map_err(|_| failure())
                 .and_then(|_| {
-                    checkpoint = "session channel";
+                    checkpoint = "sessionChannel";
                     channel.advance(process, cancel, &mut |owner| {
                         self.observe_process(storage, owner)
                     })
@@ -598,7 +693,7 @@ impl RunReservation {
                 match event {
                     None => {}
                     Some(event @ Event::Initialized { .. }) => {
-                        checkpoint = "session receipt";
+                        checkpoint = "sessionInitialization";
                         if state.initialized {
                             return Err(failure());
                         }
@@ -608,7 +703,7 @@ impl RunReservation {
                         if let Some(preflight) = &self.claude_preflight {
                             if !receipt.matches(&workspace, &preflight.resolved_model) { return Err(failure()); }
                         }
-                        checkpoint = "session process observation";
+                        checkpoint = "sessionInitialization";
                         self.observe_process(storage, process)?;
                         // Retain the existing field name for both provider sessions.
                         // This digest identifies the session; it is not an executable allowlist.
@@ -616,9 +711,9 @@ impl RunReservation {
                             "threadDigest":format!("sha256:{:x}",Sha256::digest(receipt.session_id().as_bytes())),
                             "runId":self.run_id,"workspaceIdentity":self.run["workspaceIdentity"],
                             "capabilityFingerprint":self.run["capabilityFingerprint"],"selectedProfile":self.run["selectedProfile"]});
-                        checkpoint = "session persistence";
+                        checkpoint = "sessionInitialization";
                         self.persist_native_running(storage,evidence,Path::new(&workspace),receipt.observed_builtin_plugins())?;
-                        checkpoint = "session handler";
+                        checkpoint = "sessionInitialization";
                         handle(process, channel, event)?;
                         state.initialized = true;
                     }
@@ -633,6 +728,7 @@ impl RunReservation {
                         }
                         use elsecrew_protocol::agent_adapter_v1::output_pages::{OutputItemUpdate, OutputItemOperation, OutputItemChannel};
                         let update = OutputItemUpdate { item_id, operation: OutputItemOperation::Complete, channel: OutputItemChannel::Message };
+                        checkpoint = "outputPersistence";
                         let durable = self.persist_item_progress(storage, &update, text.clone())?;
                         if let Some(previous) = state.pending_answer.replace(text) {
                             if !durable { self.persist_text(storage, "status", previous)?; }
@@ -646,18 +742,33 @@ impl RunReservation {
                             )?;
                         }
                     }
+                    Some(Event::Output(Projection::ToolResults(results))) => {
+                        // Display only: how let-through tool uses ended.
+                        for result in results {
+                            if let Some((row, started)) = state.tool_rows.remove(&result.tool_use_id) {
+                                if let Some(done) = super::activity::claude_done(&row, &result, started.elapsed()) { self.record_activity(storage, done); }
+                            }
+                        }
+                    }
                     Some(Event::Output(Projection::Result(result))) => {
                         if !state.initialized {
                             return Err(failure());
                         }
                         // Missing queue state is unknown, not zero. Result alone
                         // does not release the process fence or mark success.
+                        checkpoint = "providerResult";
                         state.completion = Some(
                             if result.outcome == ReportedOutcome::Success
                                 && result.queued_turn_count == Some(0)
-                                && !result.permission_denied
+                                && (!result.permission_denied || result.denied_tool_use_ids
+                                    .as_ref().is_some_and(|ids| ids.is_subset(&state.denied_by_app)))
                             {
-                                Ok(TurnOutcome::Completed)
+                                // Success is a boundary: verify in full (with Git),
+                                // never on the streaming check's recent result.
+                                match self.validate_text_input(storage, projects) {
+                                    Ok(()) => Ok(TurnOutcome::Completed),
+                                    Err(_) => Err(SidecarError::new("agentInputChanged", "Claude workspace changed before success")),
+                                }
                             } else {
                                 Err(SidecarError::new(
                                     "agentExecutionFailed",
@@ -666,7 +777,7 @@ impl RunReservation {
                             },
                         );
                     }
-                    Some(event) => handle(process, channel, event)?,
+                    Some(event) => { checkpoint = "eventHandling"; handle(process, channel, event)?; },
                 }
                 Ok(())
             });
@@ -675,7 +786,14 @@ impl RunReservation {
                 if !state.initialized {
                     eprintln!("native Claude transport failed at {checkpoint}");
                 }
+                state.note_failure(checkpoint, &error);
                 state.completion = Some(Err(error));
+            }
+        }
+        if state.failure.is_none() {
+            if let Some(Err(error)) = &state.completion {
+                let error = error.clone();
+                state.note_failure("providerResult", &error);
             }
         }
         if state.completion.is_none() {
@@ -684,19 +802,19 @@ impl RunReservation {
         let cleanup = process.poll_finish();
         if !state.terminal_saved
             && self
-                .persist_process_snapshot(storage, &process.tracked_for_cleanup())
+                .persist_process_snapshot(storage, &process.tracked_for_cleanup(), &process.recorded_for_ledger())
                 .is_err()
         {
             process.invalidate_cleanup_evidence();
-            state.completion = Some(Err(SidecarError::new(
-                "agentProcessObservationFailed",
-                "Claude cleanup evidence requires recovery",
-            )));
+            let error = SidecarError::new("agentProcessObservationFailed", "Claude cleanup evidence requires recovery");
+            state.note_failure("cleanup", &error);
+            state.completion = Some(Err(error));
         }
         if matches!(cleanup, Ok(false)) {
             return Ok(false);
         }
         if let Err(error) = cleanup {
+            state.note_failure("cleanup", &error);
             state.completion = Some(Err(error));
         }
         if !state.terminal_saved {
@@ -715,6 +833,7 @@ impl RunReservation {
                     };
                     if state.pending_item.is_none() || kind == "final" {
                     if let Err(error) = self.persist_text_update(storage, kind, answer, state.pending_item.as_ref()) {
+                        state.note_failure("outputPersistence", &error);
                         state.completion = Some(Err(error));
                     }
                     }
@@ -726,6 +845,7 @@ impl RunReservation {
                 process,
                 state.completion.as_ref().unwrap(),
                 user_cancel,
+                state.failure.as_ref(),
             )
             .map_err(|_| failure())?;
             state.terminal_saved = true;
@@ -739,5 +859,158 @@ impl RunReservation {
         }
         state.finished = true;
         Ok(true)
+    }
+}
+
+impl ClaudeOutputState {
+    fn note_failure(&mut self, stage: &'static str, error: &SidecarError) {
+        // First failure wins: cleanup must not erase the initiating cause.
+        if self.failure.is_some() { return; }
+        let code = match error.kind() {
+            "agentApprovalChanged" => "approvalUnavailable",
+            "agentInputChanged" => "inputChanged",
+            "providerPreflightFailed" => "boundaryRejected",
+            "storageInvalid" | "storageUnavailable" | "agentOutputPersistenceFailed" => "storageFailed",
+            "agentProcessObservationFailed" => "processObservationFailed",
+            "agentExecutionFailed" => "providerRejected",
+            "providerTransportFailed" => "transportFailed",
+            _ => "unknown",
+        };
+        self.failure = Some(json!({"stage":stage,"code":code}));
+    }
+}
+
+/// Largest tool input an approval card receives whole. The renderer contract
+/// takes at most 128 KiB; past this the card reads it in pages.
+const TOOL_INSPECTION_WHOLE_MAX_BYTES: usize = 96 * 1024;
+/// One page of a large tool input, cut at a UTF-8 character boundary.
+const TOOL_INSPECTION_PAGE_BYTES: usize = 64 * 1024;
+
+/// Where each page of `input` starts and ends. One page for an input the card
+/// takes whole; the pages joined are exactly `input`.
+fn tool_input_pages(input: &str) -> Vec<(usize, usize)> {
+    if input.len() <= TOOL_INSPECTION_WHOLE_MAX_BYTES {
+        return vec![(0, input.len())];
+    }
+    let mut pages = Vec::new();
+    let mut start = 0;
+    while start < input.len() {
+        let mut end = (start + TOOL_INSPECTION_PAGE_BYTES).min(input.len());
+        while !input.is_char_boundary(end) { end -= 1; }
+        pages.push((start, end));
+        start = end;
+    }
+    pages
+}
+
+/// The approval card's view of one page of a Claude tool request. A large
+/// input (a file written whole) comes in pages, each with the input's full
+/// size, its SHA-256 and the page count; the card joins every page and checks
+/// both before the person can allow it. The text is the exact input the allow
+/// reply echoes, a JSON object (2026-11-26 big Write, PR #19 review B1).
+fn tool_inspection(id: &str, request: &elsecrew_core::provider::vendor_observation::claude_approval::Request, page: usize) -> Option<Value> {
+    let input = request.inspect_input();
+    let pages = tool_input_pages(input);
+    let (start, end) = *pages.get(page)?;
+    let mut inspection = json!({"approvalId":id,"kind":"tool","command":null,"cwd":null,"reason":request.tool_name,
+        "grantRoot":null,"host":null,"protocol":null,"toolInput":&input[start..end]});
+    if pages.len() > 1 {
+        inspection["toolInputBytes"] = json!(input.len());
+        inspection["toolInputSha256"] = json!(format!("{:x}", Sha256::digest(input.as_bytes())));
+        inspection["toolInputPage"] = json!(page);
+        inspection["toolInputPages"] = json!(pages.len());
+    }
+    Some(inspection)
+}
+
+#[cfg(test)]
+mod tool_inspection_tests {
+    use super::*;
+    use elsecrew_core::provider::vendor_observation::claude_approval::{Observation, Permissions};
+    use elsecrew_core::provider::BoundedObservation;
+
+    fn request(content: &str) -> elsecrew_core::provider::vendor_observation::claude_approval::Request {
+        let frame = json!({"type":"control_request","request_id":"r","request":{"subtype":"can_use_tool","tool_name":"Write",
+            "input":{"file_path":"big.txt","content":content},"tool_use_id":"t"}});
+        let mut bytes = frame.to_string().into_bytes();
+        bytes.push(b'\n');
+        let observed = if bytes.len() <= elsecrew_core::provider::PROVIDER_OBSERVATION_LINE_MAX_BYTES {
+            BoundedObservation::new(bytes).unwrap()
+        } else {
+            elsecrew_core::provider::oversized_line::reduce_oversized_line(&bytes, elsecrew_core::provider::oversized_line::OversizedLinePolicy::ClaudeStreamJson).unwrap()
+        };
+        match Permissions::default().observe(&observed).unwrap() {
+            Observation::Requested(request) => request,
+            _ => panic!("expected a request"),
+        }
+    }
+
+    /// PR #19 review B1: a small input comes whole on one page; a large one in
+    /// pages that join to exactly the input the allow reply echoes, each page
+    /// under the renderer's bound, with the input's size and SHA-256. Multi-byte
+    /// text is never split inside a character.
+    #[test]
+    fn a_large_tool_input_is_read_in_pages_that_join_to_the_exact_input() {
+        let _held = crate::provider_login_io::LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let small = request("hello");
+        let view = tool_inspection("approval_1", &small, 0).unwrap();
+        assert_eq!(view["toolInput"], json!(small.inspect_input()));
+        assert!(view.get("toolInputBytes").is_none() && view.get("toolInputPages").is_none());
+        assert!(tool_inspection("approval_1", &small, 1).is_none());
+
+        let content = "한글과 English 줄\n".repeat(15_000);
+        let large = request(&content);
+        let original = large.inspect_input();
+        let count = tool_input_pages(original).len();
+        assert!(count > 1);
+        let mut joined = String::new();
+        for page in 0..count {
+            let view = tool_inspection("approval_2", &large, page).unwrap();
+            assert_eq!(view["toolInputBytes"], json!(original.len()));
+            assert_eq!(view["toolInputSha256"], json!(format!("{:x}", Sha256::digest(original.as_bytes()))));
+            assert_eq!((view["toolInputPage"].as_u64(), view["toolInputPages"].as_u64()), (Some(page as u64), Some(count as u64)));
+            let text = view["toolInput"].as_str().unwrap();
+            assert!(text.len() <= TOOL_INSPECTION_PAGE_BYTES);
+            joined.push_str(text);
+        }
+        assert!(tool_inspection("approval_2", &large, count).is_none());
+        assert_eq!(joined, original, "the pages join to exactly the input");
+    }
+}
+
+/// Once a run has ended no request of it can be answered: let them go, and
+/// with them their large-input budget, whether or not the end was recorded.
+fn release_unanswerable(approvals: &mut Vec<ClaudePending>, ended: bool) {
+    if ended { approvals.clear(); }
+}
+
+#[cfg(test)]
+mod release_tests {
+    use super::*;
+    use elsecrew_core::provider::vendor_observation::claude_approval::{large_tool_inputs_held, Observation, Permissions};
+
+    /// PR #19 re-review 2: requests still waiting when the run ends (even if
+    /// reading its end fails and the owner is kept) give back their budget.
+    #[test]
+    fn requests_of_an_ended_run_give_back_their_budget() {
+        let _held = crate::provider_login_io::LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let before = large_tool_inputs_held();
+        let frame = format!("{{\"type\":\"control_request\",\"request_id\":\"r\",\"request\":{{\"subtype\":\"can_use_tool\",\"tool_name\":\"Write\",\"input\":{{\"file_path\":\"a.txt\",\"content\":\"{}\"}},\"tool_use_id\":\"t\"}}}}\n", "x".repeat(300_000));
+        let observed = elsecrew_core::provider::oversized_line::reduce_oversized_line(frame.as_bytes(), elsecrew_core::provider::oversized_line::OversizedLinePolicy::ClaudeStreamJson).unwrap();
+        let Observation::Requested(request) = Permissions::default().observe(&observed).unwrap() else { panic!("expected a request") };
+        let mut approvals = vec![ClaudePending { id: "approval_1".into(), request, declined: false, inspected: false, pages_read: 0, accepted: false }];
+        assert!(large_tool_inputs_held() >= before + 300_000);
+        release_unanswerable(&mut approvals, false);
+        assert_eq!(approvals.len(), 1, "still running: kept");
+        release_unanswerable(&mut approvals, true);
+        assert!(approvals.is_empty());
+        assert_eq!(large_tool_inputs_held(), before, "ended: budget back");
+        // An owner dropped with requests still queued (the connection let go):
+        // dropping the queue gives the budget back too.
+        let Observation::Requested(request) = Permissions::default().observe(&observed).unwrap() else { panic!("expected a request") };
+        let approvals = vec![ClaudePending { id: "approval_2".into(), request, declined: false, inspected: false, pages_read: 0, accepted: false }];
+        assert!(large_tool_inputs_held() >= before + 300_000);
+        drop(approvals);
+        assert_eq!(large_tool_inputs_held(), before, "dropped: budget back");
     }
 }

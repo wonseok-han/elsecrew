@@ -32,6 +32,11 @@ impl DiscoveryEvidence {
     pub(crate) fn is_fresh(&self) -> bool {
         self.observed_from.elapsed() <= Duration::from_secs(30)
     }
+
+    /// See `NamedProfileObservation::fresh_for_start`.
+    pub(crate) fn fresh_for_start(&self) -> bool {
+        self.observed_from.elapsed() <= crate::provider_preflight_session::START_MARGIN
+    }
 }
 
 pub(crate) struct Completion {

@@ -10,10 +10,93 @@ pub mod exchange;
 mod layers;
 pub mod named_config;
 
+/// Built-in Codex tools that act outside anything Elsecrew can watch or
+/// approve (a browser, the user's own screen, image generation). Every run
+/// switches them off with `-c features.<name>=false`; a reported session flag
+/// may name them only as `false`. Switching them off only takes capabilities away.
+pub const UNSUPERVISED_TOOL_FEATURES: &[&str] = &[
+    "browser_use",
+    "browser_use_external",
+    "browser_use_full_cdp_access",
+    "computer_use",
+    "in_app_browser",
+    "image_generation",
+];
+
+/// Codex's hosted web search, set explicitly so the reported configuration
+/// can be checked exactly. `live` reads current pages (user decision
+/// 2026-11-18: agents may search the web; `webSearch` items no longer stop a run).
+pub const WEB_SEARCH_SETTING: &str = "web_search=\"live\"";
+
+fn web_search_expected(value: Option<&serde_json::Value>) -> bool {
+    value.is_none_or(|value| value.as_str() == Some("live"))
+}
+
+/// Removes the switched-off tool features (and the requested web search mode)
+/// from a reported session-flag layer, refusing any other value, so the
+/// remaining layer still matches its fixed shape. Absent entries are fine
+/// (older fixtures, older Codex).
+pub(crate) fn strip_unsupervised_tool_flags(flags: &mut serde_json::Value) -> Result<(), &'static str> {
+    if let Some(flags) = flags.as_object_mut() {
+        if !web_search_expected(flags.remove("web_search").as_ref()) {
+            return Err("unexpected web search mode");
+        }
+    }
+    let Some(features) = flags.get_mut("features").and_then(serde_json::Value::as_object_mut) else {
+        return Ok(());
+    };
+    for name in UNSUPERVISED_TOOL_FEATURES {
+        match features.remove(*name) {
+            None | Some(serde_json::Value::Bool(false)) => {}
+            Some(_) => return Err("unsupervised tool flag"),
+        }
+    }
+    Ok(())
+}
+
+/// The effective config must not report a switched-off tool as on.
+pub(crate) fn unsupervised_tools_off(effective: &serde_json::Value) -> bool {
+    web_search_expected(effective.get("web_search")) && UNSUPERVISED_TOOL_FEATURES.iter().all(|name| {
+        effective["features"].get(*name).is_none_or(|value| *value == serde_json::Value::Bool(false))
+    })
+}
+
 /// An explicit requested tuple; never filled from vendor defaults or upgrade suggestions.
 pub struct ExpectedProfile<'a> {
     pub model: &'a str,
     pub reasoning_effort: &'a str,
+    /// When Codex asks before running a command (2026-11-27 user decision).
+    pub approval: CodexApprovalPolicy,
+}
+
+/// Codex's approval policy for one run's thread. With the project's command
+/// permission on, Codex runs commands inside its sandbox and asks only to go
+/// past it (`on-request`, the app approving within the workspace on its own).
+/// With it off, Codex asks before every command it does not know to be a safe
+/// read (`untrusted`), as Claude asks before every Bash command; the person
+/// answers each (2026-11-27 user decision).
+///
+/// Codex 0.171 refuses `approval_policy = "untrusted"` as a process setting
+/// ("no longer supported") but takes it on `thread/start` and reports it back.
+/// So the process keeps `on-request` and only the thread carries the policy;
+/// the thread's reported policy is what is checked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodexApprovalPolicy {
+    OnRequest,
+    Untrusted,
+}
+
+impl CodexApprovalPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OnRequest => "on-request",
+            Self::Untrusted => "untrusted",
+        }
+    }
+    /// The policy for a run from the project's command permission.
+    pub fn for_commands_allowed(allowed: bool) -> Self {
+        if allowed { Self::OnRequest } else { Self::Untrusted }
+    }
 }
 
 /// Requested wire policy only; never OS or provider admission authority.
@@ -266,7 +349,7 @@ fn match_thread_policy(
         || response.reasoning_effort != profile.reasoning_effort
         || response.model_provider != "openai"
         || response.cwd != expected
-        || response.approval_policy != "on-request"
+        || response.approval_policy != profile.approval.as_str()
         || response.approvals_reviewer != "user"
         || !response.instruction_sources.is_empty()
         || !sandbox_matches
@@ -358,6 +441,8 @@ pub struct CatalogModel {
     pub model: String,
     pub is_default: bool,
     pub reasoning_efforts: Vec<String>,
+    /// Display only: the concrete model a provider alias currently maps to.
+    pub resolved_model: Option<String>,
 }
 
 /// Validate every entry, including hidden entries, before returning visible
@@ -420,6 +505,7 @@ pub fn read_model_catalog(input: &BoundedObservation) -> Result<Vec<CatalogModel
                 model: model.model,
                 is_default: model.is_default,
                 reasoning_efforts: efforts.into_iter().collect(),
+                resolved_model: None,
             });
         }
     }
@@ -433,6 +519,30 @@ mod tests {
 
     fn thread() -> Value {
         json!({"thread":{"id":"thread-test"},"model":"test-model","modelProvider":"openai","cwd":test_path!("/managed/snapshot"),"instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"readOnly","networkAccess":false},"reasoningEffort":"medium"})
+    }
+
+    /// 2026-11-27 user decision: with the project's command permission off,
+    /// Codex runs with `untrusted` (asks before every command that is not a
+    /// known safe read); on, it keeps `on-request`. The thread and the
+    /// effective configuration must report exactly the requested policy.
+    #[test]
+    fn the_requested_approval_policy_must_be_the_one_reported() {
+        assert_eq!(CodexApprovalPolicy::for_commands_allowed(true), CodexApprovalPolicy::OnRequest);
+        assert_eq!(CodexApprovalPolicy::for_commands_allowed(false), CodexApprovalPolicy::Untrusted);
+        assert_eq!(CodexApprovalPolicy::Untrusted.as_str(), "untrusted");
+        let cwd = std::path::Path::new(test_path!("/managed/snapshot"));
+        let asks = ExpectedProfile { approval: CodexApprovalPolicy::Untrusted, ..profile() };
+        let mut untrusted = thread();
+        untrusted["approvalPolicy"] = json!("untrusted");
+        assert!(match_read_only_thread(&input(&untrusted), &asks, cwd).is_ok());
+        assert!(match_read_only_thread(&input(&thread()), &asks, cwd).is_err(), "on-request reported for an untrusted run");
+        assert!(match_read_only_thread(&input(&untrusted), &profile(), cwd).is_err(), "untrusted reported for an on-request run");
+        // The process setting stays on-request for both (Codex 0.171 refuses
+        // `untrusted` there); only the thread carries the policy.
+        assert!(match_read_only_config(&input(&config()), &asks).is_ok());
+        let mut untrusted_process = config();
+        untrusted_process["config"]["approval_policy"] = json!("untrusted");
+        assert!(match_read_only_config(&input(&untrusted_process), &asks).is_err());
     }
 
     #[test]
@@ -534,6 +644,7 @@ mod tests {
         ExpectedProfile {
             model: "test-model",
             reasoning_effort: "medium",
+            approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
         }
     }
     fn config() -> Value {
@@ -552,6 +663,7 @@ mod tests {
                 model: "test-model".into(),
                 is_default: false,
                 reasoning_efforts: vec!["medium".into()],
+                resolved_model: None,
             }]
         );
         assert!(!format!("{choices:?}").contains("PRIVATE"));
@@ -563,6 +675,7 @@ mod tests {
         let missing = ExpectedProfile {
             model: "obsolete-model",
             reasoning_effort: "medium",
+            approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
         };
         assert!(match_model_catalog(&input(&catalog()), &missing).is_err());
 
@@ -657,6 +770,7 @@ mod tests {
         let bad = ExpectedProfile {
             model: "",
             reasoning_effort: "medium",
+            approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
         };
         assert!(match_read_only_config(&input(&config()), &bad).is_err());
         assert!(match_model_catalog(&input(&catalog()), &bad).is_err());

@@ -15,18 +15,19 @@ function press(overrides: Record<string, unknown> = {}, disabled = false) {
   return { clicks, prevented };
 }
 
-test("Command/Ctrl Enter use the enabled send button in new and existing chats", () => {
+test("Enter and Command/Ctrl Enter use the enabled send button in new and existing chats", () => {
+  assert.equal(press().clicks, 1);
+  assert.equal(press({ target: { tagName: "INPUT" } }).clicks, 1);
   assert.equal(press({ metaKey: true }).clicks, 1);
   assert.equal(press({ ctrlKey: true }).clicks, 1);
-  assert.equal(press({ ctrlKey: true, target: { tagName: "INPUT" } }).clicks, 1);
-  assert.deepEqual(press({ metaKey: true }, true), { clicks: 0, prevented: true });
+  assert.deepEqual(press({}, true), { clicks: 0, prevented: true });
 });
 
-test("newline, composition, held keys and other controls never submit", () => {
+test("Shift Enter newline, composition, held keys and other controls never submit", () => {
   for (const overrides of [
-    {}, { metaKey: true, nativeEvent: { isComposing: true } },
-    { ctrlKey: true, nativeEvent: { keyCode: 229 } }, { ctrlKey: true, repeat: true },
-    { metaKey: true, shiftKey: true }, { ctrlKey: true, altKey: true },
-    { metaKey: true, target: { tagName: "SELECT" } },
+    { shiftKey: true }, { metaKey: true, shiftKey: true },
+    { nativeEvent: { isComposing: true } }, { nativeEvent: { keyCode: 229 } },
+    { repeat: true }, { altKey: true }, { ctrlKey: true, altKey: true },
+    { target: { tagName: "SELECT" } }, { key: "a" },
   ]) assert.deepEqual(press(overrides), { clicks: 0, prevented: false });
 });

@@ -19,6 +19,16 @@ pub struct ProjectCatalogPage {
 }
 
 impl Storage {
+    /// The live project bound to a folder path; deleted projects carry a marker.
+    pub fn project_id_by_path(&self, path: &str) -> Result<Option<String>, SidecarError> {
+        self.ensure_writes_admitted()?;
+        self.connection.query_row(
+            "SELECT project_id FROM projects WHERE canonical_path = ?1",
+            params![path],
+            |row| row.get(0),
+        ).optional().map_err(catalog_sql)
+    }
+
     pub fn project_catalog_path(&self, project_id: &str) -> Result<Option<String>, SidecarError> {
         self.ensure_writes_admitted()?;
         if !valid_id(project_id) {

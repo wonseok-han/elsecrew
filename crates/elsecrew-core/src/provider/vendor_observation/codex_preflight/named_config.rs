@@ -3,14 +3,87 @@ use super::{ExpectedPermission, ExpectedProfile};
 use serde_json::{json, Value};
 use std::path::Path;
 
+/// `<repo>/.git` when `workspace` is a linked worktree whose `.git` file and
+/// the repository's back link name each other; otherwise none. One answer
+/// for the OS sandbox, the Codex policy and the Claude settings: agents may
+/// read the repository's Git data (user decision 2026-11-18), never write it.
+pub fn linked_source_git(workspace: &Path) -> Option<std::path::PathBuf> {
+    let link = workspace.join(".git");
+    let metadata = std::fs::symlink_metadata(&link).ok()?;
+    if !metadata.is_file() || metadata.len() > 4096 {
+        return None;
+    }
+    let text = std::fs::read_to_string(&link).ok()?;
+    let record = Path::new(text.strip_prefix("gitdir: ")?.strip_suffix('\n')?);
+    let worktrees = record.parent()?;
+    let git_dir = worktrees.parent()?;
+    if worktrees.file_name()? != "worktrees"
+        // `<repo>/.git`, or a plain folder's shadow history `<name>.git`.
+        || !git_dir.file_name()?.to_str()?.ends_with(".git")
+        || git_dir.canonicalize().ok()? != git_dir
+        || workspace.starts_with(git_dir.parent()?)
+        || git_dir.to_str()?.contains(['*', '?', '[', ']', '{', '}'])
+    {
+        return None;
+    }
+    let back = std::fs::read_to_string(record.join("gitdir")).ok()?;
+    (Path::new(back.strip_suffix('\n')?) == link).then(|| git_dir.to_owned())
+}
+
+/// The active Apple developer folder (`xcode-select`'s link) when it is an
+/// installed folder holding `usr/bin/git`. In a task worktree, Codex runs
+/// that git directly: `/usr/bin/git` is an `xcrun` shim that needs the link,
+/// the developer folder and a per-user cache, none of which the sandbox opens.
+pub fn developer_dir() -> Option<std::path::PathBuf> {
+    let dir = std::fs::canonicalize("/private/var/db/xcode_select_link").ok()?;
+    let text = dir.to_str()?;
+    // Command Line Tools, or an Xcode app's own developer folder only.
+    let xcode = dir.parent().filter(|parent| parent.file_name() == Some("Contents".as_ref()))
+        .and_then(Path::parent)
+        .filter(|app| app.extension() == Some("app".as_ref()) && app.parent() == Some(Path::new("/Applications")))
+        .is_some();
+    let installed = dir == Path::new("/Library/Developer/CommandLineTools") || (xcode && dir.file_name() == Some("Developer".as_ref()));
+    if !installed || text.contains(['*', '?', '[', ']', '{', '}', '"', '\\', '(', ')']) || !dir.join("usr/bin/git").is_file() {
+        return None;
+    }
+    Some(dir)
+}
+
+/// The Git directory a project folder uses: its own `.git` folder, or the
+/// directory its small `.git` link file names (a shadow history). Compared
+/// with `linked_source_git` to tie a worktree to its own project.
+pub fn source_git_dir(source: &Path) -> Option<std::path::PathBuf> {
+    let link = source.join(".git");
+    let metadata = std::fs::symlink_metadata(&link).ok()?;
+    if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        return Some(link);
+    }
+    if !metadata.is_file() || metadata.len() > 4096 {
+        return None;
+    }
+    let text = std::fs::read_to_string(&link).ok()?;
+    let target = std::path::PathBuf::from(text.strip_prefix("gitdir: ")?.strip_suffix('\n')?);
+    (target.canonicalize().ok()? == target).then_some(target)
+}
+
 pub fn expected_write_policy(home: &Path, workspace: &Path) -> Value {
-    let (Some(home), Some(workspace)) = (home.to_str(), workspace.to_str()) else {
+    let (Some(home), Some(workspace_text)) = (home.to_str(), workspace.to_str()) else {
         return Value::Null;
     };
-    json!({"filesystem":{
+    let mut policy = json!({"filesystem":{
         ":root":"deny", ":minimal":"read", home:"deny",
-        workspace:{".":"write",".git":"deny",".codex":"deny",".claude":"deny",".agents":"deny"}
-    },"network":{"enabled":false}})
+        workspace_text:{".":"write",".git":"deny",".codex":"deny",".claude":"deny",".agents":"deny"}
+    },"network":{"enabled":false}});
+    // A task worktree: its `.git` link and the repository's Git data are
+    // readable so `git status/diff/log` work; writes stay denied.
+    if let Some(source_git) = linked_source_git(workspace).and_then(|path| path.to_str().map(str::to_owned)) {
+        policy["filesystem"][workspace_text][".git"] = json!("read");
+        policy["filesystem"][source_git] = json!("read");
+        if let Some(developer) = developer_dir().and_then(|path| path.to_str().map(str::to_owned)) {
+            policy["filesystem"][developer] = json!("read");
+        }
+    }
+    policy
 }
 
 pub fn matches_write_policy(value: &Value, home: &Path, workspace: &Path) -> bool {
@@ -19,7 +92,8 @@ pub fn matches_write_policy(value: &Value, home: &Path, workspace: &Path) -> boo
 
 fn matches_policy(value: &Value, expected: &Value) -> bool {
     let mut normalized = value.clone();
-    // Observed 0.159.2 serializer defaults, not an arbitrary null-field bypass.
+    // Observed serializer defaults (0.159.2; `transparent_tcp` since 0.171),
+    // not an arbitrary null-field bypass.
     for (object, keys) in [
         ("", &["description", "extends", "workspace_roots"][..]),
         ("filesystem", &["glob_scan_max_depth"][..]),
@@ -37,6 +111,7 @@ fn matches_policy(value: &Value, expected: &Value) -> bool {
                 "mode",
                 "proxy_url",
                 "socks_url",
+                "transparent_tcp",
                 "unix_sockets",
             ][..],
         ),
@@ -129,6 +204,7 @@ fn check_configuration_layers(
         }
         let mut layer_config = layer["config"].clone();
         if index == 0 {
+            super::strip_unsupervised_tool_flags(&mut layer_config)?;
             super::super::codex_profile_config::strip_isolation_flag(
                 &mut layer_config, &result["config"], &[Path::new(home)],
             )?;
@@ -171,6 +247,9 @@ fn check_configuration_layers(
             return Err("effective extensions");
         }
     }
+    if !super::unsupervised_tools_off(config) {
+        return Err("effective extensions");
+    }
     if !config["sandbox_mode"].is_null() || !config["sandbox_workspace_write"].is_null() {
         return Err("legacy sandbox settings");
     }
@@ -198,6 +277,7 @@ pub(super) fn match_configuration(
             }
         }
     }
+    // The process setting stays on-request; the thread carries the run's policy.
     check_configuration_layers(&result, home, expected, &policy, "on-request")?;
     if !matches_policy(
         &result["config"]["permissions"]["elsecrew-snapshot"],
@@ -206,4 +286,37 @@ pub(super) fn match_configuration(
         return Err("effective filesystem or network policy");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The 0.171 serializer reports the named policy with these explicit
+    /// nulls (seen from `config/read`), including the new `transparent_tcp`.
+    #[test]
+    fn codex_0_171_null_defaults_still_match_and_set_values_do_not() {
+        let home = Path::new("/managed/profile");
+        let workspace = Path::new("/managed/workspace");
+        let mut observed = expected_write_policy(home, workspace);
+        for key in ["description", "extends", "workspace_roots"] {
+            observed[key] = Value::Null;
+        }
+        observed["filesystem"]["glob_scan_max_depth"] = Value::Null;
+        for key in [
+            "proxy_url", "enable_socks5", "transparent_tcp", "socks_url", "enable_socks5_udp",
+            "allow_upstream_proxy", "dangerously_allow_non_loopback_proxy",
+            "dangerously_allow_all_unix_sockets", "mode", "domains", "unix_sockets",
+            "allow_local_binding", "mitm",
+        ] {
+            observed["network"][key] = Value::Null;
+        }
+        assert!(matches_write_policy(&observed, home, workspace));
+        let mut enabled = observed.clone();
+        enabled["network"]["transparent_tcp"] = json!(true);
+        assert!(!matches_write_policy(&enabled, home, workspace));
+        let mut unknown = observed.clone();
+        unknown["network"]["not_a_known_default"] = Value::Null;
+        assert!(!matches_write_policy(&unknown, home, workspace));
+    }
 }

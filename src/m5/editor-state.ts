@@ -11,6 +11,7 @@ import type { FileVersionV1 } from "./contracts/file-v1.ts";
 import type { EventV1 } from "./contracts/protocol-v1.ts";
 import { FileSearchBusyError, searchFileNames, type FileSearchResult } from "./file-search.ts";
 import { validateProjectCatalogResult, type ProjectCatalogRequest, type ProjectCatalogResult } from "./contracts/project-catalog-v1.ts";
+import type { EditorDraftStore } from "./editor-drafts.ts";
 
 export const MAX_RENDERED_TREE_ENTRIES = TREE_PAGE_MAX_ENTRIES_V1;
 export const MAX_DIFF_STREAM_BYTES = 10 * 1024 * 1024;
@@ -116,6 +117,12 @@ interface SnapshotCreationOperation {
 
 export interface ProjectEditorControllerOptions {
   snapshotCreationTimeoutMs?: number;
+  /** Keeps unsaved text across an app restart (see editor-drafts.ts). */
+  drafts?: EditorDraftStore;
+  /** How long typing may pause before the newest text is kept. */
+  draftDelayMs?: number;
+  /** How long workspace writes may pause before the lists are reloaded. */
+  workspaceRefreshDelayMs?: number;
 }
 
 export class ProjectEditorController {
@@ -126,6 +133,15 @@ export class ProjectEditorController {
   readonly #saveGenerations = new Map<string, number>();
   readonly #saveWatchPending = new Set<string>();
   readonly #snapshotCreationTimeoutMs: number;
+  readonly #drafts: EditorDraftStore | null;
+  readonly #draftDelayMs: number;
+  readonly #workspaceRefreshDelayMs: number;
+  #draftTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Whether the open workspace has drafts in the store that came from this
+   * view of it. Only those are ever rewritten or forgotten: drafts kept for a
+   * workspace that is still being opened (or failed to open) stay untouched. */
+  #draftsLive = false;
+  #draftsNotKeptSaid = false;
   #pendingStreamBytes = 0;
   #pendingOverflowUntil = 0;
   #unsubscribers: (() => void)[] = [];
@@ -169,6 +185,9 @@ export class ProjectEditorController {
     const timeout = options.snapshotCreationTimeoutMs ?? DEFAULT_SNAPSHOT_CREATION_TIMEOUT_MS;
     if (!Number.isSafeInteger(timeout) || timeout <= 0) throw new Error("snapshot creation timeout must be a positive safe integer");
     this.#snapshotCreationTimeoutMs = timeout;
+    this.#drafts = options.drafts ?? null;
+    this.#draftDelayMs = options.draftDelayMs ?? 800;
+    this.#workspaceRefreshDelayMs = options.workspaceRefreshDelayMs ?? 500;
   }
 
   start(): void {
@@ -190,6 +209,7 @@ export class ProjectEditorController {
       && ["m5.editorNotice.preparing", "m5.editorNotice.settings", "m5.editorNotice.switching", "m5.editorNotice.protected"].includes(this.#state.noticeKey);
     if (blocked && !this.#actionBlocked) this.#selectionGeneration += 1;
     this.#actionBlocked = blocked;
+    if (!blocked && this.#workspaceRefreshPending) queueMicrotask(() => this.#runWorkspaceRefresh());
     this.#set({ actionBlocked: blocked, ...(clearBlockingNotice ? { notice: null, noticeKey: undefined } : {}), ...(blocked && notice ? typeof notice === "string" ? { notice } : editorNotice(notice.key) : {}) });
   }
 
@@ -199,6 +219,8 @@ export class ProjectEditorController {
   }
 
   dispose(): void {
+    this.#storeDrafts();
+    if (this.#workspaceRefreshTimer !== null) { clearTimeout(this.#workspaceRefreshTimer); this.#workspaceRefreshTimer = null; }
     this.#disposed = true;
     this.#controllerGeneration += 1;
     this.#selectionGeneration += 1;
@@ -299,6 +321,9 @@ export class ProjectEditorController {
     const epoch = ++this.#projectEpoch;
     this.#saveGenerations.clear();
     this.#saveWatchPending.clear();
+    // What was left unsaved in this workspace when the app last closed.
+    let kept: ReturnType<EditorDraftStore["load"]> = null;
+    try { kept = this.#drafts?.load(workspace) ?? null; } catch { /* nothing kept */ }
     this.#set({ workspace, tree: [], treeParent: "", treeNextCursor: null, treePage: 1, treeLoading: false, tabs: [], activePath: null, diffLoading: false, diffSummary: null, diffFile: null, diffText: "", rescanRequired: false, error: null, ...editorNotice("m5.editorNotice.opened") });
     try {
       // Bind in order. A failed tree must not start later diff/watch operations for B.
@@ -308,13 +333,76 @@ export class ProjectEditorController {
       if (!watch.watching && this.#isCurrent(project.id, epoch) && sameWorkspace(this.#state.workspace, workspace)) {
         this.#set({ rescanRequired: true, ...editorNotice("m5.editorNotice.rescan") });
       }
-      return this.#isCurrent(project.id, epoch) && sameWorkspace(this.#state.workspace, workspace);
+      const bound = this.#isCurrent(project.id, epoch) && sameWorkspace(this.#state.workspace, workspace);
+      if (bound && kept?.tabs.length) this.#restoreDrafts(kept);
+      return bound;
     } catch (error) {
       if (this.#isCurrent(project.id, epoch) && sameWorkspace(this.#state.workspace, workspace)) {
         this.#projectEpoch += 1;
-        this.#set({ ...previous, actionBlocked: true, ...editorNotice("m5.editorNotice.failedOpen"), error: errorDetail("m5.editorError.openWorkspace", error) });
+        // Back in the previous workspace; the drafts kept for this one stay kept.
+        // A task begun before its plain folder was recorded anew belongs to
+        // the earlier record: say so plainly instead of a technical failure.
+        const earlier = /does not name the project's repository|record points at another folder/.test(error instanceof Error ? error.message : String(error));
+        this.#set({ ...previous, actionBlocked: true, ...editorNotice("m5.editorNotice.failedOpen"), error: errorDetail(earlier ? "m5.editorError.earlierRecord" : "m5.editorError.openWorkspace", error) });
       }
       return false;
+    }
+  }
+
+  /** Unsaved text comes back exactly as it was left: still unsaved, over the
+   * version it was typed on. Saving it goes through the usual check, so a
+   * file that changed on disk meanwhile is never silently overwritten. */
+  #restoreDrafts(kept: NonNullable<ReturnType<EditorDraftStore["load"]>>): void {
+    const tabs: EditorTab[] = kept.tabs.map(draft => ({
+      path: draft.path, mode: "text", saveState: "dirty", baseVersion: draft.baseVersion,
+      byteLength: draft.byteLength, text: draft.text,
+      ...(draft.baseTextLength === undefined ? {} : { baseTextLength: draft.baseTextLength }),
+      // The file may have changed while the app was closed: only a save or an
+      // explicit reload may call this tab clean again.
+      cleanRestoreAllowed: false,
+    }));
+    const activePath = tabs.some(tab => tab.path === kept.activePath) ? kept.activePath : tabs[0]!.path;
+    this.#set({ tabs, activePath, panel: "editor", ...editorNotice("m5.editorNotice.draftsRestored") });
+  }
+
+  /** Keeps the newest unsaved text now (the window is closing or hidden). */
+  flushDrafts(): void {
+    this.#storeDrafts();
+  }
+
+  #storeDrafts(): void {
+    if (this.#draftTimer !== null) { clearTimeout(this.#draftTimer); this.#draftTimer = null; }
+    const workspace = this.#state.workspace;
+    if (!this.#drafts || this.#disposed || !workspace) return;
+    const tabs = this.#state.tabs.filter(tab => tab.mode === "text" && tab.saveState !== "clean");
+    // Nothing unsaved here and nothing of this view in the store: leave the
+    // store alone (it may hold drafts this workspace has yet to get back).
+    if (!tabs.length && !this.#draftsLive) return;
+    this.#draftsLive = tabs.length > 0;
+    try {
+      const kept = this.#drafts.save(workspace, tabs.length ? {
+        activePath: this.#state.activePath,
+        tabs: tabs.map(tab => ({ path: tab.path, text: tab.text, baseVersion: tab.baseVersion, byteLength: tab.byteLength,
+          ...(tab.baseTextLength === undefined ? {} : { baseTextLength: tab.baseTextLength }) })),
+      } : null);
+      // Not kept (no room, or storage refused): said once, then again after a
+      // keep worked. Kept drafts of other tasks are never given up for it.
+      if (!kept && tabs.length && !this.#draftsNotKeptSaid) {
+        this.#draftsNotKeptSaid = true;
+        queueMicrotask(() => { if (!this.#disposed) this.#setNotice("m5.editorNotice.draftsNotKept"); });
+      } else if (kept) this.#draftsNotKeptSaid = false;
+    } catch { /* Keeping a draft is best effort; editing goes on. */ }
+  }
+
+  /** A tab becoming unsaved, saved or closed is kept at once; plain typing
+   * after a short pause, so each keystroke does not rewrite the whole draft. */
+  #noteDraftChange(before: EditorSnapshot): void {
+    const unsaved = (state: EditorSnapshot) => state.tabs.filter(tab => tab.mode === "text" && tab.saveState !== "clean")
+      .map(tab => `${tab.path}\u0000${tab.saveState}`).join("\u0001");
+    const now = unsaved(this.#state);
+    if (now !== unsaved(before)) this.#storeDrafts();
+    else if (now && this.#draftTimer === null) {
+      this.#draftTimer = setTimeout(() => { this.#draftTimer = null; this.#storeDrafts(); }, this.#draftDelayMs);
     }
   }
 
@@ -716,9 +804,46 @@ export class ProjectEditorController {
     }
   }
 
+  /**
+   * The view can be left with its unsaved text kept for its task (ADE
+   * multi-project P1): every unsaved tab is plain edited text of a task's
+   * workspace, kept the way an app that closes keeps it, and given back when
+   * the task opens again. A tab still saving or in conflict stays.
+   */
+  canLeaveKeepingDrafts(): boolean {
+    if (this.canLeaveProject()) return true;
+    return Boolean(this.#drafts && this.#state.workspace)
+      && this.#state.tabs.every(tab => tab.saveState === "clean" || (tab.saveState === "dirty" && tab.mode === "text"));
+  }
+
+  /** Before the view lets go of anything (its file watch, PR #18 review I1):
+   * true when it can be left, its unsaved text now kept for its task. */
+  prepareLeaveKeepingDrafts(): boolean {
+    if (this.canLeaveProject()) return true;
+    return this.canLeaveKeepingDrafts() && this.#draftsKept();
+  }
+
+  /** Whether the store now holds exactly this view's unsaved text. */
+  #draftsKept(): boolean {
+    const workspace = this.#state.workspace;
+    if (!this.#drafts || !workspace) return false;
+    this.#storeDrafts();
+    let kept: ReturnType<EditorDraftStore["load"]> = null;
+    try { kept = this.#drafts.load(workspace); } catch { return false; }
+    const unsaved = this.#state.tabs.filter(tab => tab.saveState !== "clean");
+    return unsaved.every(tab => kept?.tabs.some(draft => draft.path === tab.path && draft.text === tab.text));
+  }
+
   /** Leave the view without abandoning the durable snapshot or its chat. */
-  leaveProjectView(): boolean {
-    if (this.#disposed || this.#actionBlocked || this.#snapshotCreation || this.#snapshotCreationBlocked || !this.canLeaveProject()) return false;
+  /** `discardDrafts` closes even with unsaved edits or pending work (list removal). */
+  /** `keepDrafts` leaves with unsaved text kept for its task, once the store has it. */
+  leaveProjectView(discardDrafts = false, keepDrafts = false): boolean {
+    if (this.#disposed) return false;
+    if (!discardDrafts) {
+      if (this.#actionBlocked || this.#snapshotCreation || this.#snapshotCreationBlocked) return false;
+      if (!this.canLeaveProject() && !(keepDrafts && this.canLeaveKeepingDrafts() && this.#draftsKept())) return false;
+    }
+    const left = this.#state.workspace;
     this.#selectionGeneration++;
     this.#projectEpoch++;
     this.#saveGenerations.clear();
@@ -727,6 +852,8 @@ export class ProjectEditorController {
       treePage: 1, treeLoading: false, tabs: [], activePath: null, diffLoading: false, diffSummary: null,
       diffFile: null, diffText: "", rescanRequired: false, error: null,
       ...editorNotice("m5.editorNotice.left") });
+    // Discarding is the person's choice: nothing of it comes back later.
+    if (discardDrafts && left) { try { this.#drafts?.save(left, null); } catch { /* nothing kept */ } }
     return true;
   }
 
@@ -792,6 +919,22 @@ export class ProjectEditorController {
       if (!this.#isCurrent(project.id, epoch) || generation !== this.#diffGeneration) return;
       this.#setError("m5.editorError.diff", error);
     }
+  }
+
+  /** One file's comparison for the all-changes view, without changing what
+   * the editor shows. Null when the project or task changed meanwhile. */
+  async readDiff(path: string): Promise<{ descriptor: DiffFileDescriptorV1; text: string } | null> {
+    const project = this.#state.project;
+    if (!project || this.#actionBlocked) return null;
+    const epoch = this.#projectEpoch;
+    const workspace = this.#state.workspace;
+    const descriptor = workspace ? await this.#workspaceMethods()!.getWorkspaceDiffFile({ ...workspace, path }) : await this.#bridge.getDiffFile({ projectId: project.id, path });
+    if (!this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace)) return null;
+    const text = descriptor.stream
+      ? await this.#awaitStream(descriptor.stream.streamId, descriptor.byteLength, MAX_DIFF_STREAM_BYTES)
+      : "";
+    if (!this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace)) return null;
+    return { descriptor, text };
   }
 
   selectPanel(panel: WorkbenchPanel): void {
@@ -921,6 +1064,28 @@ export class ProjectEditorController {
       }
     }
     if (event.event === "diff.changed") void this.refreshChanges();
+    // An agent (or anything else) writing in the workspace: the watcher only
+    // reports changed files, so bring the change list and the file list up to
+    // date once a burst of writes has settled.
+    else if (event.event === "file.changed" && event.paths.length) this.#scheduleWorkspaceRefresh();
+  }
+
+  #workspaceRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  #workspaceRefreshPending = false;
+  #scheduleWorkspaceRefresh(): void {
+    if (this.#workspaceRefreshTimer !== null || this.#disposed) return;
+    this.#workspaceRefreshTimer = setTimeout(() => {
+      this.#workspaceRefreshTimer = null;
+      this.#runWorkspaceRefresh();
+    }, this.#workspaceRefreshDelayMs);
+  }
+  #runWorkspaceRefresh(): void {
+    if (this.#disposed) return;
+    // While actions are blocked the refresh waits for them to resume.
+    if (this.#actionBlocked) { this.#workspaceRefreshPending = true; return; }
+    this.#workspaceRefreshPending = false;
+    void this.refreshChanges();
+    void this.loadTree(this.#state.treeParent);
   }
 
   async #checkCleanFileChange(tab: EditorTab): Promise<void> {
@@ -1073,7 +1238,14 @@ export class ProjectEditorController {
     if (update.diffFile === null || (update.panel === "editor" && update.diffVisible === undefined)) {
       update = { ...update, diffVisible: false };
     }
+    const before = this.#state;
+    // Leaving a workspace settles what is kept for it before its tabs go.
+    if (this.#drafts && "workspace" in update && !sameWorkspace(update.workspace, before.workspace)) {
+      this.#storeDrafts();
+      this.#draftsLive = false;
+    }
     this.#state = { ...this.#state, ...update, ...("notice" in update ? { noticeKey: update.notice ? update.noticeKey : undefined } : {}), ...(update.panel ? { panelRequest: { panel: update.panel } } : {}) };
+    if (this.#drafts && ("tabs" in update || "activePath" in update)) this.#noteDraftChange(before);
     for (const listener of this.#listeners) listener();
   }
 }

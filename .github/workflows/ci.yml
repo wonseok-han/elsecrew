@@ -56,12 +56,28 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
 
       - name: 기준선 기계 검증 하네스
         run: pnpm test:harness
 
+      # 렌더러 마운트 스모크(가짜 bridge로 작업대 전체 흐름)는 g4·g6 게이트에만 있어
+      # 한동안 깨진 채 아무도 돌리지 않았다(2026-11-26). macOS에서만 매번 돌린다.
+      # pnpm은 electron postinstall을 막으므로 바이너리를 직접 받는다.
+      - name: 렌더러 마운트 스모크 (Electron, macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          node node_modules/electron/install.js
+          pnpm m5:test:editor
+
+      # 결과 미리보기의 실제 앱 검사(격리 프로브 m5:test:preview-isolation, 화면 스모크
+      # m5:test:preview-ui, 기본값 확인 scripts/m5-preview-default-check.mjs)는 CI에서
+      # 돌리지 않는다. 화면이 있는 로그인 세션에서 실제 창·네이티브 뷰·포커스를 다루고,
+      # 디버그 sidecar 빌드와 수 분의 실행이 필요하다. 미리보기는 macOS에서만 기본으로
+      # 켜지고(Windows는 꺼짐, PR #9 검토 I2·I5) 세 검사도 macOS 전용이라 Windows에서는
+      # 종료 코드 2(미실행)로 끝난다. 결과는 사람이 macOS에서 돌려 PR에 증거로 남긴다.
+      # 응답 시간 진단(m5:measure:latency)도 CI에서 돌리지 않는다: 실제 창에서 파일 트리를
+      # 눌러 여는 시간을 재고, 디버그 sidecar와 약 10분이 필요하며 macOS 전용이다. G6 게이트가
+      # 아니다(fake 공급자에는 승인 큐가 없음, PR #15 검토 B1).
       - name: 하네스 증거 업로드
         if: always()
         uses: actions/upload-artifact@v4
@@ -69,82 +85,3 @@ jobs:
           name: baseline-harness-${{ matrix.os }}
           path: .artifacts/m5-harness/*.json
           if-no-files-found: warn
-
-      # 실제 인스톨러를 내려받아 격리 HOME에 무인 설치하는 E2E (네트워크 사용)
-      # Windows는 일회용 러너라 레지스트리 PATH 반영까지 실제로 검증한다 (M0 가정 4)
-      - name: 설치 파이프라인 격리 E2E
-        run: cargo test --manifest-path src-tauri/Cargo.toml isolated_install -- --ignored --nocapture
-
-  # Windows 번들 빌드 검증 — 로컬(맥)에서 못 하는 것을 CI가 대신한다 (M0 가정 4)
-  build-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - name: Tauri Windows 빌드 (NSIS 인스톨러)
-        # createUpdaterArtifacts가 켜져 있어 tauri build가 업데이터 서명을 강제한다.
-        # (public key만 있고 private key가 없으면 빌드 실패)
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: pnpm tauri build
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-installer
-          path: src-tauri/target/release/bundle/nsis/*.exe
-          if-no-files-found: error
-
-  # macOS 설치 파일(.dmg) 빌드 — Actions에서 내려받아 설치할 수 있게 한다.
-  # 서명 없이 빌드하므로 다운로드 시 "확인되지 않은 개발자" 경고가 뜬다(정상).
-  build-macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - name: Tauri macOS 빌드 (.dmg + .app)
-        # createUpdaterArtifacts가 켜져 있어 tauri build가 업데이터 서명을 강제한다.
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: pnpm tauri build
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos-installer
-          path: src-tauri/target/release/bundle/dmg/*.dmg
-          if-no-files-found: error

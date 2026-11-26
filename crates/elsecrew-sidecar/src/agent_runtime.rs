@@ -61,6 +61,9 @@ pub(crate) mod preparation;
 mod reap;
 const RECOVERY_RESERVATION_FIELD: &str = "recovery_id_reservation";
 const RECOVERY_INTENT_FIELD: &str = "recovery_resolution_intent";
+/// How many processes a termination or recovery record may list (the
+/// contract's bound, and the bound of a provider hold's own record).
+pub(crate) const RECORDED_PROCESSES_MAX: usize = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProviderMode {
@@ -78,9 +81,23 @@ pub(crate) enum FakeScenario {
     #[cfg_attr(not(test), allow(dead_code))]
     OrchestratorDelegate,
     #[cfg_attr(not(test), allow(dead_code))]
+    OrchestratorDelegateCustom,
+    #[cfg_attr(not(test), allow(dead_code))]
     OrchestratorFinal,
     #[cfg_attr(not(test), allow(dead_code))]
     OrchestratorWorker,
+    #[cfg_attr(not(test), allow(dead_code))]
+    OrchestratorDelegatePlanning,
+    #[cfg_attr(not(test), allow(dead_code))]
+    OrchestratorPlanner,
+    /// Keeps writing one file in its workspace for about three seconds (ADE
+    /// multi-project P2′: other tasks' writes go on meanwhile).
+    #[cfg_attr(not(test), allow(dead_code))]
+    BusyWriter,
+    /// A read-only member (a coordinator) that works for about three seconds
+    /// (ADE multi-project P3′: another team waits its turn meanwhile).
+    #[cfg_attr(not(test), allow(dead_code))]
+    BusyReader,
     #[cfg_attr(not(test), allow(dead_code))]
     NoOutput,
     #[cfg_attr(not(test), allow(dead_code))]
@@ -133,6 +150,9 @@ pub(crate) enum FakeScenario {
     #[cfg_attr(not(test), allow(dead_code))]
     LongStream,
     PacedLongStream,
+    /// The paced stream with a read-only handshake: a team lead (coordinator)
+    /// run for latency probes (scripts/m5-latency-probe.cjs).
+    PacedLongStreamReadOnly,
     ProviderTerminalFailed,
     ProviderTerminalRecoveryRequired,
 }
@@ -253,11 +273,32 @@ impl AgentRuntime {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn recover_unclean_runs(
         &self,
         storage: &mut Storage,
         projects: &mut ProjectManager,
     ) -> Result<(), SidecarError> {
+        self.recover_unclean_runs_until(storage, projects, &std::sync::atomic::AtomicBool::new(false))
+    }
+
+    /// `cancelled` is the start being given up (the app is closing): nothing
+    /// more is waited for or stopped, and the caller reports the cancellation.
+    pub(crate) fn recover_unclean_runs_until(
+        &self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), SidecarError> {
+        // Runs this ledger calls unfinished belong to an engine that registered
+        // on it. If such an engine still runs, this is a copy of its app data:
+        // nothing here may stop its processes or settle its runs. Decided once,
+        // and only when a run actually needs it.
+        let mut decided: Option<bool> = None;
+        let mut may_settle = |storage: &Storage| {
+            !cancelled.load(std::sync::atomic::Ordering::Acquire)
+                && *decided.get_or_insert_with(|| !previous_engine_still_runs(storage, cancelled))
+        };
         for projection in storage.projection_records("run")? {
             if projection.get("source_kind").and_then(Value::as_str) != Some(SOURCE_KIND) {
                 continue;
@@ -276,12 +317,26 @@ impl AgentRuntime {
             if projection
                 .get("recovery")
                 .is_some_and(|value| !value.is_null())
-                || !projection
-                    .get("state")
-                    .and_then(Value::as_str)
-                    .is_some_and(|state| {
-                        ["preparing", "running", "cancelling", "recoveryRequired"].contains(&state)
-                    })
+            {
+                // A stop that could not be confirmed earlier is settled the
+                // same way once the proof holds; its workspace is not given up.
+                if projection["recovery"]["state"] == "unresolved"
+                    && !(may_settle(storage) && settle_interrupted_run(storage, projects, &projection))
+                {
+                    // Still unresolved: its workspace stays marked, also when an
+                    // earlier attempt stopped right after lifting the mark.
+                    if let Ok(address) = address_from_chat(&projection["record"]) {
+                        let _ = projects.workspace_restore_recovery_required(&address);
+                    }
+                }
+                continue;
+            }
+            if !projection
+                .get("state")
+                .and_then(Value::as_str)
+                .is_some_and(|state| {
+                    ["preparing", "running", "cancelling", "recoveryRequired"].contains(&state)
+                })
             {
                 continue;
             }
@@ -312,16 +367,26 @@ impl AgentRuntime {
             let profile: AgentResolvedProfileV1 =
                 serde_json::from_value(projection["record"]["selectedProfile"].clone())
                     .map_err(|error| SidecarError::new("recoveryInvalid", error.to_string()))?;
+            // A record lists at most RECORDED_PROCESSES_MAX processes; a run
+            // that saw more keeps them all in its internal identities.
             let tracked = projection["barrier"]["trackedProcesses"]
                 .as_array()
                 .cloned()
                 .unwrap_or_default()
                 .into_iter()
+                .take(RECORDED_PROCESSES_MAX)
                 .map(|mut value| {
                     value["observedGone"] = Value::Bool(false);
                     value
                 })
                 .collect::<Vec<_>>();
+            // The app closed (or the engine stopped) while this run was going:
+            // the work was interrupted, not reset. End the run as canceled, like
+            // the stop button, and keep its task and workspace in use. Any doubt
+            // keeps the explicit recovery below.
+            if may_settle(storage) && settle_interrupted_run(storage, projects, &projection) {
+                continue;
+            }
             let run = agent_run_record(
                 run_id,
                 &chat,
@@ -446,7 +511,7 @@ impl AgentRuntime {
                         .ok_or_else(|| {
                             SidecarError::new("projectionInvalid", "durable run identity missing")
                         })?;
-                    actual_run_projection(storage, run_id)
+                    validate_actual_run_projection(storage, run_id, projection.clone())
                         .map_err(|error| SidecarError::new("projectionInvalid", error.detail))?;
                 } else {
                     validate_projection_public_budget(&projection)
@@ -487,6 +552,39 @@ impl AgentRuntime {
         self.active.contains_key(run_id)
     }
 
+    /// The tasks whose workspace a run started, starting or settling may
+    /// still write (ADE multi-project P2′). `None` when something in flight
+    /// cannot be tied to a task — a failed provider check still being cleaned
+    /// up — and every task then counts as busy.
+    pub(crate) fn run_chats(&self) -> Option<BTreeSet<String>> {
+        #[allow(unused_mut)]
+        let mut chats: BTreeSet<String> = self.active.values().map(|run| run.identity.chat_id.clone()).collect();
+        #[cfg(target_os = "macos")]
+        {
+            if !self.discovery_cleanup.is_empty() {
+                return None;
+            }
+            chats.extend(self.native.values().map(|run| run.identity.chat_id.clone()));
+            chats.extend(self.pending_claude_starts.values().map(|start| start.chat_id().to_owned()));
+            chats.extend(self.failed_starts.values().map(|failed| failed.chat_id().to_owned()));
+        }
+        Some(chats)
+    }
+
+    /// Runs of one provider started, starting or settling (ADE multi-project P3′).
+    pub(crate) fn live_runs_of(&self, runtime: &str) -> usize {
+        #[allow(unused_mut)]
+        let mut count = self.active.values().filter(|run| run.profile.runtime == runtime).count();
+        #[cfg(target_os = "macos")]
+        {
+            count += self.native.values().filter(|run| run.runtime() == runtime).count();
+            if runtime == "claude-code" {
+                count += self.pending_claude_starts.len();
+            }
+        }
+        count
+    }
+
     pub(crate) fn owned_run_ids(&self) -> Vec<String> {
         let ids = self.active.keys();
         #[cfg(target_os = "macos")]
@@ -516,7 +614,7 @@ impl AgentRuntime {
             || (self.provider == ProviderMode::FakeExact
                 && matches!(
                     self.scenario,
-                    FakeScenario::LongStream | FakeScenario::PacedLongStream | FakeScenario::OrchestratorDelegate | FakeScenario::OrchestratorFinal
+                    FakeScenario::LongStream | FakeScenario::PacedLongStream | FakeScenario::PacedLongStreamReadOnly | FakeScenario::OrchestratorDelegate | FakeScenario::OrchestratorDelegateCustom | FakeScenario::OrchestratorFinal
                 ))
     }
 
@@ -1743,6 +1841,10 @@ impl AgentRuntime {
     ) -> Result<Value, ProjectFailure> {
         validate_agent_adapter_payload_v1("recoveryResolveRequest", request)
             .map_err(contract_failure)?;
+        // A run this engine still owns (still closing) is not a stopped run.
+        if request["runId"].as_str().is_some_and(|run_id| self.has_active_run(run_id)) {
+            return Err(ProjectFailure::recovery("the run is still owned by this engine"));
+        }
         let before = self.inspect_recovery(storage, &json!({
             "recoveryId":request["recoveryId"],"chatId":request["chatId"],"taskId":request["taskId"],
             "projectId":request["projectId"],"worktreeId":request["worktreeId"],
@@ -1777,7 +1879,8 @@ impl AgentRuntime {
                 pid: private["pid"].as_u64().unwrap_or(0) as u32,
                 start_us: private["start_us"].as_i64().unwrap_or(0),
             };
-            let gone = matches!(SystemProcTable.probe(identity), ProbeResult::Gone);
+            // The run's engine is gone: a reused process ID proves its end.
+            let gone = matches!(elsecrew_core::proctree::SettledProcTable.probe(identity), ProbeResult::Gone);
             public["observedGone"] = Value::Bool(gone);
             all_gone &= gone;
         }
@@ -2234,13 +2337,7 @@ impl AgentRuntime {
                 "recoveryRequired"
             } else {
                 match requested_state {
-                    "succeeded" => {
-                        if matches!(active.profile.role_id.as_str(), "coordinator" | "design" | "planning") {
-                            "waitingForUser"
-                        } else {
-                            "reviewReady"
-                        }
-                    }
+                    "succeeded" => succeeded_chat_state(&active.profile.role_id, &active.profile.permission),
                     "canceled" => "canceled",
                     _ => "needsAttention",
                 }
@@ -2459,8 +2556,14 @@ fn reconcile_resolved_catalog(
             ));
         }
     }
+    if project.get("canonical_path").and_then(Value::as_str)
+        != elsecrew_protocol::project_v1::manifest_source_root(&manifest)
+    {
+        return Err(ProjectFailure::manifest(
+            "resolved catalog snapshot identity differs",
+        ));
+    }
     for (field, manifest_field) in [
-        ("canonical_path", "canonicalGitRoot"),
         ("base_commit", "baseCommit"),
         ("base_tree", "baseTree"),
         ("object_format", "objectFormat"),
@@ -2922,7 +3025,12 @@ fn active_run_limit_reached(active_runs: usize) -> bool {
     active_runs >= AGENT_ACTIVE_RUNS_PER_SESSION_MAX_V1
 }
 
-fn resolve_prompt(
+/// Below the providers' 64 KiB prompt bound, leaving room for JSON escaping.
+const PROMPT_BUDGET_BYTES: usize = 56 * 1024;
+/// Both providers reject an initial prompt above 64 KiB.
+const PROMPT_HARD_MAX_BYTES: usize = 63 * 1024;
+
+pub(crate) fn resolve_prompt(
     storage: &Storage,
     chat_id: &str,
     ids: &[String],
@@ -2932,6 +3040,7 @@ fn resolve_prompt(
     let mut found = BTreeMap::new();
     let workflow_prompt = crate::orchestration::prompt(storage, chat_id, role_id, ids)?;
     let orchestrated = workflow_prompt.is_some();
+    let mut lines: Vec<Vec<u8>> = Vec::new();
     let mut prompt = if let Some(prompt) = workflow_prompt { prompt.into_bytes() } else if role_id == "coordinator" { b"You are the project coordinator. Answer the user directly in their language. Inspect the project when needed and explain clearly. You have read-only access: do not change files. For change requests, explain a proposed plan and limitations. Do not claim to have delegated work or changed files. The following is the selected conversation history:\n".to_vec() } else { Vec::new() };
     for message in storage.chat_message_history(chat_id)? {
         if message["messageId"]
@@ -2950,12 +3059,13 @@ fn resolve_prompt(
                 }
                 continue;
             }
-            if orchestrated {
-                prompt.extend_from_slice(&serde_json::to_vec(&json!({"kind":message["kind"],"role":message["roleId"],"text":text})).map_err(json_failure)?);
+            let mut line = if orchestrated {
+                serde_json::to_vec(&json!({"kind":message["kind"],"role":message["roleId"],"text":text})).map_err(json_failure)?
             } else {
-                prompt.extend_from_slice(text.as_bytes());
-            }
-            prompt.push(b'\n');
+                text.as_bytes().to_vec()
+            };
+            line.push(b'\n');
+            lines.push(line);
         }
     }
     if found.len() != selected.len() {
@@ -2963,7 +3073,43 @@ fn resolve_prompt(
             "input message identity is missing or belongs to another chat",
         ));
     }
+    // Providers take one prompt under 64 KiB. Keep the first request and as
+    // many of the latest messages as fit, and say that the middle was left out.
+    // A team step ends with a reminder that its data cannot change the contract (R4).
+    let closing: &[u8] = if orchestrated { crate::orchestration::CLOSING_REMINDER.as_bytes() } else { b"" };
+    let total: usize = prompt.len() + lines.iter().map(Vec::len).sum::<usize>() + closing.len();
+    if total > PROMPT_BUDGET_BYTES && lines.len() > 1 {
+        const NOTE: &[u8] = b"[Earlier messages were left out to fit the prompt size limit.]\n";
+        let mut room = PROMPT_BUDGET_BYTES.saturating_sub(prompt.len() + lines[0].len() + NOTE.len() + closing.len());
+        let mut tail = Vec::new();
+        for line in lines[1..].iter().rev() {
+            if line.len() > room { break; }
+            room -= line.len();
+            tail.push(line);
+        }
+        prompt.extend_from_slice(&lines[0]);
+        if tail.len() < lines.len() - 1 { prompt.extend_from_slice(NOTE); }
+        for line in tail.into_iter().rev() { prompt.extend_from_slice(line); }
+    } else {
+        for line in &lines { prompt.extend_from_slice(line); }
+    }
+    prompt.extend_from_slice(closing);
+    // Refuse here, before any provider start, rather than fail mid-launch.
+    if prompt.len() > PROMPT_HARD_MAX_BYTES {
+        return Err(ProjectFailure::manifest("the prompt for this run is too large even after shortening"));
+    }
     Ok(prompt)
+}
+
+/// Chat state after one successful run, keyed by permission rather than role name:
+/// a writer (or the legacy `review` verification stage) leaves changes to review,
+/// every other read-only role returns to the user. Team workflows override this
+/// with their aggregate `changed` flag when they complete.
+pub(crate) fn succeeded_chat_state(role_id: &str, permission: &str) -> &'static str {
+    match elsecrew_protocol::run_recovery_v1::g5_stage_for_profile_v3(role_id, permission) {
+        "planning" => "waitingForUser",
+        _ => "reviewReady",
+    }
 }
 
 fn agent_run_record(
@@ -2975,12 +3121,7 @@ fn agent_run_record(
     termination: Option<&str>,
     created: &str,
 ) -> Result<Value, ProjectFailure> {
-    let stage = match profile.role_id.as_str() {
-        "coordinator" | "design" | "planning" => "planning",
-        "coding" => "implementing",
-        "review" => "verifying",
-        _ => return Err(ProjectFailure::manifest("unknown agent role")),
-    };
+    let stage = elsecrew_protocol::run_recovery_v1::g5_stage_for_profile_v3(&profile.role_id, &profile.permission);
     let value = json!({"schemaVersion":1,"runId":run_id,"chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"selectedProfile":profile,"source":"actualAgent","capabilityFingerprint":fingerprint,"state":state,"stage":stage,"terminationOutcome":termination,"createdAt":created,"updatedAt":now()});
     validate_agent_adapter_payload_v1("runRecord", &value).map_err(contract_failure)?;
     Ok(value)
@@ -3113,6 +3254,22 @@ fn actual_run_projection_and_head(
     let value = storage
         .projection_record("run", run_id)?
         .ok_or_else(|| ProjectFailure::manifest("agent run is missing"))?;
+    validate_actual_run_projection(storage, run_id, value)
+}
+
+/// The checks of `actual_run_projection_and_head` on a run projection the
+/// caller already read (startup reads them all once instead of once per run).
+fn validate_actual_run_projection(
+    storage: &Storage,
+    run_id: &str,
+    value: Map<String, Value>,
+) -> Result<
+    (
+        Map<String, Value>,
+        Option<elsecrew_protocol::agent_adapter_v1::output_pages::OutputHead>,
+    ),
+    ProjectFailure,
+> {
     if value.get("source_kind").and_then(Value::as_str) != Some(SOURCE_KIND) {
         return Err(ProjectFailure::manifest(
             "run is not an actual-agent ledger record",
@@ -3198,6 +3355,305 @@ fn reserved_recovery_id(projection: &Map<String, Value>) -> Result<String, Proje
         ));
     }
     Ok(recovery_id.to_string())
+}
+
+/// Ends a run that stopped without its engine (the app was closed, or the
+/// engine failed) as canceled and keeps its task and workspace in use:
+/// quitting interrupts the work, it never resets it. Agent processes the dead
+/// engine left behind are stopped first, like any canceled run. A stop that
+/// could not be confirmed earlier (an unresolved recovery) is settled the same
+/// way once the proof holds. False whenever anything stays uncertain: no
+/// recorded process, a process tree whose end cannot be confirmed, a workspace
+/// or record that is not exactly the run's. The explicit recovery then remains.
+fn settle_interrupted_run(
+    storage: &mut Storage,
+    projects: &mut ProjectManager,
+    projection: &Map<String, Value>,
+) -> bool {
+    #[cfg(test)]
+    if SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.get()) {
+        return false;
+    }
+    let Some((address, upserts, lifted)) = interrupted_run_settlement(storage, projects, projection)
+    else {
+        return false;
+    };
+    let chat_id = address.chat_id.clone();
+    if storage.upsert_projection_records_atomic(upserts).is_err() {
+        if lifted {
+            let _ = projects.workspace_restore_recovery_required(&address);
+        }
+        return false;
+    }
+    // Tell the person in the task itself (unless they deleted it); a missing
+    // note changes nothing.
+    let deleted = storage.projection_record("project", &address.project_id).ok().flatten().is_some_and(|project| {
+        crate::project::project_deletion::is_deleted(&project)
+            || crate::project::project_deletion::deleted_chat(&project, &chat_id)
+    });
+    if !deleted {
+        let _ = crate::orchestration::notice(storage, &chat_id, INTERRUPTED_RUN_NOTICE);
+    }
+    true
+}
+
+/// The identities recorded in the sign-in hold bound to this run, when that
+/// hold exists, is free (no live owner) and names exactly this run.
+#[cfg(target_os = "macos")]
+fn hold_identities(storage: &Storage, projection: &Map<String, Value>) -> Option<BTreeSet<ProcIdentity>> {
+    let binding = crate::provider_run_binding::RunFenceBinding::from_value(projection.get("provider_run_fence")?).ok()?;
+    match projection["record"]["selectedProfile"]["runtime"].as_str()? {
+        "claude-code" => {
+            let profile = crate::provider_claude_profile::ClaudeProfileBinding::from_storage(storage).ok()?;
+            crate::provider_login_process::bound_run_identities(&profile, &binding).ok()
+        }
+        "codex" => {
+            let profile = crate::provider_profile::CodexProfileBinding::from_storage(storage).ok()?;
+            crate::provider_login_process::bound_run_identities(&profile, &binding).ok()
+        }
+        _ => None,
+    }
+}
+#[cfg(not(target_os = "macos"))]
+fn hold_identities(_: &Storage, _: &Map<String, Value>) -> Option<BTreeSet<ProcIdentity>> {
+    None
+}
+
+/// How long a start waits for the previous engine to finish going down. An
+/// engine whose app was closed or killed still stops its agents (TERM, then
+/// KILL: up to about 8 seconds a run) after it has let go of the app data.
+const PREVIOUS_ENGINE_EXIT_WAIT: Duration = Duration::from_millis(if cfg!(test) { 300 } else { 12_000 });
+
+/// Whether an engine that registered on this ledger without a clean shutdown
+/// is still running after the time an engine needs to go down. The app data's
+/// own lock rules a working engine out for the data itself, but not for a
+/// copy of it opened on the same computer: the unfinished runs in a copy
+/// belong to that live engine, and nothing here may touch them. Where the
+/// processes cannot be listed at all, assume one runs (and do not wait).
+fn previous_engine_still_runs(storage: &Storage, cancelled: &std::sync::atomic::AtomicBool) -> bool {
+    let Ok(engines) = storage.unclean_engine_processes() else {
+        return true;
+    };
+    let engines: Vec<(u32, Option<i64>)> = engines
+        .into_iter()
+        .filter(|(pid, _)| *pid != std::process::id())
+        .map(|(pid, registered_at)| {
+            (pid, chrono::DateTime::parse_from_rfc3339(&registered_at).map(|at| at.timestamp_micros()).ok())
+        })
+        .collect();
+    if engines.is_empty() {
+        return false;
+    }
+    let deadline = Instant::now() + PREVIOUS_ENGINE_EXIT_WAIT;
+    loop {
+        let Ok(entries) = SystemProcTable.list() else {
+            return true;
+        };
+        if !entries.iter().any(|entry| engines.iter().any(|(pid, registered_us)| is_that_engine(entry, *pid, *registered_us))) {
+            return false;
+        }
+        if Instant::now() >= deadline || cancelled.load(std::sync::atomic::Ordering::Acquire) {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// A live process is the engine a record names only under that process ID,
+/// with the engine's name, and started no later than the record was written
+/// (a second of slack covers its whole-second timestamp). A process ID reused
+/// by anything else is not it.
+fn is_that_engine(entry: &elsecrew_core::proctree::ProcEntry, pid: u32, registered_us: Option<i64>) -> bool {
+    entry.identity.pid == pid
+        && entry.comm.starts_with("elsecrew")
+        && registered_us.is_none_or(|at| entry.identity.start_us <= at + 1_000_000)
+}
+
+#[cfg(test)]
+mod previous_engine_tests {
+    use super::is_that_engine;
+    use elsecrew_core::proctree::{ProcEntry, ProcIdentity};
+
+    #[test]
+    fn a_reused_process_id_is_not_the_engine_a_record_names() {
+        let registered = 1_800_000_000_000_000i64;
+        let process = |pid, start_us, comm: &str| ProcEntry { identity: ProcIdentity { pid, start_us }, ppid: 1, comm: comm.into() };
+        assert!(is_that_engine(&process(700, registered - 3_000_000, "elsecrew-sideca"), 700, Some(registered)));
+        assert!(is_that_engine(&process(700, registered + 900_000, "elsecrew-sideca"), 700, Some(registered)));
+        // Another process ID, another program, or something started afterwards.
+        assert!(!is_that_engine(&process(701, registered - 3_000_000, "elsecrew-sideca"), 700, Some(registered)));
+        assert!(!is_that_engine(&process(700, registered - 3_000_000, "node"), 700, Some(registered)));
+        assert!(!is_that_engine(&process(700, registered - 3_000_000, "Elsecrew"), 700, Some(registered)));
+        assert!(!is_that_engine(&process(700, registered + 5_000_000, "elsecrew-sideca"), 700, Some(registered)));
+        // An unreadable registration time cannot clear it.
+        assert!(is_that_engine(&process(700, registered + 5_000_000, "elsecrew-sideca"), 700, None));
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Reproduces what an app version before this settlement left behind:
+    /// every interrupted run marked for explicit recovery.
+    pub(crate) static SKIP_INTERRUPTED_SETTLEMENT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+const INTERRUPTED_RUN_NOTICE: &str = "실행이 중간에 멈췄어요. 지금까지 한 작업은 작업 공간에 그대로 있어요. 이어서 하려면 메시지를 보내 주세요.";
+
+/// The records of `settle_interrupted_run`, and whether the workspace's
+/// recovery mark was lifted for them (to put back if they cannot be stored).
+fn interrupted_run_settlement(
+    storage: &Storage,
+    projects: &mut ProjectManager,
+    projection: &Map<String, Value>,
+) -> Option<(WorkspaceAddress, Vec<ProjectionUpsert>, bool)> {
+    let run_id = projection["run_id"].as_str()?;
+    // An explicit resolution under way keeps its own order of steps.
+    if projection.get(RECOVERY_INTENT_FIELD).is_some_and(|value| !value.is_null()) {
+        return None;
+    }
+    if projection.get("recovery").is_some_and(|value| !value.is_null() && value["state"] != "unresolved") {
+        return None;
+    }
+    let internal = projection["process_identity_internal"].as_array()?;
+    if internal.is_empty() {
+        return None;
+    }
+    let mut identities = Vec::with_capacity(internal.len());
+    for private in internal {
+        identities.push(ProcIdentity {
+            pid: u32::try_from(private["pid"].as_u64()?).ok()?,
+            start_us: private["start_us"].as_i64()?,
+        });
+    }
+    // The run's sign-in hold keeps its own record of the processes. An engine
+    // that went down adds the last descendants it found there alone (its
+    // ledger was already closed), and it stops recording at its bound.
+    let held = hold_identities(storage, projection);
+    let chat_projection = actual_chat_projection(storage, projection["chat_id"].as_str()?).ok()?;
+    let chat = &chat_projection["record"];
+    let profile: AgentResolvedProfileV1 =
+        serde_json::from_value(projection["record"]["selectedProfile"].clone()).ok()?;
+    let address = address_from_chat(chat).ok()?;
+    // Whatever the dead engine left running is stopped like any canceled run
+    // (TERM, then KILL, descendants included). Only a confirmed end counts.
+    let mut tracker = TreeTracker::new(identities[0]);
+    for identity in identities[1..].iter().chain(held.iter().flatten()) {
+        tracker.track_identity(*identity);
+    }
+    // The owner is gone, so a recorded process ID now held by another
+    // process proves that recorded process ended (after a reboot, typically).
+    if !tracker
+        .terminate(&elsecrew_core::proctree::SettledProcTable, &SystemClock::default(), TerminationConfig::default())
+        .confirmed()
+    {
+        return None;
+    }
+    // Everything is proven gone: like a confirmed close, the records keep one
+    // identity. It must be among the hold's (whose release checks that the
+    // ledger's are a part of its own and probes every one of them again).
+    let kept = match &held {
+        Some(held) if !held.is_empty() => identities.iter().find(|identity| held.contains(identity)).copied()
+            .or_else(|| held.iter().next().copied())?,
+        _ => identities[0],
+    };
+    let identities = vec![kept];
+    let lifted = projects
+        .workspace_resume_interrupted(storage, &address, &projection["workspace_manifest"], run_id)
+        .ok()?;
+    let upserts = interrupted_run_upserts(storage, projection, &chat_projection, &profile, &address, &identities);
+    if upserts.is_none() && lifted {
+        let _ = projects.workspace_restore_recovery_required(&address);
+    }
+    Some((address, upserts?, lifted))
+}
+
+fn interrupted_run_upserts(
+    storage: &Storage,
+    projection: &Map<String, Value>,
+    chat_projection: &Map<String, Value>,
+    profile: &AgentResolvedProfileV1,
+    address: &WorkspaceAddress,
+    identities: &[ProcIdentity],
+) -> Option<Vec<ProjectionUpsert>> {
+    let run_id = projection["run_id"].as_str()?;
+    let chat = &chat_projection["record"];
+    // Keep each process's recorded public entry; the order follows the identities.
+    let known: Vec<&Value> = [&projection["barrier"]["trackedProcesses"], &projection["recovery"]["trackedProcesses"]]
+        .into_iter()
+        .filter_map(Value::as_array)
+        .flatten()
+        .collect();
+    let tracked: Vec<Value> = identities
+        .iter()
+        .map(|identity| {
+            let start = digest_text(&identity.start_us.to_string());
+            let mut value = known
+                .iter()
+                .find(|value| value["pid"] == identity.pid && value["startIdentityDigest"] == start.as_str())
+                .map(|value| (*value).clone())
+                .unwrap_or_else(|| process_value(*identity, Path::new("/redacted/agent"), true));
+            value["observedGone"] = Value::Bool(true);
+            value
+        })
+        .collect();
+    let writer = profile.permission == "workspaceWrite";
+    let run = agent_run_record(
+        run_id, chat, profile,
+        projection["record"]["capabilityFingerprint"].as_str().unwrap_or_default(),
+        "canceled", Some("cleanExit"),
+        projection["record"]["createdAt"].as_str().unwrap_or_default(),
+    ).ok()?;
+    let termination = json!({
+        "schemaVersion":1,"runId":run_id,"outcome":"cleanExit",
+        "processesProvenGone":true,"poisoned":false,
+        "writerLockState":if writer {"released"} else {"none"},
+        "chatState":"canceled","trackedProcesses":tracked,
+        "evidenceDigest":digest_text("agent-interrupted-unclean-stop-v1"),"observedAt":now()
+    });
+    validate_agent_adapter_payload_v1("terminationTranscript", &termination).ok()?;
+    let canceled_chat = updated_chat(chat, "canceled").ok()?;
+    let mut updated = projection.clone();
+    updated.remove("last_event_sequence");
+    updated.insert("record".into(), run);
+    updated.insert("state".into(), json!("canceled"));
+    updated.insert("termination".into(), termination);
+    updated.insert("recovery".into(), Value::Null);
+    updated.insert(
+        "process_identity_internal".into(),
+        Value::Array(identities.iter().map(|identity| json!({"pid":identity.pid,"start_us":identity.start_us})).collect()),
+    );
+    if let Some(barrier) = updated.get_mut("barrier").filter(|value| value.is_object()) {
+        barrier["trackedProcesses"] = Value::Array(tracked);
+    }
+    // The same checks a later start applies to every stored run: a record
+    // that would fail them stays an explicit recovery instead.
+    if !updated.contains_key("output_format_version") {
+        validate_projection_public_budget(&updated).ok()?;
+    }
+    validate_provider_projection(&updated).ok()?;
+    let chat_id = chat["chatId"].as_str()?;
+    let mut upserts = vec![
+        ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: run_id.into(),
+            operation_id: format!("op_agent_interrupted_{run_id}"),
+            request_id: None,
+            payload: updated,
+        },
+        ProjectionUpsert {
+            aggregate_type: "chat",
+            aggregate_id: chat_id.into(),
+            operation_id: format!("op_agent_interrupted_chat_{run_id}"),
+            request_id: None,
+            payload: chat_projection_with_record(chat_projection, &canceled_chat, None).ok()?,
+        },
+    ];
+    if writer {
+        // Never the operation name of the run's own terminal or of an earlier
+        // recovery mark: a reused name with new content is refused.
+        upserts.push(release_writer_lock(storage, address, run_id, &format!("interrupted_{run_id}"), false).ok()?);
+    }
+    Some(upserts)
 }
 
 fn ensure_recovery_reservation(
@@ -4204,8 +4660,13 @@ fn scenario_name(value: FakeScenario) -> &'static str {
         FakeScenario::Clean => "clean",
         FakeScenario::CleanReadOnly => "clean-read-only",
         FakeScenario::OrchestratorDelegate => "orchestrator-delegate",
+        FakeScenario::OrchestratorDelegateCustom => "orchestrator-delegate-custom",
         FakeScenario::OrchestratorFinal => "orchestrator-final",
         FakeScenario::OrchestratorWorker => "orchestrator-worker",
+        FakeScenario::OrchestratorDelegatePlanning => "orchestrator-delegate-planning",
+        FakeScenario::OrchestratorPlanner => "orchestrator-planner",
+        FakeScenario::BusyWriter => "busy-writer",
+        FakeScenario::BusyReader => "busy-reader",
         FakeScenario::NoOutput => "no-output",
         FakeScenario::FinalDelayed => "final-delayed",
         FakeScenario::CancelClean => "cancel-clean",
@@ -4243,6 +4704,7 @@ fn scenario_name(value: FakeScenario) -> &'static str {
         FakeScenario::PublicAggregatePlusOne => "public-aggregate-plus-one",
         FakeScenario::LongStream => "long-stream",
         FakeScenario::PacedLongStream => "paced-long-stream",
+        FakeScenario::PacedLongStreamReadOnly => "paced-long-stream-read-only",
         FakeScenario::ProviderTerminalFailed => "provider-terminal-failed",
         FakeScenario::ProviderTerminalRecoveryRequired => "provider-terminal-recovery-required",
     }
@@ -4306,8 +4768,13 @@ pub(crate) fn run_agent_fixture_launcher(scenario: &str) -> Result<(), SidecarEr
         "clean",
         "clean-read-only",
         "orchestrator-delegate",
+        "orchestrator-delegate-custom",
         "orchestrator-final",
         "orchestrator-worker",
+        "orchestrator-delegate-planning",
+        "orchestrator-planner",
+        "busy-writer",
+        "busy-reader",
         "no-output",
         "final-delayed",
         "cancel-clean",
@@ -4331,6 +4798,7 @@ pub(crate) fn run_agent_fixture_launcher(scenario: &str) -> Result<(), SidecarEr
         "public-aggregate-plus-one",
         "long-stream",
         "paced-long-stream",
+        "paced-long-stream-read-only",
         "provider-terminal-failed",
         "provider-terminal-recovery-required",
     ]
@@ -4423,7 +4891,7 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
         "handshake-version-mismatch" => handshake["claude_code_version"] = json!("2.1.242"),
         "handshake-model-mismatch" => handshake["model"] = json!("claude-unknown"),
         "handshake-cwd-mismatch" => handshake["cwd"] = json!("/not/managed"),
-        "clean-read-only" | "orchestrator-delegate" | "orchestrator-final" | "handshake-permission-mismatch" => handshake["permissionMode"] = json!("readOnly"),
+        "clean-read-only" | "busy-reader" | "paced-long-stream-read-only" | "orchestrator-delegate" | "orchestrator-delegate-custom" | "orchestrator-final" | "orchestrator-delegate-planning" | "orchestrator-planner" | "handshake-permission-mismatch" => handshake["permissionMode"] = json!("readOnly"),
         "handshake-tools-mismatch" => handshake["tools"] = json!(["Read"]),
         "handshake-mcp-mismatch" => handshake["mcp_servers"] = json!(["unsafe"]),
         "handshake-plugins-mismatch" => handshake["plugins"] = json!(["unsafe"]),
@@ -4440,14 +4908,37 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
         return Ok(());
     }
     match scenario {
+        "busy-reader" => {
+            thread::sleep(Duration::from_millis(3000));
+            println!("{}", json!({"type":"final","text":"Read for a while."}));
+            println!("{}", json!({"type":"terminal","outcome":"succeeded"}));
+        }
+        "busy-writer" => {
+            for round in 1..=200 {
+                std::fs::write(cwd.join("busy.txt"), format!("round {round}\n"))
+                    .map_err(|error| SidecarError::new("fixtureFailure", error.to_string()))?;
+                thread::sleep(Duration::from_millis(15));
+            }
+            println!("{}", json!({"type":"final","text":"Wrote busy.txt 200 times."}));
+            println!("{}", json!({"type":"terminal","outcome":"succeeded"}));
+        }
         "orchestrator-worker" => {
             std::fs::write(cwd.join("hello.txt"), b"updated by the isolated fixture worker\n")
                 .map_err(|error| SidecarError::new("fixtureFailure", error.to_string()))?;
             println!("{}", json!({"type":"final","text":"Updated hello.txt in the isolated work copy."}));
             println!("{}", json!({"type":"terminal","outcome":"succeeded"}));
         }
-        "orchestrator-delegate" | "orchestrator-final" => {
-            let text = if scenario == "orchestrator-delegate" { json!({"action":"delegate","role":"coding","instruction":"Update hello.txt in the work copy and report your changes.","summary":"I will ask the developer to inspect it."}) } else { json!({"action":"final","answer":"The developer reported success. Please review the result."}) };
+        "orchestrator-planner" => {
+            println!("{}", json!({"type":"final","text":"1. Add a task input\n2. Mark tasks done\n3. Keep the list after reload"}));
+            println!("{}", json!({"type":"terminal","outcome":"succeeded"}));
+        }
+        "orchestrator-delegate-planning" => {
+            let text = json!({"action":"delegate","role":"planning","instruction":"Write a short plan for the todo page.","summary":"I will ask the planner first."});
+            println!("{}", json!({"type":"final","text":text.to_string()}));
+            println!("{}", json!({"type":"terminal","outcome":"succeeded"}));
+        }
+        "orchestrator-delegate" | "orchestrator-delegate-custom" | "orchestrator-final" => {
+            let text = if scenario == "orchestrator-delegate-custom" { json!({"action":"delegate","role":"builder","instruction":"Update hello.txt in the work copy and report your changes.","summary":"I will ask the builder to do it."}) } else if scenario == "orchestrator-delegate" { json!({"action":"delegate","role":"coding","instruction":"Update hello.txt in the work copy and report your changes.","summary":"I will ask the developer to inspect it."}) } else { json!({"action":"final","answer":"The developer reported success. Please review the result."}) };
             println!("{}", json!({"type":"final","text":text.to_string()}));
             println!("{}", json!({"type":"terminal","outcome":"succeeded"}));
         }
@@ -4479,8 +4970,8 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
             }
             println!("{{\"type\":\"terminal\",\"outcome\":\"succeeded\"}}")
         }
-        "long-stream" | "paced-long-stream" => {
-            let paced = scenario == "paced-long-stream";
+        "long-stream" | "paced-long-stream" | "paced-long-stream-read-only" => {
+            let paced = scenario != "long-stream";
             let started = std::time::Instant::now();
             for sequence in 1..=3000 {
                 let text = if paced {
@@ -5318,12 +5809,57 @@ fn unsupported_platform_cannot_select_native_provider_mode() {
     assert!(runtime.owned_run_ids().is_empty());
 }
 
+#[cfg(test)]
+mod project_auto_approval_tests {
+    use super::project_auto_approval;
+    use crate::project::automation_permissions::AutomationPermissions;
+    use elsecrew_core::provider::vendor_observation::codex_approval::PendingApproval;
+    use elsecrew_core::provider::BoundedObservation;
+
+    fn request(params: serde_json::Value, untrusted: bool) -> Result<PendingApproval, elsecrew_core::provider::ProviderError> {
+        let mut base = serde_json::json!({"threadId":"t","turnId":"r","itemId":"i","startedAtMs":1,"kind":"command","environmentId":null,"command":"touch a.txt","cwd":"/managed/snapshot"});
+        for (key, value) in params.as_object().unwrap() { base[key] = value.clone(); }
+        let frame = serde_json::json!({"id":7,"method":"item/commandExecution/requestApproval","params":base});
+        PendingApproval::parse_in_thread(&BoundedObservation::new(frame.to_string().into_bytes()).unwrap(), "t", "r", untrusted)
+    }
+    fn command_request(cwd: &str) -> PendingApproval { request(serde_json::json!({"cwd":cwd}), false).unwrap() }
+
+    /// 2026-11-27, PR #19 re-review 2: the app's own approval of a Codex
+    /// command is the same as before or stricter, on and off.
+    /// - Permission on, `on-request` thread: a command inside the workspace is
+    ///   approved as before; a request carrying a proposed trust rule is still
+    ///   refused at parsing (as before), so it never reaches approval.
+    /// - A thread that started `untrusted` (permission off at start) never
+    ///   approves a command on its own, even after the permission is turned on.
+    #[test]
+    fn a_codex_command_asks_the_person_when_commands_are_off() {
+        let workspace = "/managed/snapshot";
+        let on = AutomationPermissions { files: true, commands: true };
+        let off = AutomationPermissions { files: true, commands: false };
+        let plain = command_request(workspace);
+        assert!(!project_auto_approval(off, &plain, workspace));
+        assert!(project_auto_approval(on, &plain, workspace), "unchanged: on, inside the workspace");
+        assert!(!project_auto_approval(on, &command_request("/elsewhere"), workspace));
+        assert!(!project_auto_approval(on, &request(serde_json::json!({"networkApprovalContext":{"host":"example.com","protocol":"https"}}), false).unwrap(), workspace));
+        // A proposed trust rule in an on-request thread: refused before any approval, as before.
+        assert!(request(serde_json::json!({"proposedExecpolicyAmendment":["touch","a.txt"]}), false).is_err());
+        // Started untrusted: asks the person whether the permission is off or turned on mid-run.
+        let untrusted = request(serde_json::json!({"proposedExecpolicyAmendment":["touch","a.txt"]}), true).unwrap();
+        assert!(!project_auto_approval(off, &untrusted, workspace));
+        assert!(!project_auto_approval(on, &untrusted, workspace), "turned on mid-run: still asks");
+        let untrusted_plain = request(serde_json::json!({}), true).unwrap();
+        assert!(!project_auto_approval(on, &untrusted_plain, workspace));
+    }
+}
+
 // Only the existing workspace scope is eligible. Network or wider grants stay interactive.
 fn project_auto_approval(consent: crate::project::automation_permissions::AutomationPermissions, request: &elsecrew_core::provider::vendor_observation::codex_approval::PendingApproval, workspace: &str) -> bool {
     use elsecrew_core::provider::vendor_observation::codex_approval::Action;
     if workspace.is_empty() { return false; }
     match &request.action {
         Action::FileChange { grant_root } => consent.files && grant_root.as_deref() == Some(workspace),
-        Action::Command { cwd, network, .. } => consent.commands && network.is_none() && cwd.as_deref() == Some(workspace),
+        // A run that started with the command permission off (`untrusted`)
+        // keeps asking the person, even if the permission is turned on now.
+        Action::Command { cwd, network, .. } => !request.thread_untrusted && consent.commands && network.is_none() && cwd.as_deref() == Some(workspace),
     }
 }

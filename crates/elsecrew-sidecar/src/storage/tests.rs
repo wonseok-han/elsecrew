@@ -42,7 +42,7 @@ fn durable_fixture_open_migrates_reopens_and_does_not_enable_product_open() {
     {
         let storage = Storage::open_durable_output_for_test(&path).unwrap();
         assert!(storage.uses_durable_output().unwrap());
-        assert_eq!(storage_schema_version(&storage.connection).unwrap(), Some(STORAGE_LIFETIME_SCHEMA_VERSION_V12));
+        assert_eq!(storage_schema_version(&storage.connection).unwrap(), Some(STORAGE_LIFETIME_SCHEMA_VERSION_V13));
     }
     assert!(Storage::open_for_admission(&path, &AtomicBool::new(false)).is_err());
     {
@@ -100,6 +100,103 @@ fn selected_projection_retains_only_requested_rows_without_skipping_validation()
     assert_eq!(storage.projection_record("project", "missing").unwrap_err().kind, "projectionInvalid");
     assert_eq!(storage.projection_records("project").unwrap_err().kind, "projectionInvalid");
     assert_eq!(load_projection(&storage.connection).unwrap_err().kind, "projectionInvalid");
+}
+
+#[test]
+fn remembered_projection_rows_equal_a_full_parse_and_parse_only_changed_rows() {
+    let (_root, path) = database();
+    let storage = Storage::open(&path).unwrap();
+    for index in 0..40 {
+        storage.connection.execute(
+            "INSERT INTO runs(run_id,state,projection_json,last_event_sequence) VALUES (?1,'running',?2,3)",
+            params![format!("run_{index:02}"), json!({"run_id":format!("run_{index:02}"),"payload":"r".repeat(4096)}).to_string()],
+        ).unwrap();
+    }
+    for id in ["project_a", "project_b"] {
+        storage.connection.execute(
+            "INSERT INTO projects(project_id,canonical_path,projection_json,last_event_sequence) VALUES (?1,?1,?2,7)",
+            params![id, json!({"id":id}).to_string()],
+        ).unwrap();
+    }
+    let parsed = || storage.projection_memo.parsed.get();
+    let full = || load_projection(&storage.connection).unwrap();
+    // The first lookup parses every row once; later ones parse nothing.
+    assert_eq!(storage.projection_record("project", "project_b").unwrap(), full().projects.get("project_b").cloned());
+    assert_eq!(parsed(), 42);
+    for _ in 0..5 {
+        assert_eq!(storage.projection_record("run", "run_07").unwrap(), full().runs.get("run_07").cloned());
+        assert_eq!(storage.projection_records("run").unwrap(), full().runs.values().cloned().collect::<Vec<_>>());
+    }
+    storage.unclean_engine_processes().unwrap();
+    assert_eq!(parsed(), 42);
+    // A changed row is parsed again, and only that row; so is a new sequence
+    // with the same bytes.
+    storage.connection.execute("UPDATE runs SET projection_json=?1 WHERE run_id='run_03'", [json!({"run_id":"run_03","payload":"changed"}).to_string()]).unwrap();
+    assert_eq!(storage.projection_record("run", "run_03").unwrap(), full().runs.get("run_03").cloned());
+    assert_eq!(storage.projection_record("run", "run_03").unwrap().unwrap()["payload"], "changed");
+    assert_eq!(parsed(), 43);
+    storage.connection.execute("UPDATE runs SET last_event_sequence=9 WHERE run_id='run_04'", []).unwrap();
+    assert_eq!(storage.projection_record("run", "run_04").unwrap().unwrap()["last_event_sequence"], 9);
+    assert_eq!(parsed(), 44);
+    // A removed row is gone, also from what is remembered.
+    storage.connection.execute("DELETE FROM runs WHERE run_id='run_05'", []).unwrap();
+    assert_eq!(storage.projection_record("run", "run_05").unwrap(), None);
+    assert_eq!(storage.projection_records("run").unwrap().len(), 39);
+    // A damaged row in another table still fails every lookup, remembered
+    // rows or not, and repairing it lets lookups through again.
+    storage.connection.execute("UPDATE runs SET projection_json='[]' WHERE run_id='run_06'", []).unwrap();
+    assert_eq!(storage.projection_record("project", "project_a").unwrap_err().kind, "projectionInvalid");
+    assert_eq!(storage.projection_record("project", "project_a").unwrap_err().kind, "projectionInvalid");
+    assert_eq!(storage.unclean_engine_processes().unwrap_err().kind, "projectionInvalid");
+    storage.connection.execute("UPDATE runs SET projection_json=?1 WHERE run_id='run_06'", [json!({"run_id":"run_06"}).to_string()]).unwrap();
+    assert_eq!(storage.projection_record("project", "project_a").unwrap(), full().projects.get("project_a").cloned());
+    // Stored text that is not valid UTF-8 fails like the full parse does
+    // (the table is STRICT, so a non-text value cannot be stored at all).
+    storage.connection.execute("UPDATE runs SET projection_json=CAST(X'FF' AS TEXT) WHERE run_id='run_08'", []).unwrap();
+    assert!(storage.projection_record("project", "project_a").is_err());
+    assert!(load_projection(&storage.connection).is_err());
+    // Rows changed inside a transaction are seen there, and a rollback brings
+    // the earlier rows back (no change counter is trusted). Other connections
+    // cannot write while the engine holds the database.
+    storage.connection.execute("UPDATE runs SET projection_json='{}' WHERE run_id='run_08'", []).unwrap();
+    let before = storage.projection_record("project", "project_a").unwrap();
+    storage.connection.execute_batch("BEGIN IMMEDIATE").unwrap();
+    storage.connection.execute("UPDATE projects SET projection_json=?1 WHERE project_id='project_a'", [json!({"id":"project_a","inside":true}).to_string()]).unwrap();
+    assert_eq!(storage.projection_record("project", "project_a").unwrap().unwrap()["inside"], true);
+    storage.connection.execute_batch("ROLLBACK").unwrap();
+    assert_eq!(storage.projection_record("project", "project_a").unwrap(), before);
+    assert_eq!(storage.projection_record("project", "project_a").unwrap(), full().projects.get("project_a").cloned());
+}
+
+/// Cost of record lookups on a copy of a real ledger (latency work 2026-11-26):
+/// `ELSECREW_PROJECTION_BENCH_DB=<copy> cargo test -p elsecrew-sidecar
+/// projection_lookup_cost -- --ignored --nocapture`. Reads the copy only.
+#[test]
+#[ignore]
+fn projection_lookup_cost_on_a_ledger_copy() {
+    let Some(path) = std::env::var_os("ELSECREW_PROJECTION_BENCH_DB") else { return };
+    let connection = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    let ids: Vec<String> = connection.prepare("SELECT project_id FROM projects").unwrap()
+        .query_map([], |row| row.get(0)).unwrap().map(Result::unwrap).collect();
+    let rounds = 20;
+    let started = std::time::Instant::now();
+    for index in 0..rounds {
+        let _ = load_projection_selected(&connection, Some(("project", Some(&ids[index % ids.len()])))).unwrap();
+    }
+    let full_ms = started.elapsed().as_secs_f64() * 1000.0 / rounds as f64;
+    let memo = ProjectionMemo::default();
+    let _ = load_projection_memo(&connection, &memo, None).unwrap();
+    let started = std::time::Instant::now();
+    for index in 0..rounds {
+        let _ = load_projection_memo(&connection, &memo, Some(("project", Some(&ids[index % ids.len()])))).unwrap();
+    }
+    let memo_ms = started.elapsed().as_secs_f64() * 1000.0 / rounds as f64;
+    let started = std::time::Instant::now();
+    for _ in 0..rounds {
+        let _ = load_projection_memo(&connection, &memo, Some(("run", None))).unwrap();
+    }
+    let runs_ms = started.elapsed().as_secs_f64() * 1000.0 / rounds as f64;
+    println!("PROJECTION_LOOKUP_COST {{\"fullParseMs\":{full_ms:.2},\"rememberedMs\":{memo_ms:.2},\"allRunsRememberedMs\":{runs_ms:.2}}}");
 }
 
 #[test]
@@ -4749,6 +4846,8 @@ fn populated_v2_storage(path: &Path, state: &str) -> Storage {
         path: path.to_path_buf(),
         writes_admitted: true,
         maintenance_epoch: 0,
+        opened_from_seal: false,
+        projection_memo: Default::default(),
     };
     storage
         .append_event(&event(
@@ -5600,4 +5699,225 @@ fn coordinator_schema_v12_migration_rolls_back_cancellation_and_reopens() {
     assert!(Storage::open_for_admission(&path, &AtomicBool::new(false)).is_err());
     let reopened = Storage::open_for_durable_admission(&path, &AtomicBool::new(false)).unwrap();
     assert!(reopened.coordinator_roles_enabled().unwrap());
+}
+
+fn custom_role_chat_event(sequence: u64, role_id: &str) -> LedgerEventV1 {
+    let mut message = team_message("chat_v13", &format!("message_v13_{sequence}"), sequence);
+    message["kind"] = json!("role");
+    message["roleId"] = json!(role_id);
+    message["runId"] = json!("run_v13");
+    event(
+        &format!("evt_v13_{sequence}"),
+        &format!("op_v13_{sequence}"),
+        "chat",
+        "chat_v13",
+        sequence,
+        materializable_chat_payload("chat_v13", "project_v13", sequence, message),
+        "2026-11-12T01:00:00Z",
+    )
+}
+
+#[test]
+fn custom_role_schema_v13_migration_relaxes_only_author_format_and_reopens() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("custom-roles.sqlite3");
+    let mut storage = Storage::open_for_admission(&path, &AtomicBool::new(false)).unwrap();
+    agent_output::schema::migrate(&mut storage.connection).unwrap();
+    // V11 cannot skip directly to V13.
+    assert!(agent_output::schema::migrate_custom_roles(&mut storage.connection, &mut || false).is_err());
+    agent_output::schema::migrate_coordinator(&mut storage.connection, &mut || false).unwrap();
+    assert!(!storage.custom_roles_enabled().unwrap());
+    storage.append_event(&event("evt_v13_project", "op_v13_project", "project", "project_v13", 1,
+        json!({"canonical_path":"/fixture/v13","project_id":"project_v13"}), "2026-11-12T00:59:00Z")).unwrap();
+    // V12 still rejects a user-defined author but accepts a legacy one.
+    assert!(storage.append_event(&custom_role_chat_event(1, "research")).is_err());
+    assert_eq!(storage.append_event(&custom_role_chat_event(1, "coding")).unwrap(), AppendOutcome::Committed);
+    let before = database_snapshot(&storage.connection);
+    let mut checks = 0;
+    assert!(agent_output::schema::migrate_custom_roles(&mut storage.connection, &mut || { checks += 1; checks > 1 }).is_err());
+    assert_eq!(database_snapshot(&storage.connection), before);
+    agent_output::schema::migrate_custom_roles(&mut storage.connection, &mut || false).unwrap();
+    assert!(storage.custom_roles_enabled().unwrap());
+    assert!(storage.coordinator_roles_enabled().unwrap());
+    assert!(agent_output::schema::verify(&storage.connection).is_ok());
+    // Idempotent; a second call is a no-op.
+    agent_output::schema::migrate_custom_roles(&mut storage.connection, &mut || false).unwrap();
+    for invalid in ["Research", "r", "re search", "1research", "re_search", &"r".repeat(33)] {
+        assert!(storage.append_event(&custom_role_chat_event(2, invalid)).is_err(), "{invalid}");
+    }
+    assert_eq!(storage.append_event(&custom_role_chat_event(2, "research")).unwrap(), AppendOutcome::Committed);
+    assert_eq!(storage.append_event(&custom_role_chat_event(3, &format!("r{}", "-".repeat(31)))).unwrap(), AppendOutcome::Committed);
+    drop(storage);
+    assert!(Storage::open_for_admission(&path, &AtomicBool::new(false)).is_err());
+    let reopened = Storage::open_for_durable_admission(&path, &AtomicBool::new(false)).unwrap();
+    assert!(reopened.custom_roles_enabled().unwrap());
+    drop(reopened);
+    let reopened = Storage::open_for_durable_admission(&path, &AtomicBool::new(false)).unwrap();
+    assert_eq!(storage_schema_version(&reopened.connection).unwrap(), Some(STORAGE_LIFETIME_SCHEMA_VERSION_V13));
+}
+
+/// A durable database with one materialization batch armed and never run, as
+/// the engine leaves it when it stops between the arm and the batch commit.
+fn interrupted_materialization(path: &std::path::Path) {
+    let mut storage = Storage::open_for_durable_admission(path, &AtomicBool::new(false)).unwrap();
+    storage.append_event(&event("evt_i_project", "op_i_project", "project", "project_i", 1,
+        json!({"canonical_path":"/fixture/interrupted","project_id":"project_i"}), "2026-11-16T00:00:00Z")).unwrap();
+    let mut armed = false;
+    for _ in 0..32 {
+        match storage.materialize_lifetime_batch_for_test(
+            &mut crate::storage_lifetime::NeverCancel,
+            Some(crate::storage_lifetime::BatchMaterializationFailurePoint::AfterArmCommit),
+        ) {
+            Err(_) => { armed = true; break; }
+            Ok(crate::storage_lifetime::LifetimeMaterializationBatchResult::Completed { .. }) => break,
+            Ok(_) => {}
+        }
+    }
+    assert!(armed, "a batch must be armed");
+    let state: String = storage.connection
+        .query_row("SELECT state FROM lifetime_materialization_job WHERE singleton=1", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(state, "attempting");
+}
+
+#[test]
+fn admission_resumes_a_materialization_batch_the_engine_stopped_in() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("interrupted.sqlite3");
+    interrupted_materialization(&path);
+    // Before: every later start refused the database for good.
+    let mut reopened = Storage::open_for_durable_admission(&path, &AtomicBool::new(false))
+        .expect("an interrupted batch never committed and must not block the app");
+    let state: Option<String> = reopened.connection
+        .query_row("SELECT state FROM lifetime_materialization_job WHERE singleton=1", [], |row| row.get(0))
+        .optional()
+        .unwrap();
+    assert_ne!(state.as_deref(), Some("attempting"));
+    let mut completed = false;
+    for _ in 0..64 {
+        if let crate::storage_lifetime::LifetimeMaterializationBatchResult::Completed { .. } =
+            reopened.run_materialization_scheduler_step().unwrap()
+        {
+            completed = true;
+            break;
+        }
+    }
+    assert!(completed, "the resumed work finishes");
+    drop(reopened);
+    drop(Storage::open_for_durable_admission(&path, &AtomicBool::new(false)).unwrap());
+}
+
+#[test]
+fn admission_still_refuses_a_failed_materialization() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("failed.sqlite3");
+    interrupted_materialization(&path);
+    {
+        let connection = Connection::open(&path).unwrap();
+        connection.execute(
+            "UPDATE lifetime_materialization_job SET state='failed',failure_kind='validationFailed',\
+             completed_at=updated_at WHERE singleton=1",
+            [],
+        ).unwrap();
+    }
+    let error = Storage::open_for_durable_admission(&path, &AtomicBool::new(false))
+        .err()
+        .expect("a failed materialization stays refused");
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+    assert_eq!(error.detail(), "storage lifetime materialization state is invalid");
+    let connection = Connection::open(&path).unwrap();
+    let state: String = connection
+        .query_row("SELECT state FROM lifetime_materialization_job WHERE singleton=1", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(state, "failed");
+}
+
+/// User decision 2026-11-20: a clean shutdown's seal lets the next start skip
+/// the full ledger check, but only for exactly the sealed file: a wrong seal,
+/// one changed byte or a log left behind is the full check as before.
+#[test]
+fn a_clean_shutdown_seal_skips_the_full_check_only_for_the_same_file() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("seal.sqlite3");
+    let running = AtomicBool::new(false);
+    let open = |seal: Option<&str>| Storage::open_for_durable_admission_with_seal(&path, &running, seal);
+    {
+        let mut storage = open(None).unwrap();
+        assert!(!storage.opened_from_seal());
+        for sequence in 1..=3 {
+            let id = format!("project_seal_{sequence}");
+            storage
+                .append_event(&event(
+                    &format!("evt_{id}"),
+                    &format!("op_{id}"),
+                    "project",
+                    &id,
+                    1,
+                    json!({"project_id": id, "canonical_path": format!("/fixture/seal/{sequence}")}),
+                    "2026-11-20T01:00:00Z",
+                ))
+                .unwrap();
+        }
+    }
+    let seal_now = || {
+        let storage = open(None).unwrap();
+        let sealed = storage.shutdown_seal().expect("a settled ledger is sealed");
+        drop(storage);
+        assert!(sealed.still_holds(&path), "closing wrote nothing more");
+        sealed.digest
+    };
+    let digest = seal_now();
+    assert!(super::shutdown_seal::valid_seal(&digest));
+
+    // The same file: the full check is skipped, and it can be sealed again.
+    let trusted = open(Some(&digest)).unwrap();
+    assert!(trusted.opened_from_seal());
+    let again = trusted.shutdown_seal().unwrap();
+    drop(trusted);
+    assert!(again.still_holds(&path));
+    assert_eq!(again.digest, digest, "nothing was written, the same bytes");
+
+    // A seal that is not this file's, or another engine version's: the full check.
+    let hash = digest.split_once('.').unwrap().0.to_owned();
+    for other in [format!("{}.0.1.0+s13", "0".repeat(64)), format!("{hash}.9.9.9+s1"), "0".repeat(64)] {
+        let full = open(Some(&other)).unwrap();
+        assert!(!full.opened_from_seal(), "{other}");
+        drop(full);
+    }
+
+    // One byte changed outside the engine: never trusted.
+    let digest = seal_now();
+    {
+        let other = Connection::open(&path).unwrap();
+        other.execute_batch("PRAGMA user_version=7;").unwrap();
+    }
+    if let Ok(storage) = open(Some(&digest)) {
+        assert!(!storage.opened_from_seal());
+    }
+    {
+        let other = Connection::open(&path).unwrap();
+        other.execute_batch("PRAGMA user_version=0;").unwrap();
+    }
+
+    // Review I8: a log appearing after the open-time check is caught under
+    // the exclusive lock too.
+    {
+        let storage = open(None).unwrap();
+        let sealed = storage.shutdown_seal().unwrap();
+        assert!(storage.matches_shutdown_seal(&sealed.digest));
+        let mut wal = path.as_os_str().to_owned();
+        wal.push("-wal");
+        let mut file = fs::OpenOptions::new().append(true).open(PathBuf::from(wal)).unwrap();
+        std::io::Write::write_all(&mut file, b"late").unwrap();
+        assert!(!storage.matches_shutdown_seal(&sealed.digest));
+    }
+
+    // A write-ahead log left behind: the file alone is not the state.
+    let digest = seal_now();
+    let mut wal = path.as_os_str().to_owned();
+    wal.push("-wal");
+    fs::write(PathBuf::from(wal), b"not empty").unwrap();
+    if let Ok(storage) = open(Some(&digest)) {
+        assert!(!storage.opened_from_seal());
+    }
 }

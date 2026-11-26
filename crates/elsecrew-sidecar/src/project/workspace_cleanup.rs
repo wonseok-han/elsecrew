@@ -45,7 +45,7 @@ impl ProjectManager {
             "abandoned",
             WorkspaceLockAdmission::Cleanup,
         )?;
-        self.verify_snapshot_repository(&self.worktree_capability(&active)?, &active)?;
+        self.verify_repository_for_discard(&self.worktree_capability(&active)?, &active)?;
         Ok(())
     }
 
@@ -92,6 +92,10 @@ impl ProjectManager {
             return Err(denied());
         }
         let project = required_project(storage, &address.project_id)?;
+        // A deleted task's files belong to project deletion now.
+        if project_deletion::deleted_chat(&project, chat_id) {
+            return Err(denied());
+        }
         if project.get("prepared_workspaces").is_some_and(|value| {
             value.as_object().is_none_or(|items| {
                 items.values().any(|item| {
@@ -110,11 +114,12 @@ impl ProjectManager {
         let lock = storage
             .projection_record("lock", &format!("lock_{}", address.worktree_id))?
             .ok_or_else(denied)?;
+        let manifest = read_bounded_json(&self.manifests_dir, &format!("{}.json", address.worktree_id))?;
         if lock["lock_id"] != format!("lock_{}", address.worktree_id)
             || lock["worktree_path"].as_str()
                 != Some(
                     canonical_protocol_path_without_existing(
-                        &self.worktrees_root.join(&address.worktree_id),
+                        &self.workspace_path(&address.worktree_id, &manifest)?,
                     )?
                     .as_str(),
                 )
@@ -171,8 +176,14 @@ impl ProjectManager {
             if chat["state"] != "discarded" {
                 continue;
             }
-            let checked = self.cleanup_chat(storage, id);
             let project_id = chat["project_id"].as_str().ok_or_else(denied)?;
+            // Deleted projects and tasks are gone from every list; their files
+            // follow through project deletion instead.
+            let registered = registered_project(storage, project_id)?;
+            if project_deletion::is_deleted(&registered) || project_deletion::deleted_chat(&registered, id) {
+                continue;
+            }
+            let checked = self.cleanup_chat(storage, id);
             let project = required_project(storage, project_id)?;
             let job = project
                 .get("workspace_cleanup_v1")
@@ -217,11 +228,11 @@ impl ProjectManager {
             || manifest["worktreePath"].as_str()
                 != Some(
                     canonical_protocol_path_without_existing(
-                        &self.worktrees_root.join(&address.worktree_id),
+                        &self.workspace_path(&address.worktree_id, &manifest)?,
                     )?
                     .as_str(),
                 )
-            || manifest["canonicalGitRoot"] != project["canonical_path"]
+            || elsecrew_protocol::project_v1::manifest_source_root(&manifest) != project["canonical_path"].as_str()
         {
             return Err(denied());
         }
@@ -244,11 +255,17 @@ impl ProjectManager {
             {
                 return Err(denied());
             }
-            serde_json::from_value::<(u64, u64)>(job["identity"].clone()).map_err(|_| denied())?
+            serde_json::from_value::<(u64, u64)>(job["identity"].clone()).map_err(|_| denied())?.1
         } else {
             self.verify_cleanup_copy(storage, &address)?;
-            let root = open_real_child_dir(&self.worktrees_dir, &address.worktree_id)?;
-            let identity = capability_directory_identity(&root)?;
+            let root = if manifest["schemaVersion"] == PROJECT_SCHEMA_VERSION_V2 {
+                open_absolute_directory_capability(&self.workspace_path(&address.worktree_id, &manifest)?)?
+            } else {
+                open_real_child_dir(&self.worktrees_dir, &address.worktree_id)?
+            };
+            // Only the inode is recorded: a device number can change when the
+            // computer restarts, while the job may resume after that.
+            let identity = capability_directory_identity(&root)?.1;
             // Preflight bounds and no-follow traversal before any deletion intent.
             walk(&root, false, 0, &mut 0)?;
             let jobs = project
@@ -256,7 +273,7 @@ impl ProjectManager {
                 .or_insert_with(|| json!({}))
                 .as_object_mut()
                 .ok_or_else(denied)?;
-            jobs.insert(chat_id.into(),json!({"state":"pending","worktreeId":address.worktree_id,"quarantine":quarantine,"identity":identity,"manifest":manifest}));
+            jobs.insert(chat_id.into(),json!({"state":"pending","worktreeId":address.worktree_id,"quarantine":quarantine,"identity":[0, identity],"manifest":manifest}));
             append_object(
                 storage,
                 "project",
@@ -269,10 +286,29 @@ impl ProjectManager {
         };
         checkpoint(1)?;
         self.finish_workspace_discard(&address);
+        // A task worktree lives outside the app's data: Git removes it (and
+        // its record) and only our own leftovers are forgotten.
+        if manifest["schemaVersion"] == PROJECT_SCHEMA_VERSION_V2 {
+            self.remove_task_worktree_folder(&address.worktree_id, &manifest, Some(identity))?;
+            checkpoint(3)?;
+            project["workspace_cleanup_v1"][chat_id]["state"] = json!("deleted");
+            append_object(
+                storage,
+                "project",
+                &address.project_id,
+                &format!("op_cleanup_done_{request_id}"),
+                request_id,
+                Value::Object(project),
+            )?;
+            return Ok(ProjectAction {
+                result: json!({"schemaVersion":1,"action":"cleanupWorkspace","chatId":chat_id,"deleted":true}),
+                ..Default::default()
+            });
+        }
         match self.worktrees_dir.symlink_metadata(&address.worktree_id) {
             Ok(_) => {
                 let root = open_real_child_dir(&self.worktrees_dir, &address.worktree_id)?;
-                if capability_directory_identity(&root)? != identity
+                if capability_directory_identity(&root)?.1 != identity
                     || self.worktrees_dir.symlink_metadata(&quarantine).is_ok()
                 {
                     return Err(denied());
@@ -289,7 +325,8 @@ impl ProjectManager {
         match self.worktrees_dir.symlink_metadata(&quarantine) {
             Ok(_) => {
                 let root = open_real_child_dir(&self.worktrees_dir, &quarantine)?;
-                if capability_directory_identity(&root)? != identity {
+                let held = capability_directory_identity(&root)?;
+                if held.1 != identity {
                     return Err(denied());
                 }
                 walk(&root, true, 0, &mut 0)?;
@@ -297,7 +334,7 @@ impl ProjectManager {
                 if capability_directory_identity(&open_real_child_dir(
                     &self.worktrees_dir,
                     &quarantine,
-                )?)? != identity
+                )?)? != held
                 {
                     return Err(denied());
                 }
@@ -308,6 +345,9 @@ impl ProjectManager {
             Err(e) => return Err(io(e)),
         }
         checkpoint(3)?;
+        // A task worktree also leaves a record (and maybe a merged branch)
+        // in the user's repository: only ours is dropped.
+        self.forget_task_worktree(&manifest);
         project["workspace_cleanup_v1"][chat_id]["state"] = json!("deleted");
         append_object(
             storage,
@@ -334,7 +374,7 @@ impl ProjectManager {
 }
 
 #[cfg(unix)]
-fn walk(dir: &Dir, erase: bool, depth: usize, count: &mut usize) -> Result<(), ProjectFailure> {
+pub(super) fn walk(dir: &Dir, erase: bool, depth: usize, count: &mut usize) -> Result<(), ProjectFailure> {
     if depth > 64 {
         return Err(denied());
     }

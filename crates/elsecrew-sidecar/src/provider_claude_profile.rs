@@ -116,7 +116,13 @@ fn open(parent: &Dir, create: bool) -> Result<Dir, SidecarError> {
         if matches!(name, "agents.md" | "claude.md" | "settings.local.json" | ".mcp.json") {
             return Err(failure());
         }
-        let meta = dir.symlink_metadata(&file_name).map_err(|_| failure())?;
+        // Another run's Claude Code may remove a file of its own between the
+        // listing and this look (ADE multi-project P5): gone is no threat.
+        let meta = match dir.symlink_metadata(&file_name) {
+            Ok(meta) => meta,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return Err(failure()),
+        };
         // Permit evolving vendor artifacts by structure; app settings and
         // credential constraints below remain exact and never get rewritten.
         if meta.uid() != unsafe { libc::geteuid() }

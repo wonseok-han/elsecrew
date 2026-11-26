@@ -33,6 +33,8 @@ import {
   validateTreePageV1,
   validateWatchEventV1,
   validateWorktreeManifestV1,
+  validateWorktreeManifest,
+  validateWorktreeManifestV2,
   WORKTREE_HEAD_MODE_V1,
   WORKTREE_LIFECYCLES_V1,
   WORKSPACE_KIND_V1,
@@ -57,6 +59,7 @@ import {
 type ValidatorName =
   | "projectIdentity"
   | "worktreeManifest"
+  | "worktreeManifestV2"
   | "standaloneSnapshotInvariant"
   | "sourceMutationTrace"
   | "snapshotSizing"
@@ -251,7 +254,9 @@ function validate(name: ValidatorName, value: unknown): unknown {
     case "projectIdentity":
       return validateProjectIdentityV1(value);
     case "worktreeManifest":
-      return validateWorktreeManifestV1(value);
+      return validateWorktreeManifest(value);
+    case "worktreeManifestV2":
+      return validateWorktreeManifestV2(value);
     case "standaloneSnapshotInvariant":
       return validateStandaloneSnapshotInvariantV1(value);
     case "sourceMutationTrace":

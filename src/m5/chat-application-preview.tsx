@@ -4,14 +4,16 @@ import { ApplicationStartControl } from "./application-start-control.tsx";
 import { RestorationPreview } from "./restoration-preview.tsx";
 import { validateProjectCatalogResult, type ApplicationPreviewPage, type ApplicationStatus } from "./contracts/project-catalog-v1.ts";
 
-type PreviewProps = { projectId: string; chatId: string; worktreeId: string; disabled: boolean; onReviewDiff?: () => void };
+type PreviewProps = { projectId: string; chatId: string; worktreeId: string; disabled: boolean; onReviewDiff?: () => void; openRequest?: number };
 export function ChatApplicationPreview(props: PreviewProps) {
   return <ChatApplicationPreviewSession key={JSON.stringify([props.projectId, props.chatId, props.worktreeId])} {...props} />;
 }
 
-function ChatApplicationPreviewSession({ projectId, chatId, worktreeId, disabled, onReviewDiff }: PreviewProps) {
+function ChatApplicationPreviewSession({ projectId, chatId, worktreeId, disabled, onReviewDiff, openRequest = 0 }: PreviewProps) {
   const { t } = useI18n();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(openRequest > 0);
+  // The team conversation's "review and apply" opens this section.
+  useEffect(() => { if (openRequest > 0) setExpanded(true); }, [openRequest]);
   const [preview, setPreview] = useState<ApplicationPreviewPage | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);

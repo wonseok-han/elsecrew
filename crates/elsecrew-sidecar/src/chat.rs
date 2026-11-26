@@ -66,6 +66,16 @@ struct RunCompletion<'a> {
 }
 
 impl G5Manager {
+    /// Fixture runs this session still owns (live processes, not stored records).
+    pub fn active_run_ids(&self) -> Vec<String> {
+        self.active.keys().cloned().collect()
+    }
+
+    /// Tasks with a fixture run in flight.
+    pub(crate) fn active_chat_ids(&self) -> Vec<String> {
+        self.active.values().map(|run| run.chat_id.clone()).collect()
+    }
+
     pub(crate) fn cleanup_blocked(&self) -> bool { self.preparing_to_quit || !self.active.is_empty() }
     pub fn recover_unclean_runs(
         &self,
@@ -152,15 +162,21 @@ impl G5Manager {
     ) -> Result<Value, ProjectFailure> {
         let mut project = project_record(storage, project_id)?;
         if let Some(settings) = project.get("role_settings") {
-            return Ok(settings.clone());
+            return Ok(without_placeholder_models(settings.clone()));
         }
         let mut settings = settings_value(project_id, 1);
-        let defaults = projects.app_role_defaults()?;
+        let defaults = projects.app_role_defaults(storage.custom_roles_enabled()?)?;
         if defaults["schemaVersion"] == 2 && !storage.coordinator_roles_enabled()? {
             return Err(ProjectFailure::manifest("coordinator roles require storage V12 admission"));
         }
+        if defaults["schemaVersion"] == 3 && !storage.custom_roles_enabled()? {
+            return Err(ProjectFailure::manifest("custom roles require storage V13 admission"));
+        }
         settings["schemaVersion"] = defaults["schemaVersion"].clone();
         settings["roles"] = defaults["roles"].clone();
+        if let Some(definitions) = defaults.get("roleDefinitions") {
+            settings["roleDefinitions"] = definitions.clone();
+        }
         project.insert("role_settings".to_string(), settings.clone());
         storage.upsert_projection_record(
             "project",
@@ -178,16 +194,17 @@ impl G5Manager {
         project_id: &str,
         expected_revision: u64,
         roles: Value,
+        role_definitions: Option<Value>,
         request_id: &str,
     ) -> Result<Value, ProjectFailure> {
-        validate_g5_payload_v1(
-            "projectRoleSettingsUpdate",
-            &json!({"projectId":project_id,"expectedRevision":expected_revision,"roles":roles}),
-        )
-        .map_err(|error| ProjectFailure::manifest(format!("invalid role settings: {error}")))?;
-        if roles.as_array().is_some_and(|roles| roles.len() == 5) && !storage.coordinator_roles_enabled()? {
-            return Err(ProjectFailure::manifest("coordinator roles require storage V12 admission"));
+        let mut request = json!({"projectId":project_id,"expectedRevision":expected_revision,"roles":roles});
+        if let Some(definitions) = &role_definitions {
+            request["roleDefinitions"] = definitions.clone();
         }
+        validate_g5_payload_v1("projectRoleSettingsUpdate", &request)
+            .map_err(|error| ProjectFailure::manifest(format!("invalid role settings: {error}")))?;
+        let version = role_schema_version(&roles, role_definitions.is_some());
+        require_role_schema_storage(storage, version)?;
         let mut project = project_record(storage, project_id)?;
         let current = project
             .get("role_settings")
@@ -198,13 +215,16 @@ impl G5Manager {
                 "project role settings changed; reload before saving",
             ));
         }
-        let updated = json!({
-            "schemaVersion":if roles.as_array().is_some_and(|roles| roles.len() == 5) { 2 } else { 1 },
+        let mut updated = json!({
+            "schemaVersion":version,
             "projectId":project_id,
             "revision":expected_revision + 1,
             "roles":roles,
             "updatedAt":now(),
         });
+        if let Some(definitions) = role_definitions {
+            updated["roleDefinitions"] = definitions;
+        }
         validate_g5_payload_v1("projectRoleSettings", &updated).map_err(|error| {
             ProjectFailure::manifest(format!(
                 "updated role settings violate the contract: {error}"
@@ -241,11 +261,21 @@ impl G5Manager {
         application_baseline: bool,
     ) -> Result<G5Action, ProjectFailure> {
         let before = project_record(storage, project_id)?;
+        // Refuse before any snapshot exists: a team without models could never
+        // bind it, and the unbound copy would only become cleanup work.
+        let unselected = match before.get("role_settings") {
+            Some(settings) => has_unselected_model(&without_placeholder_models(settings.clone())),
+            None => has_unselected_model(&projects.app_role_defaults(storage.custom_roles_enabled()?)?),
+        };
+        if unselected {
+            return Err(ProjectFailure::dirty(
+                "every role needs a model before a chat workspace is prepared",
+            ));
+        }
         let action = if application_baseline {
-            projects.prepare_application_workspace(storage, project_id, request_id)?;
-            // Reuse only the just-created active snapshot; normal preparation
-            // remains fresh and existing snapshots are never retrofitted.
-            projects.create_worktree(storage, project_id, request_id)?
+            // A fresh clean-source copy of the task's own; the project keeps
+            // its own copy and existing snapshots are never retrofitted.
+            projects.prepare_chat_application_workspace(storage, project_id, request_id)?
         } else {
             projects.prepare_chat_workspace(storage, project_id, request_id)?
         };
@@ -456,6 +486,11 @@ impl G5Manager {
                 "project role settings changed before chat creation",
             ));
         }
+        if has_unselected_model(&settings) {
+            return Err(ProjectFailure::dirty(
+                "every role needs a model before a chat is created",
+            ));
+        }
         let chat_id = match forced_chat_id {
             Some(chat_id) => chat_id.to_string(),
             None => unique_chat_id(storage)?,
@@ -482,6 +517,10 @@ impl G5Manager {
             "settingsRevision":expected_settings_revision,"roleSnapshots":settings["roles"].clone(),
             "state":"draft","createdAt":created,"updatedAt":created,
         });
+        let mut chat = chat;
+        if let Some(definitions) = settings.get("roleDefinitions") {
+            chat["roleDefinitions"] = definitions.clone();
+        }
         validate_g5_payload_v1("chatRecord", &chat)
             .map_err(|error| ProjectFailure::manifest(format!("invalid created chat: {error}")))?;
         let message = team_message(&chat, 1, "user", None, None, goal)?;
@@ -633,6 +672,37 @@ impl G5Manager {
         })
     }
 
+    /// Every project's tasks that work, wait for the person or wait for a
+    /// review, newest change first (ADE multi-project P4). The same tasks a
+    /// project's own list shows: deleted, erased and hidden ones never. All of
+    /// them: the caller orders and shortens the list it shows
+    /// (`order_task_inbox`) and counts the work from all (PR #20 review I4).
+    pub(crate) fn task_inbox(&self, storage: &Storage) -> Result<Vec<Value>, ProjectFailure> {
+        const SHOWN: [&str; 8] = ["preparing", "running", "stopping", "applying", "waitingForUser", "needsAttention", "recoveryRequired", "reviewReady"];
+        let projects: std::collections::BTreeMap<String, Map<String, Value>> = storage.projection_records("project")?
+            .into_iter()
+            .filter(|project| !crate::project::project_deletion::is_deleted(project))
+            .filter_map(|project| Some((project.get("project_id")?.as_str()?.to_owned(), project)))
+            .collect();
+        let mut items: Vec<Value> = storage.projection_records("chat")?
+            .into_iter()
+            .filter_map(|record| {
+                let project = projects.get(record.get("project_id")?.as_str()?)?;
+                let chat_id = record.get("chat_id")?.as_str()?;
+                let hidden = project.get("catalog_hidden_chats").and_then(Value::as_array).is_some_and(|ids| ids.iter().any(|id| id == chat_id));
+                if hidden || crate::project::chat_erasure::erasure_recorded(project, &Value::String(chat_id.to_owned()))
+                    || crate::project::project_deletion::deleted_chat(project, chat_id) { return None; }
+                let chat = record.get("record")?;
+                SHOWN.contains(&chat["state"].as_str()?).then(|| json!({
+                    "projectId": chat["projectId"], "chatId": chat["chatId"], "goal": chat["goal"],
+                    "state": chat["state"], "updatedAt": chat["updatedAt"],
+                }))
+            })
+            .collect();
+        items.sort_by(|left, right| right["updatedAt"].as_str().cmp(&left["updatedAt"].as_str()).then_with(|| left["chatId"].as_str().cmp(&right["chatId"].as_str())));
+        Ok(items)
+    }
+
     pub fn list_chats(
         &self,
         storage: &Storage,
@@ -649,6 +719,8 @@ impl G5Manager {
             .into_iter()
             .filter(|record| record.get("project_id").and_then(Value::as_str) == Some(project_id))
             .filter(|record| !hidden.is_some_and(|ids| ids.iter().any(|id| Some(id) == record.get("chat_id"))))
+            .filter(|record| !record.get("chat_id").is_some_and(|id| crate::project::chat_erasure::erasure_recorded(&project, id)))
+            .filter(|record| !record.get("chat_id").and_then(Value::as_str).is_some_and(|id| crate::project::project_deletion::deleted_chat(&project, id)))
             .filter_map(|record| record.get("record").cloned())
             .collect::<Vec<_>>();
         items.sort_by(|left, right| {
@@ -841,6 +913,11 @@ impl G5Manager {
             &json!({"chatId":chat_id,"roleId":role_id,"scenario":scenario}),
         )
         .map_err(|error| ProjectFailure::manifest(format!("invalid fixture run: {error}")))?;
+        // Fixture scenarios are keyed by the fixed V1 role names; a V3 team may
+        // reuse those IDs with other permissions, so it never runs fixtures.
+        if chat["schemaVersion"].as_u64() == Some(elsecrew_protocol::run_recovery_v1::G5_ROLE_SCHEMA_VERSION_V3) {
+            return Err(ProjectFailure::manifest("fixture runs require a legacy fixed-role chat"));
+        }
         let state = chat["state"].as_str().unwrap_or_default();
         if !G5_RUN_START_CHAT_STATES_V1.contains(&state) {
             return Err(ProjectFailure::recovery(
@@ -1595,6 +1672,132 @@ pub fn run_fixture_leaf() {
     std::thread::sleep(Duration::from_secs(30));
 }
 
+/// Role-set schema of an already contract-validated update.
+pub(crate) fn role_schema_version(roles: &Value, has_definitions: bool) -> u64 {
+    if has_definitions {
+        3
+    } else if roles.as_array().is_some_and(|roles| roles.len() == 5) {
+        2
+    } else {
+        1
+    }
+}
+
+/// V2 coordinator authors need storage V12+, user-defined V3 authors need V13.
+pub(crate) fn require_role_schema_storage(storage: &Storage, version: u64) -> Result<(), ProjectFailure> {
+    if version == 2 && !storage.coordinator_roles_enabled()? {
+        return Err(ProjectFailure::manifest("coordinator roles require storage V12 admission"));
+    }
+    if version == 3 && !storage.custom_roles_enabled()? {
+        return Err(ProjectFailure::manifest("custom roles require storage V13 admission"));
+    }
+    Ok(())
+}
+
+/// Default V3 team: the legacy five template profiles with locale-independent definitions.
+pub(crate) fn default_settings_v3(project_id: &str, revision: u64) -> Value {
+    use elsecrew_protocol::run_recovery_v1::G5_DEFAULT_ROLE_DEFINITIONS_V3;
+    let legacy = settings_value(project_id, revision);
+    let planning = legacy["roles"][0].clone();
+    let mut coordinator = planning.clone();
+    coordinator["roleId"] = json!("coordinator");
+    let mut design = planning.clone();
+    design["roleId"] = json!("design");
+    let mut roles = json!([coordinator, planning, design, legacy["roles"][1], legacy["roles"][2]]);
+    // The built-in team names no model: provider catalogs change, and a seeded
+    // name that is not listed can never pass the exact pre-run check. The user
+    // picks each model before the first task (see `has_unselected_model`).
+    #[cfg(test)]
+    let unselected = PRODUCT_DEFAULTS_FOR_TEST.with(std::cell::Cell::get);
+    #[cfg(not(test))]
+    let unselected = true;
+    if unselected {
+        for role in roles.as_array_mut().into_iter().flatten() {
+            role["modelSelector"] = json!("");
+            role["reasoningEffort"] = Value::Null;
+            // Defaults (2026-11-13 user decision): design and review on Codex,
+            // everyone else on Claude Code; every member but the read-only
+            // coordinator may write in the isolated copy (review runs the app
+            // and tests and reports product fixes instead of making them).
+            let runtime = match role["roleId"].as_str() { Some("design" | "review") => "codex", _ => "claude-code" };
+            role["runtime"] = json!(runtime);
+            role["permission"] = json!(if role["roleId"] == "coordinator" { "readOnly" } else { "workspaceWrite" });
+        }
+    } else {
+        #[cfg(test)]
+        {
+            roles = complete_default_roles_for_test();
+        }
+    }
+    let definitions: Vec<Value> = G5_DEFAULT_ROLE_DEFINITIONS_V3
+        .iter()
+        .map(|(role_id, name, responsibility)| json!({"roleId":role_id,"name":name,"responsibility":responsibility}))
+        .collect();
+    json!({
+        "schemaVersion":3,"projectId":project_id,"revision":revision,
+        "roles":roles,"roleDefinitions":definitions,"updatedAt":now(),
+    })
+}
+
+// Unit tests that exercise chats keep the complete team the built-in default
+// used to seed; a test opts into the product's model-less default explicitly.
+#[cfg(test)]
+thread_local! {
+    static PRODUCT_DEFAULTS_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+pub(crate) struct ProductDefaultsForTest;
+
+#[cfg(test)]
+impl ProductDefaultsForTest {
+    pub(crate) fn enable() -> Self {
+        PRODUCT_DEFAULTS_FOR_TEST.with(|flag| flag.set(true));
+        Self
+    }
+}
+
+#[cfg(test)]
+impl Drop for ProductDefaultsForTest {
+    fn drop(&mut self) {
+        PRODUCT_DEFAULTS_FOR_TEST.with(|flag| flag.set(false));
+    }
+}
+
+/// The team the built-in default used to seed, for unit tests that need one.
+#[cfg(test)]
+pub(crate) fn complete_default_roles_for_test() -> Value {
+    json!([
+        {"roleId":"coordinator","runtime":"codex","modelSelector":"fixture-codex","reasoningEffort":"medium","permission":"readOnly"},
+        {"roleId":"planning","runtime":"codex","modelSelector":"fixture-codex","reasoningEffort":"medium","permission":"readOnly"},
+        {"roleId":"design","runtime":"codex","modelSelector":"fixture-codex","reasoningEffort":"medium","permission":"readOnly"},
+        {"roleId":"coding","runtime":"claude-code","modelSelector":"opus","reasoningEffort":null,"permission":"workspaceWrite"},
+        {"roleId":"review","runtime":"codex","modelSelector":"fixture-codex","reasoningEffort":"high","permission":"readOnly"}
+    ])
+}
+
+/// Early builds seeded the fixture placeholder `sol`, which no provider lists,
+/// into V3 settings. Read it as unselected so the user simply picks a model;
+/// legacy V1/V2 fixture sets keep it for the demo runtime.
+pub(crate) fn without_placeholder_models(mut settings: Value) -> Value {
+    if settings["schemaVersion"] == 3 {
+        for role in settings["roles"].as_array_mut().into_iter().flatten() {
+            if role["modelSelector"] == "sol" {
+                role["modelSelector"] = json!("");
+                role["reasoningEffort"] = Value::Null;
+            }
+        }
+    }
+    settings
+}
+
+/// Saved settings may leave a model unselected; chats snapshot only complete teams.
+pub(crate) fn has_unselected_model(settings: &Value) -> bool {
+    settings["roles"].as_array().is_some_and(|roles| {
+        roles.iter().any(|role| role["modelSelector"].as_str().is_none_or(str::is_empty))
+    })
+}
+
 pub(crate) fn settings_value(project_id: &str, revision: u64) -> Value {
     json!({
         "schemaVersion":1,"projectId":project_id,"revision":revision,
@@ -1980,3 +2183,46 @@ fn now() -> String {
 mod tests;
 #[cfg(test)]
 mod test_binary;
+
+/// How many tasks the inbox shows at most.
+pub(crate) const TASK_INBOX_SHOWN: usize = 200;
+/// How many tasks at work the inbox answer names for the badges at most.
+pub(crate) const TASK_INBOX_WORKING_MAX: usize = 1000;
+
+/// Whether an inbox item is the person's to look at or still at work, not
+/// only ready for review (the renderer's `inboxGroup` "attention"/"working").
+pub(crate) fn inbox_item_active(item: &Value) -> bool {
+    item["state"] != "reviewReady" || item["working"] == true || item["waiting"] == true
+}
+
+/// The inbox as shown (PR #20 review I4): what waits for the person and what
+/// works come before what is ready for review, so many recent reviews never
+/// push them out; newest first within each; at most `TASK_INBOX_SHOWN`.
+pub(crate) fn order_task_inbox(mut items: Vec<Value>) -> Vec<Value> {
+    items.sort_by(|left, right| inbox_item_active(right).cmp(&inbox_item_active(left))
+        .then_with(|| right["updatedAt"].as_str().cmp(&left["updatedAt"].as_str()))
+        .then_with(|| left["chatId"].as_str().cmp(&right["chatId"].as_str())));
+    items.truncate(TASK_INBOX_SHOWN);
+    items
+}
+
+#[cfg(test)]
+mod task_inbox_order_tests {
+    use super::*;
+
+    /// PR #20 review I4: 250 recent reviews never push out an older task
+    /// that waits for the person or one that works.
+    #[test]
+    fn work_and_questions_come_before_many_recent_reviews() {
+        let item = |chat: String, state: &str, at: String, working: bool| json!({"chatId":chat,"projectId":"p","goal":"g","state":state,"updatedAt":at,"waiting":false,"working":working});
+        let mut items: Vec<Value> = (0..250).map(|n| item(format!("review_{n:03}"), "reviewReady", format!("2026-11-27T10:{:02}:{:02}Z", n / 60, n % 60), false)).collect();
+        items.push(item("asks".into(), "needsAttention", "2026-11-01T00:00:00Z".into(), false));
+        items.push(item("works".into(), "reviewReady", "2026-11-01T00:00:01Z".into(), true));
+        items.push(item("runs".into(), "running", "2026-11-01T00:00:02Z".into(), true));
+        let shown = order_task_inbox(items);
+        assert_eq!(shown.len(), TASK_INBOX_SHOWN);
+        let ids: Vec<_> = shown.iter().map(|item| item["chatId"].as_str().unwrap()).collect();
+        assert_eq!(&ids[..3], ["runs", "works", "asks"]);
+        assert_eq!(ids[3], "review_249", "then the newest reviews");
+    }
+}

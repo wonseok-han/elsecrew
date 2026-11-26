@@ -180,7 +180,7 @@ test("editing while saved project lookup is pending prevents switching", async (
     await opening;
     assert.deepEqual(bridge.calls, []);
     assert.equal(controller.snapshot().tabs[0].text, "typed during lookup");
-    assert.match(controller.snapshot().notice ?? "", /작업 내용이 바뀌었어요/);
+    assert.match(controller.snapshot().notice ?? "", /파일 내용이 바뀌었어요/);
   } finally { controller.dispose(); }
 });
 
@@ -818,7 +818,7 @@ test("picker AbortError는 상태를 바꾸지 않는 조용한 취소이고 ope
   const storedError = failedController.snapshot().error!;
   assert.equal(storedError.messageKey, "m5.editorError.openProject");
   assert.equal(ko[storedError.messageKey], storedError.message);
-  assert.equal(en[storedError.messageKey], "Could not open the project. Try another Git project.");
+  assert.equal(en[storedError.messageKey], "Could not open the folder. Check access permissions and select the project folder again.");
   assert.equal(failedController.snapshot().error, storedError, "display language must not require another controller operation");
   assert.equal(storedError.technicalDetail, "E_NOT_GIT /tmp/not-a-project");
   cancelledController.dispose();
@@ -834,7 +834,7 @@ test("스냅샷 생성 실패는 프로젝트를 활성화하거나 tree·변경
   await controller.chooseProject();
 
   assert.equal(controller.snapshot().project, null);
-  assert.match(controller.snapshot().error?.message ?? "", /작업 복사본을 준비하지 못했어요/);
+  assert.match(controller.snapshot().error?.message ?? "", /작업 공간을 준비하지 못했어요/);
   assert.match(controller.snapshot().error?.technicalDetail ?? "", /E_SNAPSHOT_RECOVERY_REQUIRED/);
   assert.deepEqual(bridge.calls, ["openProject", "createProjectWorktree:project_01"]);
   controller.dispose();

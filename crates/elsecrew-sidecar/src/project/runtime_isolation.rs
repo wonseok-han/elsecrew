@@ -4,11 +4,43 @@ use super::*;
 #[cfg(unix)]
 pub(crate) fn verify(root: &Dir) -> Result<(), ProjectFailure> {
     let mut remaining = SNAPSHOT_ENTRIES_MAX_V1;
-    scan(root, 0, &mut remaining)
+    scan(root, 0, &mut remaining, false)
+}
+
+/// A real repository (task worktree) may hold symbolic links: tracked ones,
+/// or tool-made ones such as `node_modules/.bin/*`. A relative link that
+/// stays inside the workspace is allowed; an absolute or escaping one, a
+/// shared (hard-linked) file or a special file is still refused.
+#[cfg(unix)]
+pub(crate) fn verify_allowing_inner_links(root: &Dir) -> Result<(), ProjectFailure> {
+    let mut remaining = SNAPSHOT_ENTRIES_MAX_V1;
+    scan(root, 0, &mut remaining, true)
+}
+
+/// Whether a relative link target, read from a directory `depth` levels
+/// below the workspace root, stays inside the workspace.
+/// `..` only at the start: after a name it could pass through a directory
+/// link and leave the workspace even though the text looks inside.
+fn stays_inside(target: &std::path::Path, depth: usize) -> bool {
+    let mut level = depth as isize;
+    let mut named = false;
+    for component in target.components() {
+        match component {
+            std::path::Component::Normal(_) => { level += 1; named = true; }
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if named { return false; }
+                level -= 1;
+                if level < 0 { return false; }
+            }
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => return false,
+        }
+    }
+    !target.as_os_str().is_empty()
 }
 
 #[cfg(unix)]
-fn scan(root: &Dir, depth: usize, remaining: &mut u64) -> Result<(), ProjectFailure> {
+fn scan(root: &Dir, depth: usize, remaining: &mut u64, inner_links: bool) -> Result<(), ProjectFailure> {
     use cap_std::fs::MetadataExt;
     if depth > 128 {
         return Err(ProjectFailure::recovery(
@@ -36,7 +68,11 @@ fn scan(root: &Dir, depth: usize, remaining: &mut u64) -> Result<(), ProjectFail
                 error.detail = "runtime directory capability unavailable".into();
                 error
             })?;
-            scan(&child, depth + 1, remaining)?;
+            scan(&child, depth + 1, remaining, inner_links)?;
+        } else if inner_links && meta.file_type().is_symlink()
+            && root.read_link_contents(&name).is_ok_and(|target| stays_inside(&target, depth))
+        {
+            continue;
         } else {
             return Err(ProjectFailure::recovery(if meta.file_type().is_symlink() {
                 "runtime symbolic link rejected"
@@ -87,8 +123,8 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let root = Dir::open_ambient_dir(temp.path(), ambient_authority()).unwrap();
         fs::write(temp.path().join("file"), b"data").unwrap();
-        assert!(scan(&root, 0, &mut 0).is_err());
-        assert!(scan(&root, 129, &mut 10).is_err());
+        assert!(scan(&root, 0, &mut 0, false).is_err());
+        assert!(scan(&root, 129, &mut 10, false).is_err());
         std::os::unix::fs::symlink(temp.path(), temp.path().join("loop")).unwrap();
         assert!(verify(&root).is_err());
     }
@@ -103,5 +139,30 @@ mod tests {
             verify(&root).unwrap_err().detail,
             "runtime special file rejected"
         );
+    }
+}
+
+#[cfg(all(test, unix))]
+mod inner_link_tests {
+    use super::*;
+
+    #[test]
+    fn only_relative_links_that_stay_inside_are_allowed() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path();
+        std::fs::create_dir_all(base.join("node_modules/.bin")).unwrap();
+        std::fs::write(base.join("node_modules/tool.js"), b"x").unwrap();
+        std::os::unix::fs::symlink("../tool.js", base.join("node_modules/.bin/tool")).unwrap();
+        std::os::unix::fs::symlink("node_modules/tool.js", base.join("top-link")).unwrap();
+        let root = Dir::open_ambient_dir(base, cap_std::ambient_authority()).unwrap();
+        verify_allowing_inner_links(&root).unwrap();
+        assert!(verify(&root).is_err());
+        for (name, target) in [("escape", "../outside"), ("deep-escape", "node_modules/../../outside"), ("absolute", "/etc/hosts"), ("through-link", "node_modules/../tool")] {
+            std::os::unix::fs::symlink(target, base.join(name)).unwrap();
+            assert!(verify_allowing_inner_links(&root).is_err(), "{name}");
+            std::fs::remove_file(base.join(name)).unwrap();
+        }
+        std::fs::hard_link(base.join("node_modules/tool.js"), base.join("shared")).unwrap();
+        assert!(verify_allowing_inner_links(&root).is_err());
     }
 }

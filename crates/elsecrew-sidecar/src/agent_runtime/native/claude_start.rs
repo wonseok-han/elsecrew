@@ -18,6 +18,10 @@ pub(crate) struct PendingClaudeStart {
 }
 
 impl PendingClaudeStart {
+    pub(crate) fn chat_id(&self) -> &str {
+        &self.identity.chat_id
+    }
+
     pub(crate) fn cancel(&self) {
         self.cancel.store(true, Ordering::Release);
     }
@@ -179,6 +183,7 @@ impl AgentRuntime {
         for id in ids {
             // Temporarily remove only while transferring ownership between maps.
             let mut pending = self.pending_claude_starts.remove(&id).unwrap();
+            let mut start_failure = None;
             if !pending.failed {
                 let result = pending.controller.advance(
                     storage,
@@ -204,21 +209,31 @@ impl AgentRuntime {
                                 let (reservation, process) = slot.unwrap().into_cleanup_parts();
                                 pending.reservation = Some(reservation);
                                 pending.process = Some(process);
-                                failure = Some(error);
+                                start_failure = Some(error);
                             }
                         }
                     }
-                    Err(error) => failure = Some(error),
+                    Err(error) => start_failure = Some(error),
                 }
                 pending.failed = true;
             }
             // Failed initialization/prompt admission is never retried. Existing
             // cleanup owns termination, terminal persistence and fence release.
-            if let Err(error) =
-                self.register_failed_start(&mut pending.reservation, &mut pending.process)
-            {
-                failure = Some(error);
-                self.pending_claude_starts.insert(id, pending);
+            match self.register_failed_start(&mut pending.reservation, &mut pending.process) {
+                // Once cleanup owns it, this run simply ends as failed; one
+                // run's start error must not stop every other session.
+                Ok(()) => {
+                    if let Some(error) = start_failure {
+                        eprintln!("Claude run start failed and was handed to cleanup: {}", error.kind);
+                    }
+                }
+                Err(error) => {
+                    // Cleanup could not take the run: keep it and report the
+                    // ownership problem, which still needs recovery.
+                    let _ = start_failure;
+                    failure = Some(error);
+                    self.pending_claude_starts.insert(id, pending);
+                }
             }
         }
         match failure {

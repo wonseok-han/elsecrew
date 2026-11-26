@@ -3,8 +3,8 @@ import {
   exactKeys,
   requireObject,
   requireSafeUnsigned,
-  validateWorktreeManifestV1,
-  type WorktreeManifestV1,
+  validateWorktreeManifest,
+  type WorktreeManifest,
 } from "./project-v1.ts";
 import {
   APP_SCHEMA_VERSION,
@@ -19,6 +19,90 @@ import {
 export const G5_SCHEMA_VERSION_V1 = 1 as const;
 export const G5_ROLE_IDS_V1 = ["planning", "coding", "review"] as const;
 export const G5_ROLE_IDS_V2 = ["coordinator", "planning", "design", "coding", "review"] as const;
+/** V3 role sets are user-defined: a fixed read-only coordinator plus 1..7 workers. */
+export const G5_ROLE_SCHEMA_VERSION_V3 = 3 as const;
+export const G5_COORDINATOR_ROLE_ID = "coordinator" as const;
+export const G5_ROLES_MAX_V3 = 8;
+export const G5_ROLE_NAME_MAX_BYTES_V3 = 64;
+export const G5_ROLE_RESPONSIBILITY_MAX_BYTES_V3 = 2000;
+export const G5_ROLE_ID_PATTERN_V3 = /^[a-z][a-z0-9-]{1,31}$/;
+/** Locale-independent default team; must equal Rust `G5_DEFAULT_ROLE_DEFINITIONS_V3`. */
+export const G5_DEFAULT_ROLE_DEFINITIONS_V3: readonly RoleDefinitionV3[] = [
+  { roleId: "coordinator", name: "총괄", responsibility: "사용자는 개발을 잘 모른다고 가정하고 쉬운 말로 대화합니다. 요청이 모호하면 먼저 1~3개의 짧은 질문으로 목표와 범위를 분명히 하고, 처음에는 가장 작게 동작하는 버전을 제안합니다. 팀원에게 맡길 때는 기대 결과물과 확인 가능한 완료 기준을 함께 적고, 검증이 완료 기준을 통과할 때까지 필요한 수정을 다시 맡깁니다. 마지막에는 한 일, 직접 실행해 보는 방법, 남은 한계, 다음에 하면 좋은 일을 전문용어 없이 정리합니다." },
+  { roleId: "planning", name: "기획", responsibility: "사용자의 목표를 기능 목록과 사용 흐름으로 정리하고, 이번에 만들 범위와 만들지 않을 범위를 나눕니다. 기능마다 사람이 직접 확인할 수 있는 완료 기준을 적습니다(예: '할 일을 추가하면 목록에 바로 보인다'). 기존 프로젝트라면 먼저 구조와 사용 중인 기술을 읽고 그에 맞춥니다. 사용자가 결정해야 할 점은 추측하지 말고 질문으로 남깁니다. 정리한 내용은 다음 담당이 볼 수 있게 docs/plan.md 문서로 남깁니다." },
+  { roleId: "design", name: "디자인", responsibility: "필요한 화면 목록과 각 화면의 구성, 화면 사이의 이동 흐름을 정합니다. 빈 화면, 불러오는 중, 오류, 성공 상태와 버튼·안내 문구를 사용자의 언어로 구체적으로 씁니다. 좁은 화면(모바일), 키보드만으로 조작, 읽기 쉬운 글자 대비를 챙깁니다. 기존 스타일이 있으면 따르고, 개발이 바로 구현할 수 있을 만큼 구체적으로 적습니다. 설계한 내용은 docs/design.md 문서로 남깁니다." },
+  { roleId: "coding", name: "개발", responsibility: "기획과 디자인의 완료 기준에 맞춰 작은 단위로 구현합니다. 기존 구조·스타일·라이브러리를 따르고, 새 라이브러리는 꼭 필요할 때만 이유와 함께 추가합니다. 빌드·테스트·실행을 직접 해 보고 결과를 확인합니다. 새로 만드는 프로젝트라면 실행 방법을 README에 적습니다. 비밀번호나 키 같은 비밀 값은 코드에 넣지 않습니다. 보고에는 바꾼 파일, 실행한 명령과 결과, 남은 문제를 적습니다." },
+  { roleId: "review", name: "검증", responsibility: "완료 기준을 하나씩 직접 실행해 보고 통과·실패로 판정합니다. 실패는 재현 순서, 기대한 결과, 실제 결과를 적습니다. 빈 입력, 데이터 유실, 오류 처리, 보안 문제도 찾습니다. 테스트를 추가하거나 실행할 수는 있지만 제품 코드는 고치지 않고 개발에게 맡길 수정 사항으로 보고합니다. 직접 확인하지 못한 항목은 '확인 못 함'으로 분명히 표시합니다. 판정 결과는 docs/review.md 문서로 남깁니다." },
+];
+/**
+ * Unicode format characters (general category Cf: direction overrides and
+ * isolates, zero-width characters, the byte order mark …). Saved role names
+ * cannot contain them, so a name cannot pose as another (custom roles R4).
+ * Must equal Rust `G5_FORMAT_CHAR_RANGES_V3`; both read
+ * tests/fixtures/m5/role-names-v3.json in their tests.
+ */
+export const G5_FORMAT_CHAR_RANGES_V3: readonly (readonly [number, number])[] = [
+  [0xad, 0xad], [0x600, 0x605], [0x61c, 0x61c], [0x6dd, 0x6dd], [0x70f, 0x70f], [0x890, 0x891], [0x8e2, 0x8e2],
+  [0x180e, 0x180e], [0x200b, 0x200f], [0x202a, 0x202e], [0x2060, 0x2064], [0x2066, 0x206f], [0xfeff, 0xfeff],
+  [0xfff9, 0xfffb], [0x110bd, 0x110bd], [0x110cd, 0x110cd], [0x13430, 0x1343f], [0x1bca0, 0x1bca3],
+  [0x1d173, 0x1d17a], [0xe0001, 0xe0001], [0xe0020, 0xe007f],
+];
+/** Names a member may never take, whatever the coordinator is called now (compared by `roleNameKey`). */
+export const G5_COORDINATOR_NAME_KEYS_V3: readonly string[] = ["총괄", "coordinator"];
+export type RoleNameProblemV3 = "format" | "coordinatorName" | "duplicate";
+
+export function hasFormatCharacter(text: string): boolean {
+  for (const char of text) {
+    const code = char.codePointAt(0)!;
+    if (G5_FORMAT_CHAR_RANGES_V3.some(([low, high]) => code >= low && code <= high)) return true;
+  }
+  return false;
+}
+
+/**
+ * What the screen shows for a starting role while its stored name is still
+ * the seed name: the translated labels (ko, en; `m5.roles.<id>`). Names are
+ * compared as shown, so these count too (review PR #8 I1). Must equal Rust
+ * `G5_LEGACY_ROLE_LABELS_V3` and the locales.
+ */
+export const G5_LEGACY_ROLE_LABELS_V3: readonly (readonly [string, readonly string[]])[] = [
+  ["coordinator", ["총괄", "Coordinator"]], ["planning", ["기획", "Planning"]], ["design", ["디자인", "Design"]],
+  ["coding", ["개발", "Development"]], ["review", ["검증", "Verification"]],
+];
+
+/**
+ * Comparison key: NFC (canonically equal spellings meet), every White_Space
+ * character removed, then lowercased (Rust: `nfc`, `char::is_whitespace`, `to_lowercase`).
+ */
+export function roleNameKey(name: string): string {
+  return name.normalize("NFC").replace(/\p{White_Space}/gu, "").toLowerCase();
+}
+
+/** Every key a role can be shown as: its stored name, plus the translated labels of an untouched starting role. */
+export function roleShownNameKeysV3(roleId: string, name: string): readonly string[] {
+  const keys = new Set([roleNameKey(name)]);
+  const seed = G5_DEFAULT_ROLE_DEFINITIONS_V3.find(definition => definition.roleId === roleId);
+  if (seed && seed.name === name) for (const label of G5_LEGACY_ROLE_LABELS_V3.find(([id]) => id === roleId)?.[1] ?? []) keys.add(roleNameKey(label));
+  return [...keys];
+}
+
+/**
+ * Problems a saved name would have, one per role in order (null = fine).
+ * Names are compared as the screen shows them (`roleShownNameKeysV3`).
+ * Applied when settings are saved, never when a stored record is read, so an
+ * older name that breaks a rule still opens and the screen asks to rename it.
+ */
+export function roleNameProblemsV3(definitions: readonly Pick<RoleDefinitionV3, "roleId" | "name">[]): readonly (RoleNameProblemV3 | null)[] {
+  const keys = definitions.map(definition => roleShownNameKeysV3(definition.roleId, definition.name));
+  const coordinator = new Set([...(keys[0] ?? []), ...G5_COORDINATOR_NAME_KEYS_V3]);
+  return definitions.map((definition, index) => {
+    if (hasFormatCharacter(definition.name)) return "format";
+    if (index === 0) return null;
+    if (keys[index]!.some(key => coordinator.has(key))) return "coordinatorName";
+    const duplicate = keys.some((other, at) => at !== index && at !== 0 && !hasFormatCharacter(definitions[at]!.name) && other.some(key => keys[index]!.includes(key)));
+    return duplicate ? "duplicate" : null;
+  });
+}
 export const G5_RUNTIMES_V1 = ["codex", "claude-code"] as const;
 export const G5_PERMISSIONS_V1 = ["readOnly", "workspaceWrite"] as const;
 export const G5_CHAT_STATES_V1 = [
@@ -69,7 +153,9 @@ export const G5D_PRODUCT_CAPABILITIES_V1 = [
   "storage.status",
 ] as const;
 
-export type RoleIdV1 = (typeof G5_ROLE_IDS_V2)[number];
+/** Fixed IDs of the V1/V2 templates; V3 IDs are any `G5_ROLE_ID_PATTERN_V3` match. */
+export type LegacyRoleIdV1 = (typeof G5_ROLE_IDS_V2)[number];
+export type RoleIdV1 = string;
 export type RuntimeV1 = (typeof G5_RUNTIMES_V1)[number];
 export type PermissionV1 = (typeof G5_PERMISSIONS_V1)[number];
 export type ChatStateV1 = (typeof G5_CHAT_STATES_V1)[number];
@@ -85,21 +171,30 @@ export interface RoleProfileV1 {
   permission: PermissionV1;
 }
 
+export interface RoleDefinitionV3 {
+  roleId: RoleIdV1;
+  name: string;
+  responsibility: string;
+}
+
 export interface ProjectRoleSettingsV1 {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   projectId: string;
   revision: number;
   roles: readonly RoleProfileV1[];
+  /** Present exactly when schemaVersion is 3; parallel to `roles`. */
+  roleDefinitions?: readonly RoleDefinitionV3[];
   updatedAt: string;
 }
 export interface ProjectRoleSettingsUpdateRequestV1 {
   projectId: string;
   expectedRevision: number;
   roles: readonly RoleProfileV1[];
+  roleDefinitions?: readonly RoleDefinitionV3[];
 }
 
 export interface ChatRecordV1 {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   chatId: string;
   taskId: string;
   projectId: string;
@@ -108,6 +203,7 @@ export interface ChatRecordV1 {
   goal: string;
   settingsRevision: number;
   roleSnapshots: readonly RoleProfileV1[];
+  roleDefinitions?: readonly RoleDefinitionV3[];
   state: ChatStateV1;
   createdAt: string;
   updatedAt: string;
@@ -164,7 +260,7 @@ export interface PrepareChatWorkspaceRequestV1 { projectId: string; applicationB
 export interface PreparedChatWorkspaceV1 {
   schemaVersion: typeof G5_SCHEMA_VERSION_V1;
   preparationId: string;
-  manifest: WorktreeManifestV1;
+  manifest: WorktreeManifest;
   bindingState: "unbound" | "bound" | "abandoned";
   boundChatId: string | null;
   createdAt: string;
@@ -335,36 +431,48 @@ export interface RecoveryResolutionTranscriptV1 {
   outcome: "resolvedAbandoned" | "processesRemain" | "revisionConflict";
 }
 
-export function validateRoleProfileV1(value: unknown): RoleProfileV1 {
+/**
+ * Saved V3 role settings may leave a model unselected (`""`, no reasoning
+ * effort) until the user picks one; chats and runs never accept that.
+ */
+export function validateRoleProfileV1(value: unknown, allowUnselected = false): RoleProfileV1 {
   const object = requireObject(value, "role profile");
   exactKeys(object, ["roleId", "runtime", "modelSelector", "reasoningEffort", "permission"]);
-  const roleId = oneOf(object.roleId, G5_ROLE_IDS_V2, "roleId");
+  const roleId = requireRoleId(object.roleId, "roleId");
   oneOf(object.runtime, G5_RUNTIMES_V1, "runtime");
-  boundedText(object.modelSelector, "modelSelector", G5_MODEL_SELECTOR_MAX_BYTES_V1);
+  if (allowUnselected && object.modelSelector === "") {
+    if (object.reasoningEffort !== null) fail("an unselected model cannot carry a reasoning effort");
+  } else boundedText(object.modelSelector, "modelSelector", G5_MODEL_SELECTOR_MAX_BYTES_V1);
   nullableBoundedText(object.reasoningEffort, "reasoningEffort", G5_REASONING_EFFORT_MAX_BYTES_V1);
   const permission = oneOf(object.permission, G5_PERMISSIONS_V1, "permission");
-  const expected = roleId === "coding" ? "workspaceWrite" : "readOnly";
-  if (permission !== expected) fail(`${roleId} permission must be ${expected}`);
+  if (roleId === G5_COORDINATOR_ROLE_ID && permission !== "readOnly") fail("coordinator permission must be readOnly");
   return object as unknown as RoleProfileV1;
 }
 
 export function validateProjectRoleSettingsV1(value: unknown): ProjectRoleSettingsV1 {
   const object = requireObject(value, "project role settings");
-  exactKeys(object, ["schemaVersion", "projectId", "revision", "roles", "updatedAt"]);
-  if (object.schemaVersion !== 1 && object.schemaVersion !== 2) fail("unsupported role schema version");
+  const v3 = object.schemaVersion === G5_ROLE_SCHEMA_VERSION_V3;
+  exactKeys(object, ["schemaVersion", "projectId", "revision", "roles", ...(v3 ? ["roleDefinitions"] : []), "updatedAt"]);
+  if (object.schemaVersion !== 1 && object.schemaVersion !== 2 && !v3) fail("unsupported role schema version");
   requireId(object.projectId, "projectId");
   positiveSequence(object.revision, "settings revision");
-  validateRoleSet(object.roles, "roles", object.schemaVersion as 1 | 2);
+  if (v3) validateRoleSetV3(object.roles, object.roleDefinitions, "roles", true);
+  else validateRoleSet(object.roles, "roles", object.schemaVersion as 1 | 2);
   timestamp(object.updatedAt, "updatedAt");
   return object as unknown as ProjectRoleSettingsV1;
 }
 
 export function validateProjectRoleSettingsUpdateRequestV1(value: unknown): ProjectRoleSettingsUpdateRequestV1 {
   const object = requireObject(value, "project role settings update");
-  exactKeys(object, ["projectId", "expectedRevision", "roles"]);
+  const v3 = Object.prototype.hasOwnProperty.call(object, "roleDefinitions");
+  exactKeys(object, ["projectId", "expectedRevision", "roles", ...(v3 ? ["roleDefinitions"] : [])]);
   requireId(object.projectId, "projectId");
   positiveSequence(object.expectedRevision, "expectedRevision");
-  validateRoleSet(object.roles, "roles");
+  if (v3) {
+    validateRoleSetV3(object.roles, object.roleDefinitions, "roles", true);
+    // Saving only: stored records keep opening (see roleNameProblemsV3).
+    if (roleNameProblemsV3(object.roleDefinitions as readonly RoleDefinitionV3[]).some(Boolean)) fail("role names must be plain, unique and distinct from the coordinator");
+  } else validateRoleSet(object.roles, "roles");
   return object as unknown as ProjectRoleSettingsUpdateRequestV1;
 }
 
@@ -384,7 +492,7 @@ export function validatePreparedChatWorkspaceV1(value: unknown): PreparedChatWor
   ]);
   schema(object.schemaVersion);
   requireId(object.preparationId, "preparationId");
-  const manifest = validateWorktreeManifestV1(object.manifest);
+  const manifest = validateWorktreeManifest(object.manifest);
   const bindingState = oneOf(object.bindingState, ["unbound", "bound", "abandoned"] as const, "prepared binding state");
   if (bindingState === "bound") requireId(object.boundChatId, "boundChatId");
   else if (object.boundChatId !== null) fail(`${bindingState} preparation cannot have boundChatId`);
@@ -531,17 +639,19 @@ export function validateChatAppendMessageTranscriptV1(value: unknown): void {
 
 export function validateChatRecordV1(value: unknown): ChatRecordV1 {
   const object = requireObject(value, "chat record");
+  const v3 = object.schemaVersion === G5_ROLE_SCHEMA_VERSION_V3;
   exactKeys(object, [
     "schemaVersion", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "goal",
-    "settingsRevision", "roleSnapshots", "state", "createdAt", "updatedAt",
+    "settingsRevision", "roleSnapshots", ...(v3 ? ["roleDefinitions"] : []), "state", "createdAt", "updatedAt",
   ]);
-  if (object.schemaVersion !== 1 && object.schemaVersion !== 2) fail("unsupported role schema version");
+  if (object.schemaVersion !== 1 && object.schemaVersion !== 2 && !v3) fail("unsupported role schema version");
   for (const field of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"] as const) {
     requireId(object[field], field);
   }
   boundedText(object.goal, "goal", G5_GOAL_MAX_BYTES_V1);
   positiveSequence(object.settingsRevision, "settingsRevision");
-  validateRoleSet(object.roleSnapshots, "roleSnapshots", object.schemaVersion as 1 | 2);
+  if (v3) validateRoleSetV3(object.roleSnapshots, object.roleDefinitions, "roleSnapshots");
+  else validateRoleSet(object.roleSnapshots, "roleSnapshots", object.schemaVersion as 1 | 2);
   oneOf(object.state, G5_CHAT_STATES_V1, "chat state");
   timestamp(object.createdAt, "createdAt");
   timestamp(object.updatedAt, "updatedAt");
@@ -559,7 +669,7 @@ export function validateChatTransitionV1(value: unknown): ChatTransitionV1 {
   ] as const) {
     if (before[field] !== after[field]) fail(`chat transition changed ${field}`);
   }
-  if (!sameJson(before.roleSnapshots, after.roleSnapshots)) fail("chat transition changed roleSnapshots");
+  if (!sameJson(before.roleSnapshots, after.roleSnapshots) || !sameJson(before.roleDefinitions ?? null, after.roleDefinitions ?? null)) fail("chat transition changed roleSnapshots");
   const allowed: Record<ChatStateV1, readonly ChatStateV1[]> = {
     draft: ["preparing"],
     preparing: ["running", "stopping", "needsAttention", "recoveryRequired"],
@@ -589,7 +699,7 @@ export function validateTeamMessageV1(value: unknown): TeamMessageV1 {
   boundedText(object.text, "public message text", G5_PUBLIC_MESSAGE_MAX_BYTES_V1);
   timestamp(object.createdAt, "createdAt");
   if (kind === "role") {
-    oneOf(object.roleId, G5_ROLE_IDS_V2, "roleId");
+    requireRoleId(object.roleId, "roleId");
     requireId(object.runId, "runId");
   } else {
     if (object.roleId !== null) fail("non-role message roleId must be null");
@@ -611,8 +721,9 @@ export function validateRunRecordV1(value: unknown): RunRecordV1 {
   oneOf(object.fixtureScenario, G5_FIXTURE_SCENARIOS_V1, "fixture scenario");
   const state = oneOf(object.state, G5_RUN_STATES_V1, "run state");
   const stage = oneOf(object.stage, G5_RUN_STAGES_V1, "run stage");
-  const expectedStage: Record<RoleIdV1, RunStageV1> = { coordinator: "planning", design: "planning", planning: "planning", coding: "implementing", review: "verifying" };
-  if (stage !== expectedStage[profile.roleId]) fail("run stage does not match selected role snapshot");
+  const expectedStage: RunStageV1 | null = profile.roleId === "planning" ? "planning" : profile.roleId === "coding" ? "implementing" : profile.roleId === "review" ? "verifying" : null;
+  if (!expectedStage) fail("unknown selected role snapshot");
+  if (stage !== expectedStage) fail("run stage does not match selected role snapshot");
   if (["preparing", "running", "cancelling"].includes(state)) {
     if (object.terminationEvidence !== null) fail("active run cannot have termination evidence");
   } else {
@@ -660,7 +771,8 @@ export function validateChatCreationTranscriptV1(value: unknown): ChatCreationTr
     }
     if (createdChat.goal !== request.goal) fail("created chat goal mismatch");
     if (createdChat.settingsRevision !== settings.revision) fail("created chat settings revision drift");
-    if (!sameJson(createdChat.roleSnapshots, settings.roles)) fail("created chat did not snapshot exact roles");
+    if (!sameJson(createdChat.roleSnapshots, settings.roles) || createdChat.schemaVersion !== settings.schemaVersion
+      || !sameJson(createdChat.roleDefinitions ?? null, settings.roleDefinitions ?? null)) fail("created chat did not snapshot exact roles");
   }
   const chatIdConflict = createdChat !== null
     && bindings.some((binding) => binding.chatId === createdChat.chatId);
@@ -792,7 +904,7 @@ function assertSamePreparedIdentity(
   }
 }
 
-function sameManifestExceptLifecycle(before: WorktreeManifestV1, after: WorktreeManifestV1): boolean {
+function sameManifestExceptLifecycle(before: WorktreeManifest, after: WorktreeManifest): boolean {
   const { lifecycle: _beforeLifecycle, ...beforeIdentity } = before;
   const { lifecycle: _afterLifecycle, ...afterIdentity } = after;
   return sameJson(beforeIdentity, afterIdentity);
@@ -1025,7 +1137,7 @@ export function validateCancelTerminationRecoveryTranscriptV1(value: unknown): C
   for (const field of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "settingsRevision"] as const) {
     if (beforeChat[field] !== afterChat[field]) fail(`cancel transcript changed chat ${field}`);
   }
-  if (!sameJson(beforeChat.roleSnapshots, afterChat.roleSnapshots) || beforeChat.goal !== afterChat.goal
+  if (!sameJson(beforeChat.roleSnapshots, afterChat.roleSnapshots) || !sameJson(beforeChat.roleDefinitions ?? null, afterChat.roleDefinitions ?? null) || beforeChat.goal !== afterChat.goal
     || beforeRun.runId !== afterRun.runId || beforeRun.fixtureScenario !== afterRun.fixtureScenario
     || !sameJson(beforeRun.selectedProfile, afterRun.selectedProfile)) {
     fail("cancel transcript identity changed");
@@ -1242,9 +1354,32 @@ export function parseG5DProductReadyPayloadV1(value: unknown): ReadyPayloadV1 {
 }
 
 function validateRoleSet(value: unknown, name: string, version?: 1 | 2): readonly RoleProfileV1[] {
-  const roles = array(value, name, G5_ROLE_IDS_V2.length).map(validateRoleProfileV1);
+  const roles = array(value, name, G5_ROLE_IDS_V2.length).map(role => validateRoleProfileV1(role));
   const canonical = version === 1 || (version === undefined && roles.length === 3) ? G5_ROLE_IDS_V1 : G5_ROLE_IDS_V2;
   if (roles.length !== canonical.length || roles.some((role, index) => role.roleId !== canonical[index])) fail(`${name} must use the canonical versioned role set`);
+  // Legacy V1/V2 sets keep their exact fixed permission mapping.
+  for (const role of roles) if (role.permission !== (role.roleId === "coding" ? "workspaceWrite" : "readOnly")) fail(`${role.roleId} permission must be fixed in legacy role sets`);
+  return roles;
+}
+
+/** V3: a coordinator first, 1..7 unique workers, and a parallel definition per role. */
+function validateRoleSetV3(value: unknown, definitionsValue: unknown, name: string, allowUnselected = false): readonly RoleProfileV1[] {
+  const roles = array(value, name, G5_ROLES_MAX_V3).map(role => validateRoleProfileV1(role, allowUnselected));
+  const definitions = array(definitionsValue, "roleDefinitions", G5_ROLES_MAX_V3);
+  if (roles.length < 2 || definitions.length !== roles.length) fail("V3 roles need a coordinator, 1 to 7 workers and one definition per role");
+  const seen = new Set<string>();
+  roles.forEach((role, index) => {
+    if ((index === 0) !== (role.roleId === G5_COORDINATOR_ROLE_ID)) fail("the first V3 role must be the only coordinator");
+    if (seen.has(role.roleId)) fail("V3 roleIds must be unique");
+    seen.add(role.roleId);
+    const definition = requireObject(definitions[index], "role definition");
+    exactKeys(definition, ["roleId", "name", "responsibility"]);
+    if (definition.roleId !== role.roleId) fail("role definition order must match roles");
+    const roleName = boundedText(definition.name, "role name", G5_ROLE_NAME_MAX_BYTES_V3);
+    if (/\p{Cc}/u.test(roleName)) fail("role name cannot contain control characters");
+    const text = definition.responsibility;
+    if (typeof text !== "string" || utf8ByteLength(text) > G5_ROLE_RESPONSIBILITY_MAX_BYTES_V3 || /[^\P{Cc}\n\t]/u.test(text)) fail("role responsibility must be bounded text");
+  });
   return roles;
 }
 
@@ -1279,8 +1414,20 @@ function sameChatIdentity(chat: ChatRecordV1, child: Pick<TeamMessageV1 | RunRec
   if ("workspaceIdentity" in child && child.workspaceIdentity !== chat.workspaceIdentity) fail("workspace identity mismatch");
 }
 
+/** Key-order independent JSON: sidecar serde_json emits object keys sorted, the renderer in insertion order. */
+export function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const object = value as Record<string, unknown>;
+    return `{${Object.keys(object).filter(key => object[key] !== undefined).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(object[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+export function sameJsonValue(left: unknown, right: unknown): boolean {
+  return canonicalJson(left) === canonicalJson(right);
+}
 function sameJson(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return sameJsonValue(left, right);
 }
 
 function array(value: unknown, name: string, maximum: number): unknown[] {
@@ -1299,11 +1446,26 @@ function positiveSequence(value: unknown, name: string): number {
   return result;
 }
 function boundedText(value: unknown, name: string, maximumBytes: number): string {
-  if (typeof value !== "string" || value.trim().length === 0 || new TextEncoder().encode(value).length > maximumBytes) fail(`${name} must be nonempty and bounded`);
+  if (typeof value !== "string" || isBlankText(value) || utf8ByteLength(value) > maximumBytes) fail(`${name} must be nonempty and bounded`);
   return value;
 }
 function nullableBoundedText(value: unknown, name: string, maximumBytes: number): void {
   if (value !== null) boundedText(value, name, maximumBytes);
+}
+/** Rust `str::trim` semantics (Unicode White_Space); unlike JS `trim`, U+FEFF is not blank. */
+export function isBlankText(value: string): boolean { return /^\p{White_Space}*$/u.test(value); }
+export function utf8ByteLength(value: string): number { return new TextEncoder().encode(value).length; }
+
+export function isRoleIdV3(value: unknown): value is string {
+  return typeof value === "string" && G5_ROLE_ID_PATTERN_V3.test(value);
+}
+function requireRoleId(value: unknown, name: string): string {
+  if (!isRoleIdV3(value)) fail(`invalid ${name}`);
+  return value;
+}
+/** Display stage: write permission selects implementation; legacy `review` keeps its verification label. */
+export function stageForProfileV3(profile: Pick<RoleProfileV1, "roleId" | "permission">): RunStageV1 {
+  return profile.permission === "workspaceWrite" ? "implementing" : profile.roleId === "review" ? "verifying" : "planning";
 }
 function oneOf<const Values extends readonly string[]>(value: unknown, values: Values, name: string): Values[number] {
   if (typeof value !== "string" || !values.includes(value)) fail(`invalid ${name}`);
@@ -1320,4 +1482,16 @@ export function coordinatorRoles(roles: readonly RoleProfileV1[]): readonly Role
   const planning = roles.find(role => role.roleId === "planning");
   if (!planning) throw new Error("Planning profile is missing");
   return [{ ...planning, roleId: "coordinator", permission: "readOnly" }, roles[0], { ...planning, roleId: "design", permission: "readOnly" }, ...roles.slice(1)];
+}
+
+/** Default definition for a legacy template ID, or a neutral one for a new role. */
+export function defaultRoleDefinitionV3(roleId: RoleIdV1): RoleDefinitionV3 {
+  return G5_DEFAULT_ROLE_DEFINITIONS_V3.find(definition => definition.roleId === roleId) ?? { roleId, name: roleId, responsibility: "" };
+}
+
+/** Lossless V1/V2 -> V3 view: legacy profiles keep their values and gain default definitions. */
+export function roleSettingsAsV3(settings: Pick<ProjectRoleSettingsV1, "roles" | "roleDefinitions">): { roles: readonly RoleProfileV1[]; roleDefinitions: readonly RoleDefinitionV3[] } {
+  if (settings.roleDefinitions) return { roles: settings.roles, roleDefinitions: settings.roleDefinitions };
+  const roles = coordinatorRoles(settings.roles);
+  return { roles, roleDefinitions: roles.map(role => defaultRoleDefinitionV3(role.roleId)) };
 }

@@ -14,6 +14,15 @@ pub const WORKSPACE_KIND_V1: &str = "standaloneSnapshot";
 pub const SNAPSHOT_TRANSPORT_V1: &str = "gitBundle";
 pub const SOURCE_MUTATION_POLICY_V1: &str = "forbidden";
 pub const WORKTREE_LIFECYCLES_V1: &[&str] = &["active", "abandoned", "recoveryRequired"];
+/// Task workspaces after the 2026-11-18 decision (`docs/proposals/m5-real-worktrees.md`):
+/// a real `git worktree` of the user's repository on one fixed branch, or a
+/// plain folder worked on in place and recorded by the app's shadow Git.
+pub const PROJECT_SCHEMA_VERSION_V2: u64 = 2;
+pub const WORKSPACE_KIND_GIT_WORKTREE_V2: &str = "gitWorktree";
+pub const WORKSPACE_KIND_SHADOW_FOLDER_V2: &str = "shadowFolder";
+pub const WORKTREE_HEAD_MODE_V2: &str = "branch";
+pub const TASK_BRANCH_PREFIX_V2: &str = "elsecrew/";
+pub const WORKTREE_LIFECYCLES_V2: &[&str] = &["active", "merged", "abandoned", "recoveryRequired"];
 pub const SNAPSHOT_BUNDLE_MAX_BYTES_V1: u64 = 2 * 1024 * 1024 * 1024;
 pub const SNAPSHOT_MATERIALIZED_TOTAL_MAX_BYTES_V1: u64 = 4 * 1024 * 1024 * 1024;
 pub const SNAPSHOT_ENTRIES_MAX_V1: u64 = 200_000;
@@ -104,7 +113,14 @@ pub fn validate_project_payload_v1(
 ) -> Result<(), ProjectContractError> {
     match validator {
         "projectIdentity" => validate_project_identity(value),
-        "worktreeManifest" => validate_worktree_manifest(value),
+        // Either record kind: a v1 copy (still opened and finished) or a v2
+        // worktree/shadow folder (2026-11-18 design). Callers that only
+        // handle one kind check `schemaVersion` themselves.
+        "worktreeManifest" => match value.get("schemaVersion").and_then(Value::as_u64) {
+            Some(PROJECT_SCHEMA_VERSION_V2) => validate_worktree_manifest_v2(value),
+            _ => validate_worktree_manifest(value),
+        },
+        "worktreeManifestV2" => validate_worktree_manifest_v2(value),
         "standaloneSnapshotInvariant" => validate_standalone_snapshot_invariant(value),
         "sourceMutationTrace" => validate_source_mutation_trace(value),
         "snapshotSizing" => validate_snapshot_sizing(value),
@@ -218,6 +234,113 @@ fn validate_worktree_manifest(value: &Value) -> Result<(), ProjectContractError>
         head_mode: string(object.get("headMode"), "headMode")?,
         lifecycle: string(object.get("lifecycle"), "lifecycle")?,
     })
+}
+
+/// The user's folder a workspace manifest came from: `canonicalGitRoot` in
+/// v1, `canonicalSourceRoot` in v2 (which also names plain folders).
+pub fn manifest_source_root(manifest: &Value) -> Option<&str> {
+    let key = if manifest.get("schemaVersion").and_then(Value::as_u64) == Some(PROJECT_SCHEMA_VERSION_V2) {
+        "canonicalSourceRoot"
+    } else {
+        "canonicalGitRoot"
+    };
+    manifest.get(key).and_then(Value::as_str)
+}
+
+/// A branch name Git accepts and the app can show: no spaces, controls,
+/// `~^:?*[\\`, `..`, `@{`, empty or dot-led parts, or a `.lock` part.
+fn branch_name(value: Option<&Value>, name: &str) -> Result<String, ProjectContractError> {
+    let text = string(value, name)?;
+    let parts_ok = text.split('/').all(|part| {
+        !part.is_empty() && !part.starts_with('.') && !part.ends_with(".lock") && !part.ends_with('.')
+    });
+    if text.is_empty()
+        || text.chars().count() > 200
+        || text.chars().any(|c| c.is_control() || c.is_whitespace() || "~^:?*[\\".contains(c))
+        || text.contains("..")
+        || text.contains("@{")
+        || text == "@"
+        || !parts_ok
+    {
+        return fail(&format!("{name} is not a usable branch name"));
+    }
+    Ok(text.to_owned())
+}
+
+fn validate_worktree_manifest_v2(value: &Value) -> Result<(), ProjectContractError> {
+    let object = object(value, "worktree manifest v2")?;
+    exact_keys(
+        object,
+        &[
+            "schemaVersion", "projectId", "worktreeId", "workspaceIdentity", "sourceIdentity",
+            "workspaceKind", "canonicalSourceRoot", "worktreePath", "gitDir",
+            "sourceMutationPolicy", "branchName", "baseRef",
+            "objectFormat", "baseCommit", "baseTree", "headMode", "lifecycle",
+        ],
+    )?;
+    if unsigned(object.get("schemaVersion"), "manifest schemaVersion")? != PROJECT_SCHEMA_VERSION_V2 {
+        return fail("manifest schemaVersion must be 2");
+    }
+    for field in ["projectId", "worktreeId", "workspaceIdentity", "sourceIdentity"] {
+        id(object.get(field), field)?;
+    }
+    let root = absolute_path(object.get("canonicalSourceRoot"), "canonicalSourceRoot")?;
+    let worktree = absolute_path(object.get("worktreePath"), "worktreePath")?;
+    let git_dir = absolute_path(object.get("gitDir"), "gitDir")?;
+    let policy = string(object.get("sourceMutationPolicy"), "sourceMutationPolicy")?;
+    match string(object.get("workspaceKind"), "workspaceKind")? {
+        WORKSPACE_KIND_GIT_WORKTREE_V2 => {
+            // The task's own checkout, outside the user's folder; the shared
+            // Git data is the user's repository.
+            if root == worktree || at_or_below(worktree, root) || at_or_below(root, worktree) {
+                return fail("a task worktree must be outside the user's repository folder");
+            }
+            if git_dir != format!("{}/.git", root.trim_end_matches('/')) {
+                return fail("a task worktree shares the repository's own .git directory");
+            }
+            if policy != "worktreeRefsOnly" {
+                return fail("a task worktree may change only its worktree record, task branch and objects");
+            }
+        }
+        WORKSPACE_KIND_SHADOW_FOLDER_V2 => {
+            // The user's folder itself; the app's Git data lives elsewhere.
+            if worktree != root {
+                return fail("a shadow folder workspace is the user's folder itself");
+            }
+            if git_dir == root || at_or_below(git_dir, root) {
+                return fail("shadow Git data never lives inside the user's folder");
+            }
+            if policy != "inPlace" {
+                return fail("a shadow folder workspace edits the folder in place");
+            }
+        }
+        _ => return fail("unknown workspace kind"),
+    }
+    let branch = branch_name(object.get("branchName"), "branchName")?;
+    if !branch.starts_with(TASK_BRANCH_PREFIX_V2) || branch.len() == TASK_BRANCH_PREFIX_V2.len() {
+        return fail("a task branch is named elsecrew/<task>");
+    }
+    match object.get("baseRef") {
+        Some(Value::Null) => {}
+        value => {
+            if branch_name(value, "baseRef")? == branch {
+                return fail("a task branch cannot be its own base");
+            }
+        }
+    }
+    let object_format = string(object.get("objectFormat"), "objectFormat")?;
+    if !matches!(object_format, "sha1" | "sha256") {
+        return fail("unsupported Git object format");
+    }
+    validate_git_oid_text(string(object.get("baseCommit"), "baseCommit")?, object_format, "baseCommit")?;
+    validate_git_oid_text(string(object.get("baseTree"), "baseTree")?, object_format, "baseTree")?;
+    if string(object.get("headMode"), "headMode")? != WORKTREE_HEAD_MODE_V2 {
+        return fail("a task workspace stays on its branch");
+    }
+    if !WORKTREE_LIFECYCLES_V2.contains(&string(object.get("lifecycle"), "lifecycle")?) {
+        return fail("unknown workspace lifecycle");
+    }
+    Ok(())
 }
 
 /// Fixed manifest policy fields. Identity, exact keys and both normalized path
@@ -1138,6 +1261,20 @@ fn validate_diff_file(value: &Value) -> Result<(), ProjectContractError> {
 fn validate_diff_entry(value: &Value) -> Result<(), ProjectContractError> {
     let object = object(value, "diff entry")?;
     let kind = diff_kind(object.get("kind"))?;
+    // Optional changed line counts: both or neither, never on a binary entry.
+    let mut object = object.clone();
+    match (object.remove("added"), object.remove("removed")) {
+        (None, None) => {}
+        (Some(added), Some(removed)) if kind != "binary" => {
+            for count in [&added, &removed] {
+                if unsigned(Some(count), "diff line count")? > super::MAX_SEQUENCE {
+                    return fail("diff line count must be a non-negative safe integer");
+                }
+            }
+        }
+        _ => return fail("diff line counts must come as a pair on a text entry"),
+    }
+    let object = &object;
     if kind == "renamed" {
         exact_keys(object, &["kind", "path", "oldPath", "binary"])?;
         let old = relative_path(object.get("oldPath"), "rename oldPath", false)?;

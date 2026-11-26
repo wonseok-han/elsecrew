@@ -48,6 +48,43 @@ impl LoginManager {
         self.request_inner(storage, params, Some(projects))
     }
 
+    /// After a deleted task's stopped run was settled, release a sign-in hold
+    /// bound to that run while its workspace evidence still exists. Uses the
+    /// same proof as the explicit "recover" action; a failed proof changes
+    /// nothing and the user can still check again later.
+    pub(crate) fn release_bound_fence(&mut self, storage: &Storage, projects: &crate::project::ProjectManager) -> bool {
+        self.reap_finished();
+        if self.worker.is_some() {
+            return false;
+        }
+        // Run holds first: they never block the sign-in hold's proof.
+        let sign_in = |profile: &dyn crate::provider_profile::LoginProfile| {
+            let _ = crate::provider_login_process::clean_publish_leftovers(profile);
+            let _ = recover_run_holds(profile, storage, Some(projects));
+            if !crate::provider_login_process::has_login_hold(profile)? {
+                return Err(SidecarError::new("providerLoginRecoveryRequired", "no sign-in hold"));
+            }
+            crate::provider_login_process::recover_confirmed_login(profile)
+                .or_else(|_| crate::provider_login_process::recover_settled_login(profile))
+                .or_else(|error| recover_bound(profile, storage, Some(projects), error))
+        };
+        let result = if self.claude {
+            crate::provider_claude_profile::ClaudeProfileBinding::from_storage(storage).and_then(|profile| sign_in(&profile))
+        } else {
+            CodexProfileBinding::from_storage(storage).and_then(|profile| sign_in(&profile))
+        };
+        let released = result.is_ok();
+        if released {
+            // Only a view that was showing this very hold is cleared; any
+            // other state (for example "connected") stays what it was.
+            let mut view = self.view.lock().unwrap_or_else(|e| e.into_inner());
+            if view["error"] == "providerLoginRecoveryRequired" {
+                *view = json!({"state":"idle","attemptId":self.attempt,"authUrl":null,"error":null});
+            }
+        }
+        released
+    }
+
     fn request_inner(
         &mut self, storage: &Storage, params: &Value, projects: Option<&crate::project::ProjectManager>,
     ) -> Result<Value, SidecarError> {
@@ -129,17 +166,22 @@ impl LoginManager {
                 if self.worker.is_some() {
                     return Err(invalid());
                 }
+                // Runs' own holds whose runs ended, then the sign-in hold.
+                let recover = |profile: &dyn crate::provider_profile::LoginProfile| {
+                    crate::provider_login_process::clean_publish_leftovers(profile)?;
+                    let runs = recover_run_holds(profile, storage, projects);
+                    if !crate::provider_login_process::has_login_hold(profile)? {
+                        return runs;
+                    }
+                    crate::provider_login_process::recover_confirmed_login(profile)
+                        .or_else(|_| crate::provider_login_process::recover_settled_login(profile))
+                        .or_else(|error| recover_bound(profile, storage, projects, error))
+                        .and(runs)
+                };
                 let result = if self.claude {
-                    crate::provider_claude_profile::ClaudeProfileBinding::from_storage(storage)
-                        .and_then(|profile| {
-                            crate::provider_login_process::recover_confirmed_login(&profile)
-                                .or_else(|error| recover_bound(&profile, storage, projects, error))
-                        })
+                    crate::provider_claude_profile::ClaudeProfileBinding::from_storage(storage).and_then(|profile| recover(&profile))
                 } else {
-                    CodexProfileBinding::from_storage(storage).and_then(|profile| {
-                        crate::provider_login_process::recover_confirmed_login(&profile)
-                            .or_else(|error| recover_bound(&profile, storage, projects, error))
-                    })
+                    CodexProfileBinding::from_storage(storage).and_then(|profile| recover(&profile))
                 };
                 self.attempt = id.map(str::to_owned);
                 *self.view.lock().unwrap_or_else(|e| e.into_inner()) = match result {
@@ -290,6 +332,11 @@ impl LoginManager {
         } else {
             "codex-login.pending"
         };
+        // A run's own hold (ADE multi-project P5) blocks an install as the sign-in hold does.
+        let prefix = if self.claude { "claude" } else { "codex" };
+        if crate::provider_login_process::run_hold_names(&directory, prefix).map_or(true, |names| !names.is_empty()) {
+            return true;
+        }
         match directory.symlink_metadata(name) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
             _ => true,
@@ -324,9 +371,37 @@ impl LoginManager {
 fn recover_bound(profile: &dyn crate::provider_profile::LoginProfile, storage: &Storage,
     projects: Option<&crate::project::ProjectManager>, original: SidecarError) -> Result<(), SidecarError> {
     let Some(projects) = projects else { return Err(original); };
-    crate::provider_login_process::recover_bound_run(profile, |binding, identities| {
+    crate::provider_login_process::recover_bound_run(profile, profile.pending_name(), |binding, identities| {
         crate::agent_runtime::verify_resolved_provider_fence(storage, projects, binding, identities)
     })
+}
+
+/// Each run's own hold (ADE multi-project P5) whose run has durably ended,
+/// by the same proof as a bound sign-in hold. A hold a live run still owns is
+/// busy and simply stays. The first unproven one is the error.
+pub(crate) fn recover_run_holds(profile: &dyn crate::provider_profile::LoginProfile, storage: &Storage,
+    projects: Option<&crate::project::ProjectManager>) -> Result<(), SidecarError> {
+    let mut result = Ok(());
+    for name in crate::provider_login_process::profile_run_holds(profile)? {
+        // A model list, a check, or a run that died before it was bound: the
+        // hold's own proof, no run record needed (PR #20 review B2).
+        let outcome = match crate::provider_login_process::recover_unbound_run(profile, &name) {
+            Ok(true) => Ok(()),
+            Ok(false) => match projects {
+                Some(projects) => crate::provider_login_process::recover_bound_run(profile, &name, |binding, identities| {
+                    crate::agent_runtime::verify_resolved_provider_fence(storage, projects, binding, identities)
+                }),
+                None => Err(SidecarError::new("providerLoginRecoveryRequired", "a run hold needs its run's record")),
+            },
+            Err(error) => Err(error),
+        };
+        match outcome {
+            Ok(()) => {}
+            Err(error) if error.kind() == "providerBusy" => {}
+            Err(error) => if result.is_ok() { result = Err(error) },
+        }
+    }
+    result
 }
 
 pub(super) fn valid_code(code: &str) -> bool {
@@ -909,6 +984,21 @@ mod tests {
         assert_eq!(status["state"], "failed");
         assert_eq!(status["error"], "providerLoginRecoveryRequired");
         assert!(root.join("codex-login.pending").exists());
+    }
+
+    /// Asking to recover with no hold at all is nothing to do: it must not
+    /// leave the profile looking fenced (that also blocked quitting).
+    #[test]
+    fn recovering_with_no_hold_is_idle_and_lets_the_app_quit() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let storage = Storage::open(&root.join("elsecrew.sqlite3")).unwrap();
+        let mut manager = LoginManager::default();
+        let status = manager
+            .request(&storage, &json!({"action":"recover","attemptId":"nothing"}))
+            .unwrap();
+        assert_eq!((status["state"].as_str(), status["error"].is_null()), (Some("idle"), true));
+        assert!(manager.prepare_quit());
     }
 
     #[test]

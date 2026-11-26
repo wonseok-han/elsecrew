@@ -110,3 +110,37 @@ export function splitDiffPage(rows: readonly DiffRow[]): SplitDiffRow[] {
   }
   return result;
 }
+
+/**
+ * The engine's file diff carries both versions whole: one hunk with every old
+ * line as `-` and every new line as `+`. Rebuild the two texts so a real
+ * side-by-side comparison (Monaco) can show only what changed. Null when the
+ * text has any other shape; the caller then keeps the plain listing.
+ */
+export function diffSides(text: string): { before: string; after: string } | null {
+  const lines = text.split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+  const hunk = lines.findIndex(line => line.startsWith("@@"));
+  if (hunk < 0 || lines.slice(hunk + 1).some(line => line.startsWith("@@"))) return null;
+  const match = /^@@ -\d+,(\d+) \+\d+,(\d+) @@$/.exec(lines[hunk]!);
+  if (!match) return null;
+  const before: string[] = [];
+  const after: string[] = [];
+  let beforeEndsOpen = false;
+  let afterEndsOpen = false;
+  let last: "before" | "after" | null = null;
+  for (const line of lines.slice(hunk + 1)) {
+    if (line === "\\ No newline at end of file") {
+      if (last === "before") beforeEndsOpen = true;
+      else if (last === "after") afterEndsOpen = true;
+      else return null;
+      continue;
+    }
+    if (line.startsWith("-") && after.length === 0 && !afterEndsOpen) { before.push(line.slice(1)); last = "before"; }
+    else if (line.startsWith("+")) { after.push(line.slice(1)); last = "after"; }
+    else return null;
+  }
+  if (before.length !== Number(match[1]) || after.length !== Number(match[2])) return null;
+  const join = (rows: string[], open: boolean) => rows.length ? rows.join("\n") + (open ? "" : "\n") : "";
+  return { before: join(before, beforeEndsOpen), after: join(after, afterEndsOpen) };
+}

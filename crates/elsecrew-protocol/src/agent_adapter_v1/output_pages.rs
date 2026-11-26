@@ -89,7 +89,13 @@ pub enum OutputItemOperation { Append, Complete }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum OutputItemChannel { Message, Plan }
+pub enum OutputItemChannel {
+    Message,
+    Plan,
+    /// One tool use (read, edit, command…) as a compact JSON line, so the team
+    /// chat shows the work as it happens. Always a completed status row.
+    Activity,
+}
 
 impl OutputItemUpdate {
     pub fn validate(&self, event: &AgentPublicEventV1) -> Result<(), AgentAdapterContractError> {
@@ -97,6 +103,8 @@ impl OutputItemUpdate {
             || self.item_id.chars().any(char::is_control)
             || !matches!(event.kind.as_str(), "status" | "final")
             || (event.kind == "final" && self.operation != OutputItemOperation::Complete)
+            || (self.channel == OutputItemChannel::Activity
+                && (event.kind != "status" || self.operation != OutputItemOperation::Complete))
         {
             return Err(AgentAdapterContractError::new("invalid output item update"));
         }
@@ -172,6 +180,13 @@ mod tests {
         assert!(update.validate(&event).is_err());
         update.operation = OutputItemOperation::Complete;
         assert!(update.validate(&event).is_ok());
+        let mut activity = OutputItemUpdate { item_id: "activity-1".into(), operation: OutputItemOperation::Complete, channel: OutputItemChannel::Activity };
+        assert!(activity.validate(&event).is_err(), "activity is never a final answer");
+        event.kind = "status".into();
+        assert!(activity.validate(&event).is_ok());
+        activity.operation = OutputItemOperation::Append;
+        assert!(activity.validate(&event).is_err(), "activity rows are whole");
+        event.kind = "final".into();
         for id in [String::new(), "a\0b".into(), "가".repeat(43)] {
             update.item_id = id;
             assert!(update.validate(&event).is_err());

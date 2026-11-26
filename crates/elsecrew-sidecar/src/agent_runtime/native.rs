@@ -14,6 +14,12 @@ pub(super) struct FailedStart {
     persisted: bool,
 }
 
+impl FailedStart {
+    pub(super) fn chat_id(&self) -> &str {
+        self.reservation.chat_id()
+    }
+}
+
 pub(super) struct NativeRun {
     owner: NativeOwner,
     pub(super) identity: RunIdentity,
@@ -27,15 +33,34 @@ pub(super) struct NativeRun {
 }
 
 impl NativeRun {
+    pub(super) fn runtime(&self) -> &'static str {
+        match self.owner {
+            NativeOwner::Codex(_) => "codex",
+            NativeOwner::Claude(_) => "claude-code",
+        }
+    }
+
     fn live_approvals(
         &mut self,
         storage: &Storage,
         projects: &ProjectManager,
         identity: &RunIdentity,
     ) -> Result<&mut super::approval::ApprovalQueue, SidecarError> {
+        self.live_approvals_with(storage, projects, identity, false)
+    }
+
+    /// `viewing`: listing or looking at what waits (owners'
+    /// `registration_identity_with`); answering checks in full.
+    fn live_approvals_with(
+        &mut self,
+        storage: &Storage,
+        projects: &ProjectManager,
+        identity: &RunIdentity,
+        viewing: bool,
+    ) -> Result<&mut super::approval::ApprovalQueue, SidecarError> {
         if self.stopped
             || identity_value(&self.identity) != identity_value(identity)
-            || identity_value(&self.owner.registration_identity(storage, projects)?)
+            || identity_value(&self.owner.registration_identity_with(storage, projects, viewing)?)
                 != identity_value(identity)
         {
             return Err(SidecarError::new(
@@ -409,8 +434,14 @@ impl AgentRuntime {
             .ok_or_else(invalid)?;
         let keys: &[&str] = match action {
             "list" => &["action", "identity"],
+            // A large Claude tool input is read in pages (PR #19 review B1).
+            "inspect" if params.get("page").is_some() => &["action", "identity", "approvalId", "page"],
             "decline" | "inspect" | "acceptOnce" => &["action", "identity", "approvalId"],
             _ => return Err(invalid()),
+        };
+        let page = match params.get("page") {
+            None => None,
+            Some(value) => Some(value.as_u64().filter(|page| *page < 4096).ok_or_else(invalid)? as usize),
         };
         let object = params.as_object().ok_or_else(invalid)?;
         if object.len() != keys.len() || !keys.iter().all(|key| object.contains_key(*key)) {
@@ -428,12 +459,50 @@ impl AgentRuntime {
         };
         if let Some(active) = self.native.get_mut(&identity.run_id) {
             if let NativeOwner::Claude(owner) = &mut active.owner {
-                if active.stopped || !same_identity(&active.identity, &identity)
-                    || !same_identity(&owner.registration_identity(storage, projects)?, &identity) {
+                // A Claude run that has stopped or finished its output is
+                // still listed for a moment: nothing is waiting there either,
+                // and viewing a request there shows nothing (never an answer).
+                let listing = (action == "list" || action == "inspect") && same_identity(&active.identity, &identity);
+                if listing && active.stopped {
+                    return Ok(nothing_waiting(raw, action));
+                }
+                if active.stopped || !same_identity(&active.identity, &identity) {
                     return Err(invalid());
                 }
-                return owner.approval_request(action, params.get("approvalId").and_then(Value::as_str), &raw);
+                // Viewing may reuse a Git check of the last few seconds (the
+                // screen asks every 750 ms; a slow answer let Claude withdraw
+                // a request before it showed). Answering checks in full.
+                let registered = match owner.registration_identity_with(storage, projects, listing) {
+                    Ok(registered) => registered,
+                    Err(_error) if listing => {
+                        // Development builds, once per run (the screen asks every 750 ms).
+                        #[cfg(debug_assertions)]
+                        {
+                            static LOGGED: std::sync::Mutex<Option<std::collections::HashSet<String>>> = std::sync::Mutex::new(None);
+                            if LOGGED.lock().map(|mut seen| seen.get_or_insert_with(Default::default).insert(identity.run_id.clone())).unwrap_or(false) {
+                                crate::orchestration_dispatch::dev_diagnosis(&format!("approval list of a run no longer registered: {}", _error.kind));
+                            }
+                        }
+                        return Ok(nothing_waiting(raw, action));
+                    }
+                    Err(error) => return Err(error),
+                };
+                if !same_identity(&registered, &identity) {
+                    return Err(invalid());
+                }
+                return owner.approval_request(action, params.get("approvalId").and_then(Value::as_str), page, &raw);
             }
+        }
+        // Only a Claude tool input is read in pages.
+        if page.is_some() {
+            return Err(invalid());
+        }
+        // A run that already ended has nothing waiting. The screen keeps asking
+        // until it learns the run ended (a few 750 ms polls); that is not an
+        // error, and viewing a request of it shows nothing. Accepting or
+        // declining for an ended run still refuses.
+        if (action == "list" || action == "inspect") && !self.native.contains_key(&identity.run_id) {
+            return Ok(nothing_waiting(raw, action));
         }
         let queued = if action == "decline" || action == "acceptOnce" {
             let id = params["approvalId"].as_str().ok_or_else(invalid)?;
@@ -457,22 +526,29 @@ impl AgentRuntime {
         let active = self.native.get_mut(&identity.run_id).ok_or_else(|| {
             SidecarError::new("agentApprovalChanged", "approval run is no longer current")
         })?;
-        active.live_approvals(storage, projects, &identity)?;
+        active.live_approvals_with(storage, projects, &identity, queued.is_none())?;
         let connection = format!("{}:{}", active.stream_id, active.owner.connection_id());
         let pending = active.approvals.summaries(
             &identity,
             &connection,
             &active.owner.pending_approvals(),
         )?;
-        let mut result = json!({"identity":raw,"pending":pending,"queued":queued});
+        let mut result = json!({"identity":raw,"pending":&pending,"queued":queued});
         if action == "inspect" {
             let id = params["approvalId"].as_str().ok_or_else(invalid)?;
-            result["inspection"] = active.approvals.inspect(
-                &identity,
-                &connection,
-                &active.owner.pending_approvals(),
-                id,
-            )?;
+            // A request answered or withdrawn since the screen's last list
+            // has nothing to show (the screen then drops it).
+            let waiting = pending.iter().any(|item| item["approvalId"] == id);
+            result["inspection"] = if waiting {
+                active.approvals.inspect(
+                    &identity,
+                    &connection,
+                    &active.owner.pending_approvals(),
+                    id,
+                )?
+            } else {
+                Value::Null
+            };
         }
         Ok(result)
     }
@@ -673,6 +749,16 @@ impl AgentRuntime {
         }
         Ok(events)
     }
+}
+
+/// "Nothing is waiting" for a listing, or for a view of a request that is
+/// no longer waiting (`inspection` is then null).
+fn nothing_waiting(raw: &Value, action: &str) -> Value {
+    let mut result = json!({"identity":raw,"pending":[],"queued":Value::Null});
+    if action == "inspect" {
+        result["inspection"] = Value::Null;
+    }
+    result
 }
 
 #[cfg(test)]

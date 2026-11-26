@@ -1,4 +1,4 @@
-import { validateChatRecordV1, validateProjectRoleSettingsV1, validateProjectRoleSettingsUpdateRequestV1, type ProjectRoleSettingsV1, type RoleProfileV1, type ChatRecordV1 } from "./run-recovery-v1.ts";
+import { sameJsonValue, validateChatRecordV1, validateProjectRoleSettingsV1, validateProjectRoleSettingsUpdateRequestV1, type ProjectRoleSettingsV1, type RoleProfileV1, type RoleDefinitionV3, type ChatRecordV1 } from "./run-recovery-v1.ts";
 import { validateProjectIdentityV1, type ProjectIdentityV1 } from "./project-v1.ts";
 
 export const PROJECT_CATALOG_METHOD = "project.catalog";
@@ -41,9 +41,35 @@ function validateGitTrustInspection(value: unknown): GitTrustInspection {
 export type TeamTaskCancelRequest = ChatDiscardAddress & { action: "cancelTeamTask"; triggerMessageId: string };
 export type AutomationPermissions = { files: boolean; commands: boolean };
 export interface WorkspaceCleanupEntry { chatId: string; projectId: string; title: string; eligible: boolean; pending: boolean }
+/** docs/proposals/m5-chat-erasure.md: erased chats are omitted; preview is a bounded goal excerpt. */
+export interface ChatErasureEntry { chatId: string; projectId: string; preview: string; eligible: boolean; state: "none" | "pending" | "redacted" }
+/** How many runs of each agent may work at once (ADE multi-project P3′). */
+export const RUN_LIMIT_MAX = 6;
+export interface RunLimits { codex: number; "claude-code": number }
+function runLimit(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > RUN_LIMIT_MAX) throw new Error("invalid run limit");
+  return value as number;
+}
+
+/** A task of any project that works or waits (ADE multi-project P4). */
+export const TASK_INBOX_STATES = ["preparing", "running", "stopping", "applying", "waitingForUser", "needsAttention", "recoveryRequired", "reviewReady"] as const;
+export interface TaskInboxItem {
+  projectId: string; chatId: string; goal: string;
+  state: (typeof TASK_INBOX_STATES)[number]; updatedAt: string;
+  /** In line for a run of its agent. */ waiting: boolean;
+  /** A run, a start or stop, or a team step is in flight. */ working: boolean;
+}
+
+/** A task of any project at work, for the project badges: every one, not
+ * only those the shortened inbox list shows (PR #20 review I4). */
+export interface TaskInboxWorking { projectId: string; chatId: string }
+export const TASK_INBOX_WORKING_MAX = 1000;
+
 export type ProjectCatalogRequest =
   | { action: "workspaceCleanupList" }
   | { action: "cleanupWorkspace"; chatId: string; confirmed: true }
+  | { action: "chatErasureList" }
+  | { action: "eraseChatContent"; chatId: string; confirmed: true }
   | { action: "getAutomationPermissions"; projectId: string }
   | { action: "setAutomationPermissions"; projectId: string; permissions: AutomationPermissions; confirmed: true }
   | { action: "getProviderConnections" }
@@ -53,12 +79,22 @@ export type ProjectCatalogRequest =
   | { action: "confirmGitTrust"; identity: GitTrustIdentity; confirmed: true }
   | { action: "revokeGitTrust" }
   | { action: "getAppRoleDefaults" }
-  | { action: "updateAppRoleDefaults"; expectedRevision: number; roles: readonly RoleProfileV1[] }
+  | { action: "updateAppRoleDefaults"; expectedRevision: number; roles: readonly RoleProfileV1[]; roleDefinitions?: readonly RoleDefinitionV3[] }
   | ({ action: "inspectChatDiscard" } & ChatDiscardAddress)
   | { action: "discardChatWorkspace"; inspection: ChatDiscardInspection; confirmed: true }
-  | { action: "removeProject"; projectId: string }
-  | { action: "restoreChats"; projectId: string }
-  | { action: "removeChat"; projectId: string; chatId: string }
+  | { action: "inspectSourceChanges"; projectId: string }
+  | { action: "getWorkspaceFolder" } | { action: "chooseWorkspaceFolder" } | { action: "resetWorkspaceFolder" }
+  /** Main process only: the renderer asks with chooseWorkspaceFolder. */
+  | { action: "setWorkspaceFolder"; path: string }
+  | ({ action: "inspectChatMerge" } & ChatMergeAddress)
+  | ({ action: "mergeChatWorkspace"; expectedHead: string; expectedBase: string; keepConflicts: boolean; confirmed: true } & ChatMergeAddress)
+  | { action: "deleteProject"; projectId: string; confirmed: true }
+  | { action: "deleteChat"; projectId: string; chatId: string; confirmed: true }
+  | { action: "finishDeletions" }
+  | { action: "workStatus" }
+  | { action: "taskInbox" }
+  | { action: "getRunLimits" }
+  | { action: "setRunLimit"; runtime: "codex" | "claude-code"; limit: number }
   | { action: "list"; cursor: string | null } | { action: "reopen"; projectId: string } | { action: "releaseView"; projectId: string }
   | { action: "applicationCapabilities" }
   | { action: "inspectApplicationRetirement"; projectId: string; applicationId: string }
@@ -80,16 +116,49 @@ export type ProjectCatalogRequest =
   | { action: "inspectPreparation"; projectId: string }
   | { action: "applicationStatus"; projectId: string }
   | { action: "chatApplicationStatus"; projectId: string; chatId: string }
+  | { action: "applyChatLatest"; projectId: string; chatId: string }
+  | { action: "inspectChatApply"; projectId: string; chatId: string }
   | { action: "applicationHistory"; projectId: string }
-  | { action: "applicationPreview"; projectId: string }
   | { action: "chatApplicationPreview"; projectId: string; chatId: string }
-  | { action: "prepareApplicationWorkspace"; projectId: string }
   | { action: "abandonPreparation"; inspection: PreparationInspection };
 export interface ProjectCatalogEntry { projectId: string; canonicalPath: string }
+/** A task worktree's place against its base branch (task = PR). */
+export interface ChatMergeAddress { chatId: string; projectId: string; worktreeId: string; workspaceIdentity: string }
+export type ChatMergeBlock = "noBaseBranch" | "baseBranchMissing" | "baseInOtherWorktree" | "conflictsUnresolved" | "nothingToMerge";
+export type ChatMergeBlockReason = "noBaseBranch" | "changedSinceReview" | "userChangesOverlap" | "baseInOtherWorktree" | "unsupportedRepository" | "conflictsUnresolved" | "folderChangesTooLarge" | "folderHasRepository";
+const MERGE_BLOCK_REASONS: readonly ChatMergeBlockReason[] = ["noBaseBranch", "changedSinceReview", "userChangesOverlap", "baseInOtherWorktree", "unsupportedRepository", "conflictsUnresolved", "folderChangesTooLarge", "folderHasRepository"];
+export type ChatMergeState =
+  | { kind: "snapshot" }
+  | { kind: "gitWorktree"; branch: string; baseRef: string | null; head: string; baseTip: string | null; ahead: number; behind: number; uncommitted: boolean; baseCheckedOut: boolean;
+      /** A base merge handed to the team; `unresolved` files still carry conflict marks. */
+      resolving: boolean; unresolved: number;
+      /** The task's first commit is already in the base: merged before. */
+      mergedBefore: boolean; blocked: ChatMergeBlock | null };
+export type ChatMergeOutcome =
+  | { outcome: "merged"; merge: ChatMergeState }
+  | { outcome: "conflict"; teamResolvable: boolean; conflictCount: number; conflicts: string[]; merge: ChatMergeState }
+  | { outcome: "resolving"; conflictCount: number; conflicts: string[]; merge: ChatMergeState }
+  | { outcome: "blocked"; reason: ChatMergeBlockReason; merge: ChatMergeState };
+const OID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+function validateChatMergeState(value: unknown): ChatMergeState {
+  const state = object(value);
+  if (state.kind === "snapshot") { keys(state, ["kind"]); return state as ChatMergeState; }
+  keys(state, ["kind", "branch", "baseRef", "head", "baseTip", "ahead", "behind", "uncommitted", "baseCheckedOut", "resolving", "unresolved", "mergedBefore", "blocked"]);
+  if (state.kind !== "gitWorktree" || typeof state.branch !== "string" || !state.branch.startsWith("elsecrew/") || state.branch.length > 200) throw new Error("invalid merge branch");
+  if (state.baseRef !== null && (typeof state.baseRef !== "string" || !state.baseRef || state.baseRef.length > 200)) throw new Error("invalid merge base");
+  if (typeof state.head !== "string" || !OID.test(state.head) || (state.baseTip !== null && (typeof state.baseTip !== "string" || !OID.test(state.baseTip)))) throw new Error("invalid merge commit");
+  if (typeof state.resolving !== "boolean" || (!state.resolving && state.unresolved !== 0)) throw new Error("invalid merge resolution");
+  for (const key of ["ahead", "behind", "unresolved"] as const) if (!Number.isSafeInteger(state[key]) || (state[key] as number) < 0) throw new Error("invalid merge count");
+  if (typeof state.uncommitted !== "boolean" || typeof state.baseCheckedOut !== "boolean" || typeof state.mergedBefore !== "boolean") throw new Error("invalid merge flags");
+  if (state.blocked !== null && !["noBaseBranch", "baseBranchMissing", "baseInOtherWorktree", "conflictsUnresolved", "nothingToMerge"].includes(String(state.blocked))) throw new Error("invalid merge block");
+  return state as ChatMergeState;
+}
 export type ProjectCatalogResult =
   | { schemaVersion: 1; action: "workspaceCleanupList"; entries: WorkspaceCleanupEntry[] }
   | { schemaVersion: 1; action: "cleanupWorkspace"; chatId: string; deleted: true }
-  | { schemaVersion: 1; action: "getAutomationPermissions" | "setAutomationPermissions"; projectId: string; permissions: AutomationPermissions }
+  | { schemaVersion: 1; action: "chatErasureList"; entries: ChatErasureEntry[] }
+  | { schemaVersion: 1; action: "eraseChatContent"; chatId: string; erased: true }
+  | { schemaVersion: 1; action: "getAutomationPermissions" | "setAutomationPermissions"; projectId: string; permissions: AutomationPermissions; recorded: boolean }
   | { schemaVersion: 1; action: "getProviderConnections" | "setProviderConnection"; connections: { codex: boolean; "claude-code": boolean } }
   | { schemaVersion: 1; action: "cancelTeamTask"; chatId: string; triggerMessageId: string; status: "stopping" | "stopped" }
   | { schemaVersion: 1; action: "inspectGitTrust" | "confirmGitTrust"; inspection: GitTrustInspection }
@@ -97,6 +166,10 @@ export type ProjectCatalogResult =
   | { schemaVersion: 1; action: "getAppRoleDefaults" | "updateAppRoleDefaults"; settings: AppRoleDefaults }
   | { schemaVersion: 1; action: "inspectChatDiscard"; inspection: ChatDiscardInspection }
   | { schemaVersion: 1; action: "discardChatWorkspace"; chat: ChatRecordV1 }
+  | { schemaVersion: 1; action: "inspectSourceChanges"; changes: { applies: boolean; uncommitted: number } }
+  | { schemaVersion: 1; action: "getWorkspaceFolder" | "chooseWorkspaceFolder" | "setWorkspaceFolder" | "resetWorkspaceFolder"; folder: { path: string; custom: boolean } }
+  | { schemaVersion: 1; action: "inspectChatMerge"; merge: ChatMergeState }
+  | ({ schemaVersion: 1; action: "mergeChatWorkspace" } & ChatMergeOutcome)
   | { schemaVersion: 1; action: "applicationCapabilities"; enabled: boolean }
   | { schemaVersion: 1; action: "inspectApplicationRetirement"; projectId: string; enabled: boolean; inspection: ApplicationRetirementInspection }
   | { schemaVersion: 1; action: "retireApplication"; projectId: string; applicationId: string }
@@ -115,16 +188,22 @@ export type ProjectCatalogResult =
   | { schemaVersion: 1; action: "cancelApplicationConfirmation"; confirmationId: string }
   | { schemaVersion: 1; action: "applicationPreviewPage"; projectId: string; chatId: string | null; page: ApplicationPreviewPage }
   | { schemaVersion: 1; action: "chatApplicationPreview"; projectId: string; chatId: string; preview: ApplicationPreview }
-  | { schemaVersion: 1; action: "prepareApplicationWorkspace"; projectId: string; worktreeId: string }
-  | { schemaVersion: 1; action: "applicationPreview"; projectId: string; preview: ApplicationPreview }
   | { schemaVersion: 1; action: "applicationHistory"; projectId: string; entries: ApplicationHistoryEntry[] }
   | { schemaVersion: 1; action: "applicationStatus"; status: ApplicationStatus }
   | { schemaVersion: 1; action: "chatApplicationStatus"; chatId: string; status: ApplicationStatus }
-  | { schemaVersion: 1; action: "inspectPreparation" | "abandonPreparation"; inspection: PreparationInspection }
+  | { schemaVersion: 1; action: "applyChatLatest"; projectId: string; chatId: string; written: number; removed: number; skipped: string[]; failed: string | null }
+  /** `applied`: a complete apply was recorded; `pending`: changed paths that
+   * differ from what was applied (all of them when never applied). */
+  | { schemaVersion: 1; action: "inspectChatApply"; projectId: string; chatId: string; applied: boolean; pending: number; total: number }
+  | { schemaVersion: 1; action: "inspectPreparation"; inspection: PreparationInspection | null }
+  | { schemaVersion: 1; action: "abandonPreparation"; inspection: PreparationInspection }
   | { schemaVersion: 1; action: "list"; projects: ProjectCatalogEntry[]; nextCursor: string | null }
-  | { schemaVersion: 1; action: "removeProject"; projectId: string }
-  | { schemaVersion: 1; action: "restoreChats"; projectId: string }
-  | { schemaVersion: 1; action: "removeChat"; projectId: string; chatId: string }
+  | { schemaVersion: 1; action: "deleteProject"; projectId: string }
+  | { schemaVersion: 1; action: "deleteChat"; projectId: string; chatId: string; projectClosed: boolean }
+  | { schemaVersion: 1; action: "finishDeletions"; pending: number }
+  | { schemaVersion: 1; action: "workStatus"; working: boolean }
+  | { schemaVersion: 1; action: "taskInbox"; items: TaskInboxItem[]; workingTasks: TaskInboxWorking[] }
+  | { schemaVersion: 1; action: "getRunLimits" | "setRunLimit"; limits: RunLimits }
   | { schemaVersion: 1; action: "releaseView"; projectId: string }
   | { schemaVersion: 1; action: "reopen"; project: ProjectIdentityV1 };
 
@@ -164,6 +243,11 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
   } else if (request.action === "cleanupWorkspace") {
     keys(request,["action","chatId","confirmed"]); id(request.chatId);
     if (request.confirmed !== true) throw new Error("cleanup confirmation required");
+  } else if (request.action === "chatErasureList") {
+    keys(request,["action"]);
+  } else if (request.action === "eraseChatContent") {
+    keys(request,["action","chatId","confirmed"]); id(request.chatId);
+    if (request.confirmed !== true) throw new Error("erasure confirmation required");
   } else if (request.action === "getAutomationPermissions" || request.action === "setAutomationPermissions") {
     keys(request, request.action === "setAutomationPermissions" ? ["action","projectId","permissions","confirmed"] : ["action","projectId"]);
     id(request.projectId);
@@ -188,11 +272,26 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
   } else if (request.action === "getAppRoleDefaults") {
     keys(request, ["action"]);
   } else if (request.action === "updateAppRoleDefaults") {
-    keys(request, ["action", "expectedRevision", "roles"]);
-    validateProjectRoleSettingsUpdateRequestV1({projectId: "app_defaults", expectedRevision: request.expectedRevision, roles: request.roles});
+    const v3 = Object.prototype.hasOwnProperty.call(request, "roleDefinitions");
+    keys(request, ["action", "expectedRevision", "roles", ...(v3 ? ["roleDefinitions"] : [])]);
+    validateProjectRoleSettingsUpdateRequestV1({projectId: "app_defaults", expectedRevision: request.expectedRevision, roles: request.roles, ...(v3 ? { roleDefinitions: request.roleDefinitions } : {})});
   } else if (request.action === "inspectChatDiscard") {
     keys(request, ["action", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"]);
     for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"]) id(request[key]);
+  } else if (request.action === "inspectSourceChanges") {
+    keys(request, ["action", "projectId"]); id(request.projectId);
+  } else if (request.action === "getWorkspaceFolder" || request.action === "chooseWorkspaceFolder" || request.action === "resetWorkspaceFolder") {
+    keys(request, ["action"]);
+  } else if (request.action === "setWorkspaceFolder") {
+    keys(request, ["action", "path"]);
+    if (typeof request.path !== "string" || !request.path.startsWith("/") || request.path.length > 4096 || /[\u0000-\u001f]/u.test(request.path)) throw new Error("invalid workspace folder");
+  } else if (request.action === "inspectChatMerge" || request.action === "mergeChatWorkspace") {
+    const merging = request.action === "mergeChatWorkspace";
+    keys(request, ["action", "chatId", "projectId", "worktreeId", "workspaceIdentity", ...(merging ? ["expectedHead", "expectedBase", "keepConflicts", "confirmed"] : [])]);
+    if (merging && typeof request.keepConflicts !== "boolean") throw new Error("invalid keepConflicts");
+    for (const key of ["chatId", "projectId", "worktreeId", "workspaceIdentity"]) id(request[key]);
+    if (merging && (!OID.test(String(request.expectedHead)) || !OID.test(String(request.expectedBase)))) throw new Error("invalid merge commits");
+    if (merging && request.confirmed !== true) throw new Error("merging requires explicit confirmation");
   } else if (request.action === "discardChatWorkspace") {
     keys(request, ["action", "inspection", "confirmed"]);
     validateChatDiscardInspection(request.inspection);
@@ -237,15 +336,40 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
   } else if (request.action === "list") {
     keys(request, ["action", "cursor"]);
     if (request.cursor !== null) id(request.cursor);
-  } else if (request.action === "removeProject" || request.action === "restoreChats" || request.action === "reopen" || request.action === "releaseView" || request.action === "inspectPreparation" || request.action === "applicationStatus" || request.action === "applicationHistory" || request.action === "applicationPreview" || request.action === "prepareApplicationWorkspace") {
+  } else if (request.action === "deleteProject") {
+    keys(request, ["action", "projectId", "confirmed"]); id(request.projectId);
+    if (request.confirmed !== true) throw new Error("deletion requires confirmation");
+  } else if (request.action === "deleteChat") {
+    keys(request, ["action", "projectId", "chatId", "confirmed"]); id(request.projectId); id(request.chatId);
+    if (request.confirmed !== true) throw new Error("deletion requires confirmation");
+  } else if (request.action === "finishDeletions" || request.action === "workStatus" || request.action === "taskInbox" || request.action === "getRunLimits") {
+    keys(request, ["action"]);
+  } else if (request.action === "setRunLimit") {
+    keys(request, ["action", "runtime", "limit"]);
+    if (request.runtime !== "codex" && request.runtime !== "claude-code") throw new Error("invalid run limit agent");
+    runLimit(request.limit);
+  } else if (request.action === "reopen" || request.action === "releaseView" || request.action === "inspectPreparation" || request.action === "applicationStatus" || request.action === "applicationHistory") {
     keys(request, ["action", "projectId"]); id(request.projectId);
-  } else if (request.action === "removeChat" || request.action === "chatApplicationPreview" || request.action === "chatApplicationStatus") {
+  } else if (request.action === "chatApplicationPreview" || request.action === "chatApplicationStatus" || request.action === "applyChatLatest" || request.action === "inspectChatApply") {
     keys(request, ["action", "projectId", "chatId"]); id(request.projectId); id(request.chatId);
   } else if (request.action === "abandonPreparation") {
     keys(request, ["action", "inspection"]); validatePreparationInspection(request.inspection);
   } else throw new Error("invalid project catalog action");
   return request as ProjectCatalogRequest;
 }
+/** One page of changes: bounded, relative, unique paths with a known kind. */
+function validatePreviewBody(value: unknown): void {
+  const preview = object(value);
+  keys(preview, ["worktreeId", "total", "changes"]); id(preview.worktreeId);
+  if (!Number.isSafeInteger(preview.total) || (preview.total as number) < 0 || (preview.total as number) > 100000 || !Array.isArray(preview.changes) || preview.changes.length !== Math.min(100, preview.total as number)) throw new Error("invalid preview bounds");
+  const seen = new Set<string>();
+  for (const raw of preview.changes) {
+    const change = object(raw); keys(change, ["path", "kind"]);
+    if (typeof change.path !== "string" || !change.path || new TextEncoder().encode(change.path).byteLength > 4096 || change.path.includes("\0") || change.path.split("/").some(part => !part || part === "." || part === "..") || seen.has(change.path) || !["added", "modified", "deleted"].includes(String(change.kind))) throw new Error("invalid preview path");
+    seen.add(change.path);
+  }
+}
+
 export function validateProjectCatalogResult(value: unknown, input: ProjectCatalogRequest): ProjectCatalogResult {
   const request = validateProjectCatalogRequest(input);
   const result = object(value);
@@ -263,10 +387,26 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   } else if (request.action === "cleanupWorkspace") {
     keys(result,["schemaVersion","action","chatId","deleted"]);
     if (result.chatId !== request.chatId || result.deleted !== true) throw new Error("cleanup receipt mismatch");
+  } else if (request.action === "chatErasureList") {
+    keys(result,["schemaVersion","action","entries"]);
+    if (!Array.isArray(result.entries) || result.entries.length > 200) throw new Error("invalid erasure list");
+    const seen = new Set<string>();
+    for (const raw of result.entries) {
+      const entry = object(raw); keys(entry,["chatId","projectId","preview","eligible","state"]);
+      id(entry.chatId); id(entry.projectId);
+      if (typeof entry.preview !== "string" || [...entry.preview].length > 160 || typeof entry.eligible !== "boolean"
+        || !["none","pending","redacted"].includes(entry.state as string) || seen.has(entry.chatId as string)) throw new Error("invalid erasure entry");
+      seen.add(entry.chatId as string);
+    }
+  } else if (request.action === "eraseChatContent") {
+    // Completion is reported only after the durable `erased` record (no partial success).
+    keys(result,["schemaVersion","action","chatId","erased"]);
+    if (result.chatId !== request.chatId || result.erased !== true) throw new Error("erasure receipt mismatch");
   } else if (request.action === "getAutomationPermissions" || request.action === "setAutomationPermissions") {
-    keys(result,["schemaVersion","action","projectId","permissions"]);
+    keys(result,["schemaVersion","action","projectId","permissions","recorded"]);
     const permissions = object(result.permissions); keys(permissions,["files","commands"]);
-    if (result.projectId !== request.projectId || typeof permissions.files !== "boolean" || typeof permissions.commands !== "boolean") throw new Error("invalid automation permissions");
+    if (result.projectId !== request.projectId || typeof permissions.files !== "boolean" || typeof permissions.commands !== "boolean" || typeof result.recorded !== "boolean") throw new Error("invalid automation permissions");
+    if (request.action === "setAutomationPermissions" && result.recorded !== true) throw new Error("automation permission receipt differs");
     if (request.action === "setAutomationPermissions" && (permissions.files !== request.permissions.files || permissions.commands !== request.permissions.commands)) throw new Error("automation permission receipt differs");
   } else if (request.action === "cancelTeamTask") {
     keys(result, ["schemaVersion", "action", "chatId", "triggerMessageId", "status"]);
@@ -287,13 +427,40 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   } else if (request.action === "getAppRoleDefaults" || request.action === "updateAppRoleDefaults") {
     keys(result, ["schemaVersion", "action", "settings"]);
     const settings = object(result.settings);
-    keys(settings, ["schemaVersion", "revision", "roles", "updatedAt"]);
+    keys(settings, ["schemaVersion", "revision", "roles", ...(settings.schemaVersion === 3 ? ["roleDefinitions"] : []), "updatedAt"]);
     validateProjectRoleSettingsV1({...settings, projectId: "app_defaults"});
+    // Sidecar JSON keys come back sorted; compare values, not key order.
+    if (request.action === "updateAppRoleDefaults" && (!sameJsonValue(request.roleDefinitions ?? null, settings.roleDefinitions ?? null)
+      || !Array.isArray(settings.roles) || settings.roles.length !== request.roles.length)) throw new Error("app defaults result differs from request");
     if (request.action === "updateAppRoleDefaults" && (settings.revision !== request.expectedRevision + 1 || !request.roles.every((role, index) => (["roleId", "runtime", "modelSelector", "reasoningEffort", "permission"] as const).every(key => role[key] === (settings.roles as readonly RoleProfileV1[])[index]?.[key])))) throw new Error("app defaults result differs from request");
   } else if (request.action === "inspectChatDiscard") {
     keys(result, ["schemaVersion", "action", "inspection"]);
     const inspection = validateChatDiscardInspection(result.inspection);
     for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"] as const) if (inspection[key] !== request[key]) throw new Error("discard inspection address mismatch");
+  } else if (request.action === "getWorkspaceFolder" || request.action === "chooseWorkspaceFolder" || request.action === "setWorkspaceFolder" || request.action === "resetWorkspaceFolder") {
+    keys(result, ["schemaVersion", "action", "folder"]);
+    const folder = object(result.folder); keys(folder, ["path", "custom"]);
+    if (typeof folder.path !== "string" || !folder.path.startsWith("/") || typeof folder.custom !== "boolean") throw new Error("invalid workspace folder");
+  } else if (request.action === "inspectSourceChanges") {
+    keys(result, ["schemaVersion", "action", "changes"]);
+    const changes = object(result.changes); keys(changes, ["applies", "uncommitted"]);
+    if (typeof changes.applies !== "boolean" || !Number.isSafeInteger(changes.uncommitted) || (changes.uncommitted as number) < 0) throw new Error("invalid source changes");
+  } else if (request.action === "inspectChatMerge") {
+    keys(result, ["schemaVersion", "action", "merge"]);
+    validateChatMergeState(result.merge);
+  } else if (request.action === "mergeChatWorkspace") {
+    if (result.outcome === "merged") keys(result, ["schemaVersion", "action", "outcome", "merge"]);
+    else if (result.outcome === "conflict" || result.outcome === "resolving") {
+      if (result.outcome === "resolving" && !request.keepConflicts) throw new Error("conflicts were kept without being asked");
+      keys(result, ["schemaVersion", "action", "outcome", ...(result.outcome === "conflict" ? ["teamResolvable"] : []), "conflictCount", "conflicts", "merge"]);
+      if (result.outcome === "conflict" && typeof result.teamResolvable !== "boolean") throw new Error("invalid teamResolvable");
+      if (!Number.isSafeInteger(result.conflictCount) || !Array.isArray(result.conflicts) || result.conflicts.length > 100
+        || (result.conflictCount as number) < result.conflicts.length || result.conflicts.some(path => typeof path !== "string" || !path || path.length > 4096)) throw new Error("invalid merge conflicts");
+    } else if (result.outcome === "blocked") {
+      keys(result, ["schemaVersion", "action", "outcome", "reason", "merge"]);
+      if (!MERGE_BLOCK_REASONS.includes(result.reason as ChatMergeBlockReason)) throw new Error("invalid merge block");
+    } else throw new Error("invalid merge outcome");
+    if (validateChatMergeState(result.merge).kind !== "gitWorktree") throw new Error("merge result is not a worktree");
   } else if (request.action === "discardChatWorkspace") {
     keys(result, ["schemaVersion", "action", "chat"]);
     const chat = validateChatRecordV1(result.chat);
@@ -377,24 +544,12 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
     if (page.offset !== request.offset || !Number.isSafeInteger(page.total) || (page.total as number) < request.offset || (page.total as number) > 100000 || typeof page.fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(page.fingerprint) || (request.fingerprint !== null && page.fingerprint !== request.fingerprint) || !Array.isArray(page.changes) || page.changes.length !== Math.min(100, (page.total as number) - request.offset)) throw new Error("review page mismatch");
     // Reuse the exact path/kind and bounded-list validator without treating a
     // later page as the first page of the complete change set.
-    validateProjectCatalogResult({schemaVersion:1,action:"applicationPreview",projectId:request.projectId,preview:{worktreeId:page.worktreeId,total:page.changes.length,changes:page.changes}}, {action:"applicationPreview",projectId:request.projectId});
-  } else if (request.action === "prepareApplicationWorkspace") {
-    keys(result, ["schemaVersion", "action", "projectId", "worktreeId"]);
-    if (id(result.projectId) !== request.projectId) throw new Error("prepared application project mismatch");
-    id(result.worktreeId);
-  } else if (request.action === "applicationPreview" || request.action === "chatApplicationPreview") {
-    keys(result, request.action === "chatApplicationPreview" ? ["schemaVersion", "action", "projectId", "chatId", "preview"] : ["schemaVersion", "action", "projectId", "preview"]);
-    if (request.action === "chatApplicationPreview" && id(result.chatId) !== request.chatId) throw new Error("preview chat mismatch");
+    validatePreviewBody({ worktreeId: page.worktreeId, total: page.changes.length, changes: page.changes });
+  } else if (request.action === "chatApplicationPreview") {
+    keys(result, ["schemaVersion", "action", "projectId", "chatId", "preview"]);
+    if (id(result.chatId) !== request.chatId) throw new Error("preview chat mismatch");
     if (id(result.projectId) !== request.projectId) throw new Error("preview project mismatch");
-    const preview = object(result.preview);
-    keys(preview, ["worktreeId", "total", "changes"]); id(preview.worktreeId);
-    if (!Number.isSafeInteger(preview.total) || (preview.total as number) < 0 || (preview.total as number) > 100000 || !Array.isArray(preview.changes) || preview.changes.length !== Math.min(100, preview.total as number)) throw new Error("invalid preview bounds");
-    const seen = new Set<string>();
-    for (const raw of preview.changes) {
-      const change = object(raw); keys(change, ["path", "kind"]);
-      if (typeof change.path !== "string" || !change.path || new TextEncoder().encode(change.path).byteLength > 4096 || change.path.includes("\0") || change.path.split("/").some(part => !part || part === "." || part === "..") || seen.has(change.path) || !["added", "modified", "deleted"].includes(String(change.kind))) throw new Error("invalid preview path");
-      seen.add(change.path);
-    }
+    validatePreviewBody(result.preview);
   } else if (request.action === "applicationHistory") {
     keys(result, ["schemaVersion", "action", "projectId", "entries"]);
     if (id(result.projectId) !== request.projectId || !Array.isArray(result.entries) || result.entries.length > 1000) throw new Error("invalid application history");
@@ -406,6 +561,18 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
       seen.add(entry.applicationId);
       if (!["applied", "restored", "abandoned"].includes(String(entry.state)) || !Number.isSafeInteger(entry.total) || (entry.total as number) < 0 || (entry.total as number) > 100000) throw new Error("invalid historical summary");
     }
+  } else if (request.action === "applyChatLatest") {
+    keys(result, ["schemaVersion","action","projectId","chatId","written","removed","skipped","failed"]);
+    if (result.failed !== null && (typeof result.failed !== "string" || !result.failed.length || result.failed.length > 4096)) throw new Error("invalid failed path");
+    if (id(result.projectId) !== request.projectId || id(result.chatId) !== request.chatId) throw new Error("apply target mismatch");
+    for (const count of [result.written, result.removed]) if (!Number.isSafeInteger(count) || (count as number) < 0) throw new Error("invalid apply count");
+    if (!Array.isArray(result.skipped) || result.skipped.length > 100000 || !result.skipped.every(path => typeof path === "string" && path.length > 0 && path.length <= 4096)) throw new Error("invalid skipped paths");
+  } else if (request.action === "inspectChatApply") {
+    keys(result, ["schemaVersion","action","projectId","chatId","applied","pending","total"]);
+    if (id(result.projectId) !== request.projectId || id(result.chatId) !== request.chatId) throw new Error("apply target mismatch");
+    if (typeof result.applied !== "boolean") throw new Error("invalid apply state");
+    for (const count of [result.pending, result.total]) if (!Number.isSafeInteger(count) || (count as number) < 0) throw new Error("invalid apply count");
+    if ((result.pending as number) > (result.total as number)) throw new Error("invalid apply count");
   } else if (request.action === "applicationStatus" || request.action === "chatApplicationStatus") {
     keys(result, request.action === "chatApplicationStatus" ? ["schemaVersion","action","chatId","status"] : ["schemaVersion","action","status"]);
     if (request.action === "chatApplicationStatus" && id(result.chatId) !== request.chatId) throw new Error("application status chat mismatch");
@@ -424,14 +591,39 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
     if (status.currentIndex !== null && (!Number.isSafeInteger(status.currentIndex) || (status.currentIndex as number) < 0 || (status.currentIndex as number) >= (status.total as number))) throw new Error("invalid application cursor");
   } else if (request.action === "inspectPreparation" || request.action === "abandonPreparation") {
     keys(result, ["schemaVersion", "action", "inspection"]);
+    // null: the project has no interrupted start at all (a normal answer).
+    if (request.action === "inspectPreparation" && result.inspection === null) return result as ProjectCatalogResult;
     const inspection = validatePreparationInspection(result.inspection);
     if (request.action === "inspectPreparation") {
       if (inspection.projectId !== request.projectId) throw new Error("preparation project mismatch");
     } else if (Object.keys(inspection).some(key => inspection[key as keyof PreparationInspection] !== request.inspection[key as keyof PreparationInspection])) throw new Error("preparation response mismatch");
-  } else if (request.action === "removeChat") {
-    keys(result, ["schemaVersion", "action", "projectId", "chatId"]);
-    if (id(result.projectId) !== request.projectId || id(result.chatId) !== request.chatId) throw new Error("catalog removal identity mismatch");
-  } else if (request.action === "releaseView" || request.action === "removeProject" || request.action === "restoreChats") {
+  } else if (request.action === "deleteChat") {
+    keys(result, ["schemaVersion", "action", "projectId", "chatId", "projectClosed"]);
+    if (id(result.projectId) !== request.projectId || id(result.chatId) !== request.chatId || typeof result.projectClosed !== "boolean") throw new Error("deletion identity mismatch");
+  } else if (request.action === "getRunLimits" || request.action === "setRunLimit") {
+    keys(result, ["schemaVersion", "action", "limits"]);
+    const limits = result.limits as Record<string, unknown>;
+    if (!limits || typeof limits !== "object") throw new Error("invalid run limits");
+    keys(limits, ["codex", "claude-code"]); runLimit(limits.codex); runLimit(limits["claude-code"]);
+    if (request.action === "setRunLimit" && limits[request.runtime] !== request.limit) throw new Error("run limit not saved");
+  } else if (request.action === "taskInbox") {
+    keys(result, ["schemaVersion", "action", "items", "workingTasks"]);
+    if (!Array.isArray(result.items) || result.items.length > 200) throw new Error("invalid task inbox");
+    if (!Array.isArray(result.workingTasks) || result.workingTasks.length > TASK_INBOX_WORKING_MAX) throw new Error("invalid task inbox work");
+    for (const task of result.workingTasks as Record<string, unknown>[]) { keys(task, ["projectId", "chatId"]); id(task.projectId); id(task.chatId); }
+    for (const item of result.items as Record<string, unknown>[]) {
+      keys(item, ["projectId", "chatId", "goal", "state", "updatedAt", "waiting", "working"]);
+      id(item.projectId); id(item.chatId);
+      if (typeof item.goal !== "string" || item.goal.length > 4000 || typeof item.state !== "string" || !TASK_INBOX_STATES.includes(item.state as TaskInboxItem["state"])
+        || typeof item.updatedAt !== "string" || item.updatedAt.length > 64 || typeof item.waiting !== "boolean" || typeof item.working !== "boolean") throw new Error("invalid task inbox item");
+    }
+  } else if (request.action === "workStatus") {
+    keys(result, ["schemaVersion", "action", "working"]);
+    if (typeof result.working !== "boolean") throw new Error("invalid work status");
+  } else if (request.action === "finishDeletions") {
+    keys(result, ["schemaVersion", "action", "pending"]);
+    if (!Number.isSafeInteger(result.pending) || (result.pending as number) < 0) throw new Error("invalid pending deletions");
+  } else if (request.action === "releaseView" || request.action === "deleteProject") {
     keys(result, ["schemaVersion", "action", "projectId"]);
     if (id(result.projectId) !== request.projectId) throw new Error("catalog release identity mismatch");
   } else if (request.action === "reopen") {

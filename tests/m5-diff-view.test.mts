@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { diffPages, diffRows, splitDiffPage, DIFF_PAGE_ROWS } from "../src/m5/diff-view.ts";
+import { diffPages, diffRows, diffSides, splitDiffPage, DIFF_PAGE_ROWS } from "../src/m5/diff-view.ts";
 
 test("unified diff distinguishes file headers, context, changes and multiple hunks", () => {
   const rows = diffRows("--- a/a.ts\n+++ b/a.ts\n@@ -2,2 +2,2 @@ function\n same\n-old\n+new\n@@ -10 +20 @@\n-x\n+y\n");
@@ -102,4 +102,22 @@ test("split comparison is page bounded and preserves every numbered source line 
   }
   assert.deepEqual(before, Array.from({length:210}, (_,i)=>i+1));
   assert.deepEqual(after, before);
+});
+
+test("the engine's whole-file diff rebuilds both sides for a real comparison", () => {
+  const head = "diff --git a/a.js b/a.js\n--- a/a.js\n+++ b/a.js\n";
+  assert.deepEqual(diffSides(head + "@@ -1,2 +1,2 @@\n-one\n-two\n+one\n+TWO\n"), { before: "one\ntwo\n", after: "one\nTWO\n" });
+  // Added and deleted files have one empty side.
+  assert.deepEqual(diffSides("--- /dev/null\n+++ b/n.txt\n@@ -0,0 +1,1 @@\n+new\n"), { before: "", after: "new\n" });
+  assert.deepEqual(diffSides("--- a/o.txt\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-old\n"), { before: "old\n", after: "" });
+  // A missing final newline is kept on the side it belongs to.
+  assert.deepEqual(diffSides(head + "@@ -1,1 +1,1 @@\n-a\n\\ No newline at end of file\n+a\n"), { before: "a", after: "a\n" });
+  assert.deepEqual(diffSides(head + "@@ -1,1 +1,1 @@\n-a\n+b\n\\ No newline at end of file\n"), { before: "a\n", after: "b" });
+  // Lines that start like headers are content inside the hunk.
+  assert.deepEqual(diffSides(head + "@@ -1,1 +1,1 @@\n---x\n++++y\n"), { before: "--x\n", after: "+++y\n" });
+  // Any other shape (context lines, several hunks, wrong counts) keeps the plain view.
+  assert.equal(diffSides(head + "@@ -1,2 +1,2 @@\n same\n-a\n+b\n"), null);
+  assert.equal(diffSides(head + "@@ -1,1 +1,1 @@\n-a\n+b\n@@ -5,1 +5,1 @@\n-c\n+d\n"), null);
+  assert.equal(diffSides(head + "@@ -1,2 +1,1 @@\n-a\n+b\n"), null);
+  assert.equal(diffSides(head + "@@ -1,1 +1,1 @@\n+b\n-a\n"), null);
 });

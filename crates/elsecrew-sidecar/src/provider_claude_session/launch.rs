@@ -14,8 +14,9 @@ pub(crate) struct Scope {
 
 impl Scope {
     pub(crate) fn revalidate(&self) -> Result<(), SidecarError> {
-        self.executable.revalidate()?;
-        crate::provider_profile::verify_runtime_files(&self.home)
+        let program = self.executable.revalidate()?;
+        // Other live runs of this profile may have their sockets here (P5).
+        crate::provider_profile::verify_claude_home_files(&self.home, Some(program))
     }
 
     pub(crate) fn verify(&self, workspace: &Path, home: &Path, model: &str, effort: Option<&str>, access: ToolAccess, owner: elsecrew_core::proctree::ProcIdentity) -> Result<(), SidecarError> {
@@ -23,8 +24,8 @@ impl Scope {
             || self.effort.as_deref() != effort || self.access != access {
             return Err(super::initialization_failure("launch scope identity"));
         }
-        self.executable.revalidate()?;
-        crate::provider_profile::verify_claude_runtime_files(&self.home, owner)
+        let program = self.executable.revalidate()?;
+        crate::provider_profile::verify_claude_runtime_files(&self.home, owner, Some(program))
     }
 }
 

@@ -442,3 +442,19 @@ fn tree_directory_first_order_and_cross_kind_duplicates() {
         assert!(validate_tree_page(&page(entries)).is_err());
     }
 }
+
+#[test]
+fn diff_line_counts_are_an_optional_pair_on_text_entries() {
+    let summary = |entry: Value| json!({"projectId":"project_1","baseCommit":"a".repeat(40),"entries":[entry]});
+    assert!(validate_project_payload_v1("diffSummary", &summary(json!({"kind":"modified","path":"a.txt","binary":false,"added":3,"removed":1}))).is_ok());
+    assert!(validate_project_payload_v1("diffSummary", &summary(json!({"kind":"added","path":"a.txt","binary":false}))).is_ok());
+    for bad in [
+        json!({"kind":"modified","path":"a.txt","binary":false,"added":3}),
+        json!({"kind":"modified","path":"a.txt","binary":false,"added":-1,"removed":0}),
+        json!({"kind":"modified","path":"a.txt","binary":false,"added":"3","removed":0}),
+        json!({"kind":"binary","path":"a.bin","binary":true,"added":0,"removed":0}),
+        json!({"kind":"modified","path":"a.txt","binary":false,"added":1,"removed":0,"extra":true}),
+    ] {
+        assert!(validate_project_payload_v1("diffSummary", &summary(bad.clone())).is_err(), "{bad}");
+    }
+}

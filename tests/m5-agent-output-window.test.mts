@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { reduceOutputWindow, OUTPUT_WINDOW_BYTES, type OutputWindow } from "../src/m5/agent-output-window.ts";
+import { reduceOutputWindow, OUTPUT_WINDOW_BYTES, OUTPUT_WINDOW_ACTIVITY_ROWS, type OutputWindow } from "../src/m5/agent-output-window.ts";
 import type { OutputPage, OutputRow } from "../src/m5/contracts/agent-output-pages.ts";
 
 const fixture: OutputPage = JSON.parse(readFileSync(new URL("./fixtures/m5/agent-output-page.json", import.meta.url), "utf8"));
@@ -26,6 +26,18 @@ test("three thousand events retain only a bounded window without losing cursor",
   assert.equal(state.hasEarlier, true);
   for (let seq = 3001; seq <= 3100; seq++) state = reduceOutputWindow(state, [row(seq, "가".repeat(21000))]);
   assert.ok(state.rows.reduce((sum, row) => sum + row.textBytes, 0) <= OUTPUT_WINDOW_BYTES);
+});
+test("a long run of tool uses keeps the agent's messages in the live window", () => {
+  let state = reduceOutputWindow(empty(), [row(1, "first message", "complete")]);
+  for (let seq = 2; seq <= 1001; seq++) {
+    state = reduceOutputWindow(state, [{ outputSequence: seq, event: { ...fixture.rows[0]!.event, eventId: `agent_event_${seq}`, kind: "status", text: `{"action":"read","target":"f${seq}"}` },
+      itemUpdate: { itemId: `activity_${seq}`, channel: "activity", operation: "complete" } }]);
+  }
+  assert.equal(state.rows[0]!.text, "first message");
+  assert.equal(state.rows.filter(value => value.channel === "activity").length, OUTPUT_WINDOW_ACTIVITY_ROWS);
+  assert.equal(state.rows.at(-1)!.text, '{"action":"read","target":"f1001"}');
+  assert.equal(state.hasEarlier, true);
+  assert.equal(state.cursor, 1001);
 });
 test("failed batch leaves original cursor and content intact", () => {
   const state = reduceOutputWindow(empty(), [row(1, "hello")]);

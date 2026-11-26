@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
@@ -202,6 +203,25 @@ test("advertised native model choices round-trip only scoped display data", asyn
   assert.equal(request.method, "agent.getModelChoices");
   const result = { schemaVersion: 1, runtime: "codex", scope: { chatId: "chat_test", roleId: "planning", worktreeId: "work_test", workspaceIdentity: "workspace_test" }, models: [{ modelSelector: "test-model", reasoningEfforts: ["medium"] }] };
   child.stdout.write(responseLine(request.requestId, result));
+  assert.deepEqual(await pending, result);
+});
+
+test("a busy provider profile is asked again instead of failing the model list", async () => {
+  const { child, client } = createClient();
+  const ready = JSON.parse(g5dAgentReadyLine());
+  ready.payload.capabilities = [...G5D_NATIVE_CAPABILITIES_V1];
+  const starting = client.start(); child.stdout.write(`${JSON.stringify(ready)}\n`); await starting;
+  const pending = client.getModelChoices({ runtime: "codex", refresh: true, chatId: "chat_test", roleId: "planning" });
+  const first = JSON.parse(child.writes.at(-1)!);
+  child.stdout.write(`${JSON.stringify({ protocolVersion: 1, kind: "response", sidecarInstanceId: "sidecar_test_01", requestId: first.requestId, ok: false,
+    error: { code: "providerBusy", kind: "requestBlocked", detail: "another provider check currently owns this profile; retry after it finishes", retryable: true, outcomeUnknown: false } })}\n`);
+  const writes = child.writes.length;
+  for (let i = 0; i < 40 && child.writes.length === writes; i++) await new Promise(resolve => setTimeout(resolve, 100));
+  const second = JSON.parse(child.writes.at(-1)!);
+  assert.equal(second.method, "agent.getModelChoices");
+  assert.notEqual(second.requestId, first.requestId);
+  const result = { schemaVersion: 1, runtime: "codex", scope: { chatId: "chat_test", roleId: "planning", worktreeId: "work_test", workspaceIdentity: "workspace_test" }, models: [{ modelSelector: "test-model", reasoningEfforts: ["medium"] }] };
+  child.stdout.write(responseLine(second.requestId, result));
   assert.deepEqual(await pending, result);
 });
 
@@ -1353,13 +1373,66 @@ test("G5 recovery-ready status stays connected for recovery APIs and unsafe quit
 
   const exits: string[] = [];
   const coordinator = new QuitCoordinatorV1({
-    prepareSidecarQuit: async () => ({ safeToQuit: false, blockers: ["recovery_01"] }),
+    prepareSidecarQuit: async () => ({ safeToQuit: false, blockers: ["run:recovery_01"] }),
     failedBeforeReady: () => false,
     allowProcessExit: (kind) => exits.push(kind),
   });
-  assert.deepEqual(await coordinator.prepareQuit(), { safeToQuit: false, blockers: ["recovery_01"] });
+  assert.deepEqual(await coordinator.prepareQuit(), { safeToQuit: false, blockers: ["run:recovery_01"] });
   assert.equal(coordinator.exitAllowed, false);
   assert.deepEqual(exits, []);
+});
+
+test("quitting is never refused: stored records, a stopped service or a hung one still close the app", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const flush = async () => { for (let index = 0; index < 6; index += 1) await Promise.resolve(); };
+  const run = async (prepare: () => Promise<{ safeToQuit: boolean; blockers: string[] }>, advance = 0) => {
+    const exits: string[] = [];
+    let started = 0;
+    let calls = 0;
+    const coordinator = new QuitCoordinatorV1({
+      prepareSidecarQuit: () => { calls += 1; return prepare(); },
+      failedBeforeReady: () => false,
+      allowProcessExit: (kind) => exits.push(kind),
+      onQuitStarted: () => { started += 1; },
+    });
+    coordinator.handleBeforeQuit();
+    coordinator.handleBeforeQuit();
+    await flush();
+    if (advance) { t.mock.timers.tick(advance); await flush(); }
+    return { exits, started, calls, allowed: coordinator.exitAllowed };
+  };
+  // Stored recovery only: nothing to wait for; the next start shows it again.
+  assert.deepEqual(await run(async () => ({ safeToQuit: false, blockers: ["run:agent_run_1", "lock:lock_w"] })),
+    { exits: ["uncleanQuit"], started: 1, calls: 1, allowed: true });
+  // The task service is gone.
+  assert.deepEqual(await run(async () => { throw new Error("sidecar exited"); }),
+    { exits: ["uncleanQuit"], started: 1, calls: 1, allowed: true });
+  // The task service never answers.
+  assert.deepEqual(await run(() => new Promise(() => {}), 15_000),
+    { exits: ["uncleanQuit"], started: 1, calls: 1, allowed: true });
+});
+
+test("a quit waits for running work to stop, then closes cleanly or anyway", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const tick = async () => { await new Promise<void>((resolve) => setImmediate(resolve)); t.mock.timers.tick(250); };
+  for (const stopsAfter of [3, Infinity]) {
+    const exits: string[] = [];
+    let calls = 0;
+    const coordinator = new QuitCoordinatorV1({
+      prepareSidecarQuit: async () => {
+        calls += 1;
+        const blockers = calls > stopsAfter ? [] : ["agent_run_live", "run:agent_run_live"];
+        return { safeToQuit: blockers.length === 0, blockers };
+      },
+      failedBeforeReady: () => false,
+      allowProcessExit: (kind) => exits.push(kind),
+    });
+    coordinator.handleBeforeQuit();
+    for (let attempt = 0; attempt < 45 && !coordinator.exitAllowed; attempt += 1) await tick();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    if (stopsAfter === 3) assert.deepEqual([exits, calls], [["clean"], 4]);
+    else assert.deepEqual([exits, calls], [["uncleanQuit"], 41]);
+  }
 });
 
 test("one quit waits for both login workers to confirm cleanup", async (t) => {
@@ -1391,7 +1464,7 @@ test("one quit waits for both login workers to confirm cleanup", async (t) => {
   assert.deepEqual(exits, ["clean"]);
 });
 
-test("persistent login recovery remains blocked after the bounded quit retry budget", async (t) => {
+test("asking whether the app can close never exits on an unclean result", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let calls = 0;
   const exits: string[] = [];
@@ -1413,46 +1486,6 @@ test("persistent login recovery remains blocked after the bounded quit retry bud
   assert.equal(calls, 41);
   assert.equal(coordinator.exitAllowed, false);
   assert.deepEqual(exits, []);
-});
-
-test("unsafe quit reports a fixed reason once while its notification is open", async () => {
-  for (const unavailable of [false, true]) {
-    const notices: string[] = [];
-    const exits: string[] = [];
-    let release!: () => void;
-    let calls = 0;
-    const coordinator = new QuitCoordinatorV1({
-      prepareSidecarQuit: async () => {
-        calls += 1;
-        if (unavailable) throw new Error("private provider stderr");
-        return { safeToQuit: false, blockers: ["recovery_01"] };
-      },
-      failedBeforeReady: () => false,
-      allowProcessExit: kind => { exits.push(kind); },
-      notifyQuitBlocked: reason => {
-        notices.push(reason);
-        return new Promise<void>(resolve => { release = resolve; });
-      },
-    });
-    coordinator.handleBeforeQuit();
-    coordinator.handleBeforeQuit();
-    await new Promise<void>(resolve => setImmediate(resolve));
-    coordinator.handleBeforeQuit();
-    assert.equal(calls, 1);
-    assert.deepEqual(notices, [unavailable ? "unavailable" : "recoveryRequired"]);
-    assert.equal(coordinator.exitAllowed, false);
-    assert.deepEqual(exits, []);
-    release();
-    await new Promise<void>(resolve => setImmediate(resolve));
-    coordinator.handleBeforeQuit();
-    await new Promise<void>(resolve => setImmediate(resolve));
-    assert.equal(calls, 2, "dismissed notification permits an explicit retry");
-    assert.equal(notices.length, unavailable ? 1 : 2,
-      "a disconnected service is reported once, without granting exit");
-    assert.equal(coordinator.exitAllowed, false);
-    assert.deepEqual(exits, []);
-    release();
-  }
 });
 
 test("pre-ready startup failure permits one explicitly unclean app close without re-entering quit", () => {
@@ -1496,6 +1529,107 @@ test("G4 file streams correlate descriptors, chunks, hashes, and project watcher
   unwatch();
   child.stdout.write(eventLine({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: "watch_stream_01", seq: 2, event: "diff.changed", payload: { projectId: "project_01", event: "diff.changed", paths: ["src/App.tsx"], rescanRequired: false } }));
   assert.equal(watched.length, 1, "unsubscribe must remove the exact event wrapper");
+});
+
+test("task-workspace file reads settle their streams: many opened files never exhaust the active-stream bound", async () => {
+  const { child, client } = createClient();
+  const started = client.start();
+  child.stdout.write(`${readyLine()}\n`);
+  await started;
+  const ref = { chatId: "chat_01", projectId: "project_01", worktreeId: "worktree_01", workspaceIdentity: "workspace_01" };
+  const seen: unknown[] = [];
+  const unwatch = client.onWorkspaceEvent(event => seen.push(event));
+  // More than the 16 streams that may be open at once.
+  for (let index = 0; index < 40; index += 1) {
+    const read = client.readWorkspaceFile({ ...ref, path: "src/App.tsx" });
+    const request = JSON.parse(child.writes.at(-1) ?? "{}") as { requestId: string; method: string };
+    assert.equal(request.method, "workspace.file.read");
+    child.stdout.write(`${JSON.stringify({
+      protocolVersion: 1, kind: "response", sidecarInstanceId: "sidecar_test_01", requestId: request.requestId, ok: true,
+      result: { ...ref, path: "src/App.tsx", classification: "utf8", byteLength: 5,
+        version: "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        stream: { streamId: `workspace_read_${index}`, chunkBytes: 262144 } },
+    })}\n`);
+    await read;
+    child.stdout.write(eventLine({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: `workspace_read_${index}`, seq: 1, event: "workspace.blob.chunk", payload: { ...ref, text: "hello" } }));
+    assert.equal(client.failure, undefined, `read ${index}`);
+  }
+  assert.equal(seen.length, 40, "the renderer still receives every chunk");
+  unwatch();
+  // A chunk for a stream that already completed is still refused.
+  child.stdout.write(eventLine({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: "workspace_read_0", seq: 2, event: "workspace.blob.chunk", payload: { ...ref, text: "x" } }));
+  assert.match(String(client.failure?.message), /unknown or completed stream/);
+});
+
+// PR #15 review I3·M2: task-workspace files and diffs of many chunks settle,
+// with each chunk encoded once (never the whole text again per chunk).
+async function startedWorkspaceClient() {
+  const { child, client } = createClient();
+  const started = client.start();
+  child.stdout.write(`${readyLine()}\n`);
+  await started;
+  return { child, client, ref: { chatId: "chat_01", projectId: "project_01", worktreeId: "worktree_01", workspaceIdentity: "workspace_01" } };
+}
+function answer(child: { writes: string[]; stdout: { write(text: string): unknown } }, result: object) {
+  const request = JSON.parse(child.writes.at(-1) ?? "{}") as { requestId: string };
+  child.stdout.write(`${JSON.stringify({ protocolVersion: 1, kind: "response", sidecarInstanceId: "sidecar_test_01", requestId: request.requestId, ok: true, result })}\n`);
+}
+const sha256 = (text: string) => `sha256:${createHash("sha256").update(text).digest("hex")}`;
+
+test("task-workspace streams of many chunks settle, each chunk encoded once", async () => {
+  const { child, client, ref } = await startedWorkspaceClient();
+  const chunks = Array.from({ length: 40 }, (_, index) => `${String(index).padStart(3, "0")}:${"가나다abc".repeat(4000)}\n`);
+  const text = chunks.join("");
+  const byteLength = Buffer.byteLength(text);
+  const encode = TextEncoder.prototype.encode;
+  let encoded = 0;
+  TextEncoder.prototype.encode = function (input?: string) { const bytes = encode.call(this, input); encoded += bytes.byteLength; return bytes; };
+  try {
+    for (let round = 0; round < 20; round += 1) {
+      const read = client.readWorkspaceFile({ ...ref, path: "big.txt" });
+      answer(child, { ...ref, path: "big.txt", classification: "utf8", byteLength, version: sha256(text), stream: { streamId: `big_${round}`, chunkBytes: 262144 } });
+      await read;
+      chunks.forEach((chunk, index) => child.stdout.write(eventLine({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: `big_${round}`, seq: index + 1, event: "workspace.blob.chunk", payload: { ...ref, text: chunk } })));
+      assert.equal(client.failure, undefined, `file ${round}`);
+      const diff = client.getWorkspaceDiffFile({ ...ref, path: "big.txt" });
+      answer(child, { ...ref, kind: "modified", path: "big.txt", oldPath: null, baseVersion: sha256("old"), worktreeVersion: sha256(text), byteLength, stream: { streamId: `diff_${round}`, chunkBytes: 262144 } });
+      await diff;
+      chunks.forEach((chunk, index) => child.stdout.write(eventLine({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: `diff_${round}`, seq: index + 1, event: "workspace.blob.chunk", payload: { ...ref, text: chunk } })));
+      assert.equal(client.failure, undefined, `diff ${round}`);
+    }
+  } finally {
+    TextEncoder.prototype.encode = encode;
+  }
+  // 20 files and 20 diffs of ~1.9 MiB settled (more than the 16 open at
+  // once). Encoding stays linear in what arrived: about 5x with the event
+  // envelope checks, where re-encoding the whole text per chunk cost ~25x.
+  assert.ok(encoded < 40 * byteLength * 8, `encoded ${encoded} bytes for ${40 * byteLength}`);
+});
+
+test("task-workspace streams still refuse a wrong hash, and an empty file opens no stream", async () => {
+  const empty = await startedWorkspaceClient();
+  const read = empty.client.readWorkspaceFile({ ...empty.ref, path: "empty.txt" });
+  answer(empty.child, { ...empty.ref, path: "empty.txt", classification: "utf8", byteLength: 0, version: sha256(""), stream: { streamId: "empty_1", chunkBytes: 262144 } });
+  await read;
+  assert.equal(empty.client.failure, undefined);
+  empty.child.stdout.write(eventLine({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: "empty_1", seq: 1, event: "workspace.blob.chunk", payload: { ...empty.ref, text: "x" } }));
+  assert.match(String(empty.client.failure?.message), /unknown or completed stream/);
+
+  const wrong = await startedWorkspaceClient();
+  const second = wrong.client.readWorkspaceFile({ ...wrong.ref, path: "a.txt" });
+  answer(wrong.child, { ...wrong.ref, path: "a.txt", classification: "utf8", byteLength: 10, version: sha256("helloworld"), stream: { streamId: "a_1", chunkBytes: 262144 } });
+  await second;
+  wrong.child.stdout.write(eventLine({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: "a_1", seq: 1, event: "workspace.blob.chunk", payload: { ...wrong.ref, text: "hello" } }));
+  assert.equal(wrong.client.failure, undefined, "half a stream is fine");
+  wrong.child.stdout.write(eventLine({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: "a_1", seq: 2, event: "workspace.blob.chunk", payload: { ...wrong.ref, text: "WORLD" } }));
+  assert.match(String(wrong.client.failure?.message), /hash does not match/);
+
+  const over = await startedWorkspaceClient();
+  const third = over.client.readWorkspaceFile({ ...over.ref, path: "b.txt" });
+  answer(over.child, { ...over.ref, path: "b.txt", classification: "utf8", byteLength: 3, version: sha256("abc"), stream: { streamId: "b_1", chunkBytes: 262144 } });
+  await third;
+  over.child.stdout.write(eventLine({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: "b_1", seq: 1, event: "workspace.blob.chunk", payload: { ...over.ref, text: "abcd" } }));
+  assert.match(String(over.client.failure?.message), /exceeds declared stream size/);
 });
 
 test("G4 rejects unknown, oversized, and hash-mismatched blob streams without retry", async () => {
@@ -1705,7 +1839,10 @@ test("renderer event credit bounds stalled delivery and drains only exact acknow
   credit.deliver(event(MAX_IN_FLIGHT_EVENTS + 1), () => { sent += 1; });
   assert.equal(sent, MAX_IN_FLIGHT_EVENTS); assert.match(failure?.message ?? "", /consumerTooSlow/);
   let normalFailure: Error | undefined; const normal = new EventCreditV1((error) => { normalFailure = error; }); normal.deliver(event(1), () => {}); normal.acknowledge({ streamId: "credit", seq: 1 }); normal.deliver(event(2), () => {}); assert.equal(normalFailure, undefined);
-  normal.acknowledge({ streamId: "credit", seq: 1 }); assert.match(normalFailure?.message ?? "", /consumerTooSlow/);
+  // A repeated acknowledgement of an already drained event drains nothing (it
+  // is stale, e.g. from a page that was replaced); skipping ahead still fails.
+  normal.acknowledge({ streamId: "credit", seq: 1 }); assert.equal(normalFailure, undefined); assert.equal(normal.outstanding, 1);
+  normal.acknowledge({ streamId: "credit", seq: 3 }); assert.match(normalFailure?.message ?? "", /consumerTooSlow/);
 });
 
 test("renderer close/reopen credit lifecycle fails only with unacknowledged delivery", () => {
@@ -2069,5 +2206,288 @@ test("team runs require an explicitly accepted coordinator root and exact worksp
       assert.equal(client.failure, undefined);
       assert.equal(child.terminations, 0);
     } else assert.equal(child.terminations, 1, invalid);
+  }
+});
+
+test("an engine failure is reported once to listeners and its process end can be awaited", async () => {
+  const { child, client } = createClient();
+  const codes: string[] = [];
+  client.onFailure(code => codes.push(code));
+  const starting = client.start();
+  child.stdout.write("not-json\n");
+  await assert.rejects(starting);
+  assert.deepEqual(codes, ["protocolInvalid"]);
+  assert.equal(await client.waitForExit(10), false, "still running until its exit arrives");
+  const exited = client.waitForExit(1_000);
+  child.emit("exit", 0, "SIGTERM");
+  assert.equal(await exited, true);
+  assert.equal(client.exitDetail, "0/SIGTERM");
+  assert.equal(await client.waitForExit(10), true);
+  client.failRendererDisconnected();
+  assert.deepEqual(codes, ["protocolInvalid"], "later failures do not report again");
+});
+
+test("event credit ignores acknowledgements of a replaced engine and starts clean after reset", () => {
+  let failure: Error | undefined; const credit = new EventCreditV1((error) => { failure = error; });
+  const event = (streamId: string, seq: number) => ({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId, seq, event: "blob.chunk", payload: { text: "" } } as EventV1);
+  credit.deliver(event("old", 1), () => {});
+  credit.reset();
+  assert.equal(credit.outstanding, 0);
+  credit.acknowledge({ streamId: "old", seq: 1 });
+  assert.equal(failure, undefined, "a late acknowledgement from before the restart is stale, not a failure");
+  credit.deliver(event("new", 1), () => {});
+  credit.acknowledge({ streamId: "new", seq: 2 });
+  assert.match(failure?.message ?? "", /out-of-order/, "order is still checked within a live stream");
+});
+
+test("the renderer acknowledges every delivered event even when handling it fails", () => {
+  const preload = readFileSync(new URL("../electron/preload.ts", import.meta.url), "utf8");
+  assert.match(preload, /try \{ handle\(\); \}\s*catch \(error\) \{[^}]*\}\s*finally \{ acknowledge\(payload\); \}/);
+  for (const channel of ["agentOutputAvailable", "sidecarEvent", "projectEvent", "workspaceEvent", "chatEvent", "agentPublicEvent", "agentRunStateChanged"]) {
+    const line = preload.split("\n").find(text => text.startsWith("ipcRenderer.on(") && text.includes(`.${channel},`));
+    assert.ok(line?.includes("=> delivered(payload"), channel);
+  }
+  assert.equal((preload.match(/acknowledge\(payload\)/g) ?? []).length, 1, "only the shared finally acknowledges");
+  const main = readFileSync(new URL("../electron/main.ts", import.meta.url), "utf8");
+  assert.match(main, /watchEngineFailure\(client\);/);
+  assert.match(main, /waitForExit\(10_000\)/);
+  assert.match(main, /ENGINE_RESTART_LIMIT = 3/);
+  assert.doesNotMatch(main, /webContents\.reload\(\)/, "the screen refreshes itself only when nothing unsaved would be lost");
+  assert.match(main, /did-start-navigation[\s\S]{0,200}eventCredit\.pause\(\)/);
+  assert.match(main, /did-finish-load", \(\) => eventCredit\.resume\(\)/);
+});
+
+test("event credit holds deliveries while the page reloads and ignores stale acknowledgements", () => {
+  let failure: Error | undefined; const credit = new EventCreditV1((error) => { failure = error; });
+  const event = (seq: number) => ({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: "s", seq, event: "blob.chunk", payload: { text: "" } } as EventV1);
+  let sent = 0;
+  credit.deliver(event(1), () => { sent += 1; });
+  credit.pause();
+  credit.deliver(event(2), () => { sent += 1; });
+  credit.acknowledge({ streamId: "s", seq: 1 });
+  assert.equal(sent, 1, "nothing is sent while the page loads");
+  assert.equal(credit.outstanding, 0);
+  credit.resume();
+  credit.deliver(event(3), () => { sent += 1; });
+  credit.deliver(event(4), () => { sent += 1; });
+  credit.acknowledge({ streamId: "s", seq: 2 });
+  assert.equal(failure, undefined, "an acknowledgement older than the oldest outstanding event is stale");
+  credit.acknowledge({ streamId: "s", seq: 3 });
+  credit.acknowledge({ streamId: "s", seq: 4 });
+  assert.equal(credit.outstanding, 0);
+  assert.equal(failure, undefined);
+  credit.deliver(event(5), () => {});
+  credit.acknowledge({ streamId: "s", seq: 6 });
+  assert.match(failure?.message ?? "", /out-of-order/, "skipping ahead is still refused");
+});
+
+test("a run that failed with a failure diagnostic is delivered and never ends the engine", async () => {
+  const { client, child } = createClient();
+  const started = client.start(); child.stdout.write(`${g5aReadyLine()}\n`); await started;
+  await hydrateActualAgentRun(client, child);
+  const delivered: unknown[] = [];
+  client.onAgentRunStateChanged((event) => delivered.push(event));
+  const failed = structuredClone(g5bFixture("succeeded-state-notifies-hydration")) as { run: Record<string, unknown> };
+  failed.run = { ...failed.run, state: "failed", failure: { stage: "providerResult", code: "transportFailed" } };
+  child.stdout.write(agentRunStateChangedLine(failed, "agent_run_01_stream", 1));
+  assert.equal(delivered.length, 1);
+  assert.equal(child.terminations, 0);
+  assert.equal(client.failure, undefined);
+
+  const recovery = createClient();
+  const opened = recovery.client.start(); recovery.child.stdout.write(`${g5aReadyLine()}\n`); await opened;
+  await hydrateActualAgentRun(recovery.client, recovery.child);
+  const needsRecovery = structuredClone(g5bFixture("succeeded-state-notifies-hydration")) as { run: Record<string, unknown> };
+  needsRecovery.run = { ...needsRecovery.run, state: "recoveryRequired", terminationOutcome: "recoveryRequired", failure: { stage: "cleanup", code: "unknown" } };
+  recovery.child.stdout.write(agentRunStateChangedLine(needsRecovery, "agent_run_01_stream", 1));
+  assert.equal(recovery.child.terminations, 0);
+
+  for (const [name, run] of [
+    ["running", { state: "running", terminationOutcome: null, failure: { stage: "providerResult", code: "transportFailed" } }],
+    ["unknown code", { state: "failed", failure: { stage: "providerResult", code: "networkGone" } }],
+    ["extra key", { state: "failed", failure: { stage: "providerResult", code: "transportFailed", detail: "x" } }],
+    ["null", { state: "failed", failure: null }],
+    ["missing code", { state: "failed", failure: { stage: "providerResult" } }],
+    ["unknown stage", { state: "failed", failure: { stage: "network", code: "transportFailed" } }],
+  ] as const) {
+    const invalid = createClient();
+    const begun = invalid.client.start(); invalid.child.stdout.write(`${g5aReadyLine()}\n`); await begun;
+    await hydrateActualAgentRun(invalid.client, invalid.child);
+    const payload = structuredClone(g5bFixture("succeeded-state-notifies-hydration")) as { run: Record<string, unknown> };
+    payload.run = { ...payload.run, ...run };
+    invalid.child.stdout.write(agentRunStateChangedLine(payload, "agent_run_01_stream", 1));
+    assert.equal(invalid.child.terminations, 1, `${name} failure diagnostic must stay rejected`);
+    assert.match(invalid.client.failure?.message ?? "", /failure|field: detail/, `${name} is refused for its failure diagnostic`);
+  }
+});
+
+test("result preview: an optional pair after installation, validated answers, never without the baseline", async () => {
+  const suffix = ["chat.appendMessage", "provider.login", "run.approval", "project.catalog", "provider.install", "preview.resolve", "preview.readAsset"];
+  const { child, client } = createClient();
+  const started = client.start();
+  const ready = JSON.parse(g5dReadyLine());
+  ready.payload.capabilities.push(...suffix);
+  child.stdout.write(`${JSON.stringify(ready)}\n`);
+  assert.deepEqual((await started).capabilities.slice(-3), ["provider.install", "preview.resolve", "preview.readAsset"]);
+  const status = client.getSystemStatus();
+  const result = g5dStatus("ready") as any;
+  result.sidecar.capabilities.push(...suffix);
+  child.stdout.write(responseLine(JSON.parse(child.writes.at(-1)!).requestId, result));
+  assert.deepEqual((await status).sidecar.capabilities, result.sidecar.capabilities);
+
+  const resolving = client.previewResolve({ projectId: "project_1", chatId: "chat_1", entry: null });
+  const sent = JSON.parse(child.writes.at(-1)!);
+  assert.equal(sent.method, "preview.resolve");
+  assert.deepEqual(sent.params, { projectId: "project_1", chatId: "chat_1", entry: null });
+  const resolved = { chatId: "chat_1", projectId: "project_1", worktreeId: "worktree_1", workspaceIdentity: "workspace_1", previewHandle: "ph_cccccccccccccccccccccccccccccccc", entry: "index.html", refusal: null };
+  child.stdout.write(responseLine(sent.requestId, resolved));
+  assert.deepEqual(await resolving, resolved);
+  const read = { chatId: "chat_1", projectId: "project_1", worktreeId: "worktree_1", workspaceIdentity: "workspace_1", previewHandle: "ph_cccccccccccccccccccccccccccccccc", path: "index.html", offset: 0 };
+  const reading = client.previewReadAsset(read);
+  const readSent = JSON.parse(child.writes.at(-1)!);
+  assert.equal(readSent.method, "preview.readAsset");
+  const { previewHandle: _handle, ...echo } = read;
+  const body = { ...echo, outcome: "ok", byteLength: 2, version: `sha256:${"a".repeat(64)}`, bytesBase64: Buffer.from("hi").toString("base64") };
+  child.stdout.write(responseLine(readSent.requestId, body));
+  assert.deepEqual(await reading, { ...body, previewHandle: read.previewHandle });
+  assert.deepEqual(readSent.params, read);
+  // An answer for another workspace ends the connection (strict validation).
+  const wrong = client.previewReadAsset(read);
+  const wrongSent = JSON.parse(child.writes.at(-1)!);
+  child.stdout.write(responseLine(wrongSent.requestId, { ...body, workspaceIdentity: "workspace_2" }));
+  await assert.rejects(wrong);
+  assert.equal(client.failureCode, "protocolInvalid");
+
+  // The pair without the installation baseline is not negotiated.
+  const bare = createClient();
+  const bareStarted = bare.client.start();
+  const rejected = assert.rejects(bareStarted);
+  const bareReady = JSON.parse(g5dReadyLine());
+  bareReady.payload.capabilities.push("chat.appendMessage", "preview.resolve", "preview.readAsset");
+  bare.child.stdout.write(`${JSON.stringify(bareReady)}\n`);
+  await rejected;
+
+  // An older engine without the pair: the preview is unavailable, nothing is sent.
+  const old = createClient();
+  const oldStarted = old.client.start();
+  const oldReady = JSON.parse(g5dReadyLine());
+  oldReady.payload.capabilities.push(...suffix.slice(0, -2));
+  old.child.stdout.write(`${JSON.stringify(oldReady)}\n`);
+  await oldStarted;
+  const writes = old.child.writes.length;
+  await assert.rejects(old.client.previewResolve({ projectId: "project_1", chatId: "chat_1", entry: null }), /preview unavailable/);
+  assert.equal(old.child.writes.length, writes);
+});
+
+test("the preview is on by default on macOS only, off with ELSECREW_PREVIEW=0, and keeps developer tools out of packaged apps (PR #9 review I2·I5)", async () => {
+  const { PREVIEW_DEFAULT_PLATFORMS, previewFlagsFromEnvironment } = await import("../electron/preview-flag.ts");
+  // On by default where it was checked (macOS); only "0" turns it off there.
+  // Windows is off until its isolation and screen checks run: "1" turns it on.
+  assert.deepEqual([...PREVIEW_DEFAULT_PLATFORMS], ["darwin"]);
+  assert.deepEqual(previewFlagsFromEnvironment({}, false, "darwin"), { enabled: true, devTools: false });
+  assert.deepEqual(previewFlagsFromEnvironment({}, true, "darwin"), { enabled: true, devTools: false });
+  for (const platform of ["win32", "linux"]) {
+    assert.deepEqual(previewFlagsFromEnvironment({}, true, platform), { enabled: false, devTools: false }, platform);
+    assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "1" }, true, platform), { enabled: true, devTools: false }, platform);
+  }
+  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "0" }, false, "darwin"), { enabled: false, devTools: false });
+  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "0" }, true, "darwin"), { enabled: false, devTools: false });
+  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "1" }, false, "darwin"), { enabled: true, devTools: false });
+  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW_DEVTOOLS: "1" }, false, "darwin"), { enabled: true, devTools: true });
+  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW_DEVTOOLS: "1" }, true, "darwin"), { enabled: true, devTools: false });
+  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "0", ELSECREW_PREVIEW_DEVTOOLS: "1" }, false, "darwin"), { enabled: false, devTools: false });
+  const flagSource = source("electron/preview-flag.ts");
+  assert.deepEqual([...flagSource.matchAll(/ELSECREW_[A-Z_]+/g)].map(match => match[0]).filter((name, index, all) => all.indexOf(name) === index), ["ELSECREW_PREVIEW", "ELSECREW_PREVIEW_DEVTOOLS"]);
+  // The preview view never gets a preload; the app window's isolation is unchanged.
+  const { previewWebPreferences } = await import("../electron/preview-manager.ts");
+  for (const devTools of [false, true]) assert.equal("preload" in previewWebPreferences({} as never, devTools), false);
+  const main = source("electron/main.ts");
+  assert.match(main, /contextIsolation: true,\n\s+sandbox: true,/);
+  assert.match(main, /window\.webContents\.on\("will-attach-webview", \(event\) => event\.preventDefault\(\)\)/);
+  assert.equal(readFileSync("src/m5/index.html", "utf8").includes("elsecrew-preview"), false, "the app CSP is not widened");
+});
+
+// PR #20 review B3: later teams of the same task that wait their turn are
+// each accepted as their own new root, even after an earlier team used its
+// whole call budget; an announcement under that spent root still fails.
+test("later queued teams of one task each start as a new root; a spent root stays refused", async () => {
+  for (const reuseSpentRoot of [false, true]) {
+    const { client, child } = createClient();
+    const starting = client.start(); child.stdout.write(`${g5aReadyLine()}\n`); await starting;
+    await hydrateActualAgentRun(client, child);
+    const fp = measuredCapability().fingerprint;
+    const announce = (stream: string, runId: string, rootRunId: string, roleId: string) => {
+      const accepted = acceptedAgentRun(fp, { runId, roleId });
+      child.stdout.write(JSON.stringify({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01",
+        streamId: stream, seq: 1, event: "agent.teamRunAccepted", chatId: "chat_01", taskId: "task_01", runId,
+        payload: { rootRunId, accepted } }) + "\n");
+    };
+    const queue = async () => {
+      const start = client.startAgentRun({ chatId: "chat_01", roleId: "coordinator", inputMessageIds: ["message_01"], expectedCapabilityFingerprint: fp });
+      const req = JSON.parse(child.writes.at(-1)!);
+      child.stdout.write(`${JSON.stringify({ protocolVersion: 1, kind: "response", sidecarInstanceId: "sidecar_test_01", requestId: req.requestId, ok: false,
+        error: { code: "providerCapacity", kind: "requestBlocked", detail: "the team waits its turn; it starts when a run of this provider ends", retryable: false } })}\n`);
+      await assert.rejects(start, /waits its turn/);
+    };
+    // The first team waits, starts as its own root and spends its whole budget.
+    await queue();
+    announce("team_first_root", "agent_run_team_one", "agent_run_team_one", "coordinator");
+    for (let n = 0; n < 11; n++) announce(`team_first_member_${n}`, `agent_run_team_one_m${n}`, "agent_run_team_one", n % 2 ? "coding" : "coordinator");
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(child.terminations, 0);
+    // A later team of the same task waits too, and starts as a new root.
+    await queue();
+    if (reuseSpentRoot) {
+      announce("team_second_old_root", "agent_run_team_two", "agent_run_team_one", "coordinator");
+      await new Promise(resolve => setTimeout(resolve, 10));
+      assert.equal(child.terminations, 1, "an earlier team's spent root is refused");
+      continue;
+    }
+    announce("team_second_root", "agent_run_team_two", "agent_run_team_two", "coordinator");
+    announce("team_second_member", "agent_run_team_two_m0", "agent_run_team_two", "coding");
+    // And once more.
+    await queue();
+    announce("team_third_root", "agent_run_team_three", "agent_run_team_three", "coordinator");
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(client.failure, undefined);
+    assert.equal(child.terminations, 0);
+  }
+});
+
+// ADE multi-project P3′: a coordinator start the engine put in line
+// (`providerCapacity`) is accepted later as its own root, only for that chat
+// and only as its coordinator; any other self-rooted announcement still fails.
+test("a coordinator start put in line is accepted later as its own root, and nothing else is", async () => {
+  for (const invalid of [null, "otherChat", "notCoordinator", "notQueued"] as const) {
+    const { client, child } = createClient();
+    const starting = client.start(); child.stdout.write(`${g5aReadyLine()}\n`); await starting;
+    await hydrateActualAgentRun(client, child);
+    const fp = measuredCapability().fingerprint;
+    if (invalid !== "notQueued") {
+      const start = client.startAgentRun({ chatId: "chat_01", roleId: "coordinator", inputMessageIds: ["message_01"], expectedCapabilityFingerprint: fp });
+      const req = JSON.parse(child.writes.at(-1)!);
+      child.stdout.write(`${JSON.stringify({ protocolVersion: 1, kind: "response", sidecarInstanceId: "sidecar_test_01", requestId: req.requestId, ok: false,
+        error: { code: "providerCapacity", kind: "requestBlocked", detail: "the team waits its turn; it starts when a run of this provider ends", retryable: false } })}\n`);
+      await assert.rejects(start, /waits its turn/);
+    }
+    const accepted = acceptedAgentRun(fp, { runId: "agent_run_queued_root", roleId: invalid === "notCoordinator" ? "coding" : "coordinator" });
+    child.stdout.write(JSON.stringify({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01",
+      streamId: `team_accept_queued_${invalid}`, seq: 1, event: "agent.teamRunAccepted",
+      chatId: invalid === "otherChat" ? "chat_02" : "chat_01", taskId: "task_01", runId: accepted.runId,
+      payload: { rootRunId: accepted.runId, accepted } }) + "\n");
+    if (invalid === null) {
+      // Its events are known, and a team member can follow it as the root.
+      child.stdout.write(agentPublicEventLine(agentPublicEvent(fp, { runId: "agent_run_queued_root", roleId: "coordinator" }), "queued_root_stream"));
+      const worker = acceptedAgentRun(fp, { runId: "agent_run_queued_worker", roleId: "coding" });
+      child.stdout.write(JSON.stringify({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01",
+        streamId: "team_accept_queued_worker", seq: 1, event: "agent.teamRunAccepted", chatId: "chat_01", taskId: "task_01", runId: worker.runId,
+        payload: { rootRunId: "agent_run_queued_root", accepted: worker } }) + "\n");
+      await new Promise(resolve => setTimeout(resolve, 10));
+      assert.equal(client.failure, undefined);
+      assert.equal(child.terminations, 0);
+    } else {
+      await new Promise(resolve => setTimeout(resolve, 10));
+      assert.equal(child.terminations, 1, invalid);
+    }
   }
 });

@@ -5,12 +5,19 @@ import { useI18n } from "../i18n.tsx";
 import { loadModels, catalogCheckedAt } from "./model-catalog.ts";
 import type { ModelChoicesResult } from "./contracts/model-choices-v1.ts";
 
+const CONNECTION_RETRIES = 40;
+const CONNECTION_RETRY_MS = 3_000;
+
 type Entry = { usage: ModelChoicesResult["usage"]; checkedAt: number; failed: boolean; state?: ClaudeUsageResult["state"] };
 // No durable account usage; each app session starts without a claimed balance.
 export function ProviderUsage({ disabled }: { disabled: boolean }) {
   const { t, lang } = useI18n();
   const [entries, setEntries] = useState<Partial<Record<"codex" | "claude-code", Entry>>>({});
   const [connections,setConnections] = useState<Connections>({codex:false,"claude-code":false});
+  // Unknown until the first successful read: the engine may still be checking
+  // its storage for a minute after launch, which is not "not connected".
+  const [connectionsKnown,setConnectionsKnown] = useState(false);
+  const retries = useRef(0);
   const generation = useRef(0);
   const [connectionRevision,setConnectionRevision] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -26,7 +33,7 @@ export function ProviderUsage({ disabled }: { disabled: boolean }) {
     try {
       const connected=await readConnections();
       if (!mounted.current || epoch !== generation.current) return;
-      setConnections(connected);
+      setConnections(connected); setConnectionsKnown(true); retries.current = 0;
       await Promise.all((["codex","claude-code"] as const).map(async runtime => {
         let entry: Entry = {usage:null,checkedAt:Date.now(),failed:false,state:"notConnected"};
         try {
@@ -37,12 +44,21 @@ export function ProviderUsage({ disabled }: { disabled: boolean }) {
             } else if(runtime === "claude-code" && window.m5ClaudeUsage) {
               const result=await window.m5ClaudeUsage.read();
               entry={...result,failed:result.state!=="available"};
+              // Keep the display model list ready for role screens. A fresh
+              // remembered list is reused, so this rarely queries the provider.
+              if (window.m5Models) void loadModels(runtime,input=>window.m5Models!.request(input)).catch(()=>undefined);
             } else entry={usage:null,checkedAt:Date.now(),failed:true};
           }
         } catch { entry={usage:null,checkedAt:Date.now(),failed:true}; }
         if(mounted.current && epoch===generation.current) setEntries(previous=>({...previous,[runtime]:entry}));
       }));
-    } catch { if(mounted.current) setEntries({}); }
+    } catch {
+      if(mounted.current) {
+        setEntries({});
+        // Not answered yet (engine still starting): read again shortly.
+        if (retries.current++ < CONNECTION_RETRIES) setTimeout(() => { if (mounted.current) setConnectionRevision(value => value + 1); }, CONNECTION_RETRY_MS);
+      }
+    }
     finally { pending.current=false; if(mounted.current) { setBusy(false); if(epoch !== generation.current) setConnectionRevision(value=>value+1); } }
   };
   useEffect(() => { mounted.current=true; return()=>{mounted.current=false;generation.current++;}; },[]);
@@ -69,7 +85,7 @@ export function ProviderUsage({ disabled }: { disabled: boolean }) {
     <button ref={trigger} type="button" className="m5-usage-trigger" popoverTarget={popupId} title={t("m5.usage.title")} aria-label={t("m5.usage.title")}>
       {(["codex","claude-code"] as const).map(runtime => {
         const entry=entries[runtime];
-        return <span className="m5-usage-summary" key={runtime}><b>{runtime === "codex" ? "Codex" : "Claude"}</b>{!connections[runtime] ? <span>{t("m5.connection.off")}</span> : entry?.usage?.windows.length ? entry.usage.windows.map(item=><span key={item.id}>{item.windowMinutes ? (item.windowMinutes >= 1440 ? t("m5.usage.days",{n:item.windowMinutes/1440}) : t("m5.usage.hours",{n:item.windowMinutes/60})) : t("m5.usage.window")} {Math.round(item.usedPercent)}%</span>) : <span>{busy ? t("m5.usage.loading") : "—"}</span>}</span>;
+        return <span className="m5-usage-summary" key={runtime}><b>{runtime === "codex" ? "Codex" : "Claude"}</b>{!connectionsKnown ? <span>{t("m5.usage.loading")}</span> : !connections[runtime] ? <span>{t("m5.connection.off")}</span> : entry?.usage?.windows.length ? entry.usage.windows.map(item=><span key={item.id}>{item.windowMinutes ? (item.windowMinutes >= 1440 ? t("m5.usage.days",{n:item.windowMinutes/1440}) : t("m5.usage.hours",{n:item.windowMinutes/60})) : t("m5.usage.window")} {Math.round(item.usedPercent)}%</span>) : <span>{busy ? t("m5.usage.loading") : "—"}</span>}</span>;
       })}
     </button>
     <div ref={popup} id={popupId} popover="auto" className="m5-provider-usage-content" onToggle={event => { if (event.newState === "open") { positionPopup(); void refresh(); } }}>

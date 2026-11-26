@@ -1,6 +1,13 @@
 # Elsecrew
 
-터미널을 한 번도 열어보지 않은 비개발자가 Claude Code·Codex를 설치하고, 안전한 첫 프로젝트를 시작한 뒤 계속 관리하도록 돕는 데스크톱 앱. 현재 기본 배포 경로는 Tauri이고, M5는 Electron + React/TypeScript + Monaco renderer와 Rust safety sidecar 전환 골격을 같은 저장소에서 개발한다.
+비개발자도 GUI에서 Claude Code·Codex와 대화하며 여러 프로젝트의 개발 작업을 관리하는 agent-first 데스크톱 앱. 현재 개발 중심은 Electron + React/TypeScript + Monaco와 Rust safety sidecar의 M5 작업대다. 옛 Tauri 설치 도우미(M0~M4)는 2026-11-13에 저장소에서 제거했다(필요하면 Git 기록에서 확인). M5는 PR #1로 main에 통합됐지만 제품 완료·출시 승인을 뜻하지 않는다.
+
+## 응답 언어 — 최우선
+
+- **사용자에게 보내는 모든 메시지는 한국어로 쓴다.** 진행 보고·질문·요약·오류 설명·최종 응답 모두 해당하며, 첫 문장부터 한국어로 시작한다.
+- 도구 출력·로그·하위 에이전트 보고·시스템 알림이 영어여도 그 언어를 따라가지 않는다.
+- 코드 식별자, 명령어, 파일 경로, 원문 오류 메시지 인용만 원문을 유지한다.
+- 하위 에이전트에게 일을 맡길 때도 보고를 한국어로 쓰라고 지시한다.
 
 ## 가장 먼저 지킬 인계 규칙
 
@@ -30,14 +37,16 @@
 
 ### 워크로그가 커지면 — 아카이브 롤오버
 
-`docs/history.md`가 **500줄을 넘으면** 오래된 엔트리부터 `docs/archive/history-YYYY-MM.md`로 옮겨 **300줄 이하로 줄인다.**
+`docs/history.md`의 **워크로그 엔트리 부분이 500줄을 넘으면** 가장 오래된 엔트리부터 `docs/archive/history-YYYY-MM.md`로 옮겨 **엔트리 부분을 300줄 이하로 줄인다.** (2026-11-26 사용자 결정)
 
-- **날짜 경계에서 자른다.** 같은 날짜의 엔트리를 쪼개지 않는다.
+- **줄 수는 엔트리만 센다.** 고정 섹션(`프로젝트 요약`·`핵심 결정·발견`·`작업 규칙`)과 맨 위 머리말·맨 아래 아카이브 포인터는 계산에서 뺀다. 예: `awk '/^## /{exit} {n++} END{print n}' docs/history.md`
+- **날짜와 상관없이 오래된 엔트리부터 옮긴다.** 같은 날짜의 엔트리가 history와 아카이브로 나뉘어도 괜찮다. 엔트리 하나(`### YYYY-MM-DD …`부터 다음 엔트리 전까지)는 쪼개지 않는다.
 - **삭제가 아니라 이동이다.** 내용은 그대로 옮기고, `history.md` 맨 아래에 아카이브 포인터 한 줄을 남긴다.
+- **옮긴 뒤 엔트리 보존을 반드시 확인한다.** `pnpm m5:check:history`(= `node scripts/m5-history-entries.mjs <기준 브랜치>`, 기본 `origin/feature/ade`)가 통과해야 한다. 기준의 엔트리가 하나라도 빠지거나 바뀌면 실패한다. 아카이브 파일은 기존 내용을 먼저 읽은 뒤 쓴다. 쓰기 모드로 먼저 열면 파일이 비워진다(2026-11-26 실제 유실 사고).
 - **고정 섹션**(`프로젝트 요약`·`핵심 결정·발견`·`작업 규칙`)은 옮기지 않는다. 옮기기 전에 재사용할 결정·함정이 `핵심 결정·발견`에 반영돼 있는지 확인한다 — 반영돼 있으면 아카이브를 열 일이 없다.
 - 날짜별로 **파일을 쪼개지 않는다.** 현재 진실이 흩어져 조회 비용만 커진다. 날짜별 조회는 `git log -- docs/history.md`로 한다.
 
-**워크로그와 설계 문서의 경계**: 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 한 주제의 설계 심의가 길어지면(토론 왕복·철회·정정이 여러 엔트리에 얽히면) 워크로그에 쌓지 말고 전용 설계 문서로 옮기고, 워크로그에는 결론 요약과 포인터만 남긴다. 예: `docs/proposals/m4-orchestration.md`
+**워크로그와 설계 문서의 경계**: 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 한 주제의 설계 심의가 길어지면(토론 왕복·철회·정정이 여러 엔트리에 얽히면) 워크로그에 쌓지 말고 전용 설계 문서로 옮기고, 워크로그에는 결론 요약과 포인터만 남긴다. 예: `docs/proposals/m5-change-application.md`
 
 ### 문서를 새로 만들 때
 
@@ -46,7 +55,7 @@
 | 분류 | 위치 | 무엇을 주장하나 |
 | --- | --- | --- |
 | 작업 기억 | `docs/history.md` | 무엇이 일어났나 |
-| 현행 사실 | `docs/architecture.md`, `docs/diagrams/` | 지금 시스템이 어떻게 생겼나 |
+| 현행 사실 | `docs/architecture.md` | 지금 시스템이 어떻게 생겼나 |
 | 실행 절차 | `docs/release-checklist.md` | 할 때 따라 하는 순서 |
 | **제안(아직 사실 아님)** | `docs/proposals/` | 앞으로 이럴 수도 있다 |
 | 지난 기록 | `docs/archive/` | 당시엔 사실이었다 |
@@ -61,29 +70,22 @@
 - 에이전트: Claude Code + Codex
 - 플랫폼: macOS + Windows
 - UI: 한국어·영어 전환. 표시 이름은 `Elsecrew`(엘스크루). 패키지·앱 식별자·저장 경로도 Elsecrew로 통일. 2026-11-12 사용자 결정으로 새 앱 데이터를 사용하며 기존 앱 데이터는 자동 이전/삭제하지 않음
-- 현행 구조: 재방문용 홈베이스 + 6단계 위저드(에이전트 → 진단 → 설치 → 로그인 → 프로젝트 → 첫 대화) + macOS M4 `HandoffPilot`
-- M5 현행 구현: Electron + React/TypeScript + Monaco와 Rust sidecar에 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·채팅별 standalone snapshot·편집/diff·명시 반영/복원 흐름을 연결했다. macOS Codex·Claude Code의 앱 전용 로그인·모델 조회·실제 실행 adapter와 설치/업데이트 경로가 있으며 기존 터미널 인증을 자동 재사용하지 않는다. fixture 실행과 실제 공급자 실행은 분리한다. 구현 존재와 실제 계정/플랫폼 검증 완료는 구분하며 최신 증거는 `docs/history.md`에서 확인한다.
-- 홈베이스: 프로젝트 폴더 스캔, 에이전트 설치·로그인 상태, 업데이트 확인
-- 상태: M0~M3와 주요 오류 복구, M4 파일럿 완료. M5 G1~G5 macOS fixture gate `G5_READY`, G5A `G5A_READY`, G5B `G5B_READY`, G5C `G5C_READY` 기록은 유지한다. macOS 자체 임시 프로젝트에서 Claude와 Codex의 실제 파일 수정·취소 및 정상 종료를 확인했다. Codex의 짧은 응답 실행도 성공했다. 공급자 호환 결함과 UI 상태 전달의 최신 증거는 docs/history.md에서 확인한다. 이 증거를 두 공급자의 전체 실행·복구 검증 완료로 보지 않는다. G6 성능 수집 누락·메모리 기준 초과, Windows 안전/패키지 검증, 출시 후보 검증과 서명/배포 결정이 남는다. Windows 실제 에이전트 실행은 비활성이다.
+- M5 현행 구현: Electron + React/TypeScript + Monaco와 Rust sidecar에 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·작업별 작업 공간·편집/diff·합치기 흐름을 연결했다. 2026-11-18부터 macOS의 새 작업은 사용자 저장소의 실제 git worktree(작업 하나 = 브랜치 `elsecrew/task-…` 하나 = PR 하나, `~/elsecrew/workspaces/<프로젝트>/` 아래 보이는 폴더, 설정에서 변경)이며, 앱이 단계마다 커밋하고 사용자가 "main에 합치기"로 합친다(`docs/proposals/m5-real-worktrees.md`). git이 아닌 폴더는 확인 뒤 앱 데이터에 기록(그림자 git)을 만들고 폴더에는 `.git` 링크 파일 하나만 두어 같은 흐름을 쓴다(2026-11-19). 예전 standalone snapshot 작업과 명시 반영/복원은 기존 작업, LFS 외 미지원 저장소의 대체, `ELSECREW_GIT_WORKTREES=0`에 남는다. macOS Codex·Claude Code의 앱 전용 로그인·모델 조회·실제 실행 adapter와 설치/업데이트 경로가 있으며 기존 터미널 인증을 자동 재사용하지 않는다. fixture 실행과 실제 공급자 실행은 분리한다. 구현 존재와 실제 계정/플랫폼 검증 완료는 구분하며 최신 증거는 `docs/history.md`에서 확인한다.
+- 제품 방향: 사용자는 총괄과 대화하고 총괄이 직접 답하거나 필요한 팀원에게 위임한다. 기본 총괄·기획·디자인·개발·검증은 초기 템플릿이며 사용자가 역할을 추가·변경할 수 있다(V3 역할, 저장 schema V13). 화면에서는 작업 단위를 '작업', 작업 복사본을 '작업 공간'이라 부른다. 작업은 작업마다 분리된 작업 공간(작업 브랜치)에서 수행하고, 사용자 폴더는 변경 검토 뒤 사용자가 합칠 때만 바뀐다. 에이전트는 저장소 `.git`을 읽을 수만 있고 커밋은 앱이 한다.
+- 남은 핵심 작업: Windows 실제 에이전트 실행·안전 검증, G6 성능 검증, Electron 배포 workflow·서명/공증과 출시 후보 검증, 소개 웹사이트(`website/`)를 Elsecrew 기준으로 재개발. 최신 미완료 항목은 `docs/history.md`를 우선한다.
+- 상태: M5 G1~G5 macOS fixture gate `G5_READY`, G5A~G5C 기록은 유지한다. macOS에서 Claude와 Codex의 실제 파일 수정·취소·정상 종료와 실제 팀 작업을 확인했으나 두 공급자의 전체 실행·복구 검증 완료로 보지 않는다. G6 전체 성능(유휴 메모리 예산 512MiB), Windows 안전/패키지 검증, 출시 후보 검증과 서명/배포 결정이 남는다. Windows 실제 에이전트 실행은 비활성이다.
 
 ## 코드 지도
 
-- `src/App.tsx`: 최상위 홈/위저드 라우팅과 화면 컴포넌트
 - `src/i18n.tsx`, `src/locales/{ko,en}.ts`: 경량 i18n. 새 키는 ko/en 양쪽에 추가
-- `src/doctor.ts`: 구조화 오류를 초보자용 원인·해결책으로 변환
-- `src/store.ts`: 기준 폴더와 프로젝트 최근 사용 시각 저장
-- `src-tauri/src/agent.rs`: 에이전트별 설치·감지·로그인 레시피
-- `src-tauri/src/{detect,install,login,project,status,editor,error}.rs`: 시스템 기능
 - `crates/elsecrew-{core,protocol,sidecar}`: 공용 Rust 안전 코어·계약, SQLite·snapshot·채팅·fixture 및 실제 공급자 adapter, 로그인/설치·실행/종료·반영/복원·백업 관리 sidecar
 - `electron/`: Electron main/preload, 고정 typed IPC와 sidecar 수명주기·패키징
 - `src/m5/`, `src/m5/contracts/`: Monaco 채팅 작업대와 V1~V7 bridge·프로젝트/채팅/실행/복구·저장 수명·정규화 event·실제 공급자 및 변경 반영 계약
 - `website/`: 별도 Vinext/OpenAI Sites 소개 웹사이트
 - `docs/README.md`: 문서 색인과 분류 규칙. 어느 문서를 언제 여는지
-- `.codex/config.toml`, `.codex/agents/`: 프로젝트 전용 서브에이전트 동시 실행 상한과 M5 역할·모델·권한 설정
 - `scripts/m5-harness.mjs`: 기준선과 M5 G1~G6의 누적 기계 검증·JSON 증거 단일 진입점
 - `docs/architecture.md`: 기술 설계
 - `docs/history.md`: 현재 상태와 작업 인계의 기준
-- `docs/proposals/m4-orchestration.md`: 완료된 M4 파일럿의 설계·검토·철회 기록. M4를 다룰 때 §9 `철회된 주장`을 먼저 확인한다
 - `docs/proposals/m5-coding-agent-ide.md`: M5 제품 방향·안전 계약·열린 결정의 제안 문서. 현재 구현과 게이트는 `docs/architecture.md`·`docs/history.md`에서 확인한다
 - `docs/proposals/m5-{agent-ide,guided-start}-concept.html`: 작업대와 처음 시작하기 인터랙티브 검토 시안
 
@@ -93,7 +95,6 @@
 - 안전 기본값을 우선하며 기존 사용자 설정 파일을 덮어쓰지 않는다.
 - Rust 오류는 `AppError { kind, detail }`로 전달한다. 사용자 설명은 프론트 i18n, `detail`은 도움 요청용 기술 정보로 분리한다.
 - OpenAI 앱 번들 경로는 바뀔 수 있다. Codex CLI 감지는 `/Applications/{ChatGPT,Codex}.app/...` 후보 방식을 유지한다.
-- 프로젝트 스캔은 현재 기준 폴더의 바로 아래 하위 폴더만 검사한다.
 - `scm_breeze`의 `_safe_eval` 오류가 나면 `/usr/bin/git`, `/bin/ls`, `/usr/bin/find`처럼 절대경로를 사용한다.
 
 ## 구현 우선·최종 통합 검증 (2026-10-01 사용자 지시)
@@ -104,12 +105,12 @@
 - 기능 연결 뒤 TypeScript/Rust 빌드·테스트·하네스·실제 UI 흐름과 안전 경계 독립 검토를 묶어서 수행한다. 실패 목록을 고치고 영향받은 검사부터 재실행한다. 최종 완료는 미검증 항목·차단 결함이 닫힌 뒤에만 선언한다.
 - 검증 시점 변경은 제품의 안전 검사를 제거하거나 미검증 실제 실행/원본 쓰기를 활성화하는 승인이 아니다. 실제 계정·유료 모델·사용자 프로젝트 시험의 별도 승인과 원본 보호·종료/복구 계약은 유지한다.
 
-## 개발 방식 선택 (2026-09-14 사용자 지시)
+## 개발 방식 선택 (2026-11-12 현행)
 
-- 현재 메인 개발 모델은 사용자가 선택한 **GPT-6 Astra (`gpt-6-astra`)**다. 모델명만으로 속도 향상을 가정하지 않으며 추론 수준은 현재 사용자 설정을 따른다.
+- 메인 모델·추론 수준은 현재 앱에서 사용자가 선택한 설정을 따른다. 문서나 커스텀 역할에 특정 모델을 고정하지 않으며 서브에이전트도 현재 설정을 상속한다.
 - **메인이 직접 조사·구현·관련 검증을 수행하는 것이 기본**이다. 단일 기능이나 순서가 밀접한 작업을 역할별로 쪼개 의무 위임하지 않는다. 직접 작업의 범위·기준 HEAD·검증 명령은 짧게 기록한다.
 - **읽기 전용 독립 검토자 1명은 상시 호출 승인(2026-09-28 사용자 지시)**을 받았다. 기능 파동의 검토 범위를 짧게 설명한 뒤 추가 수동 승인 없이 호출하고, 같은 검토자의 수정 재검토도 이어간다. 이는 검토자 호출 승인이지 검토 결과의 자동 합격이 아니다. 구현 위임·추가 검토자 병렬 투입은 이유·범위·예상 이득을 설명하고 별도 승인 전에 대기한다.
-- 직접 작업은 메인이 소유한 `m5/coding-agent-ide` checkout에서 수행할 수 있다. 동시 작성자가 없으면 기능마다 worktree·병합·별도 계약 문서를 만들 필요가 없다. 실제 병렬 작성에만 별도 branch/worktree와 파일 소유권을 요구한다.
+- 직접 작업은 최신 main에서 분기한 메인 소유 기능 브랜치의 checkout에서 수행한다. 동시 작성자가 없으면 기능마다 worktree·병합·별도 계약 문서를 만들 필요가 없다. 실제 병렬 작성에만 별도 branch/worktree와 파일 소유권을 요구한다.
 - 일반 변경은 직접 diff 검토와 영향 영역 검사로 완료한다. 데이터 손상·권한·원본 보호·종료/복구 경계 변경과 제품 활성화·출시에는 독립 검토가 필요하다. 필요한 구현·회귀까지 준비한 뒤 상시 승인된 검토자 1명을 호출하며 자체 검증을 독립 승인으로 표현하지 않는다. 실제 계정·유료 모델·사용자 프로젝트 시험, main 병합·push 등 기존 별도 승인 경계는 유지한다.
 - 관련 검사가 통과하면 새 실패나 영향 변화 없이 반복하지 않는다. 누적 QA는 기능 파동 마감에 한 번 수행하고, 문서·개발 설정만 바뀐 경우에는 문서 일치·설정 문법·diff 검사로 충분하다.
 - 아래의 의무 역할 배치·worktree·독립 리뷰·통합 절차는 **사용자가 위임을 승인한 경우에 적용**한다. 이 절이 기존 운영 절차와 과거 작업 계약의 담당 배치 규칙에 우선하며 제품 안전 계약·출시 합격 기준은 유지한다.
@@ -119,13 +120,13 @@
 
 여러 구현·검토 에이전트를 사용하는 작업은 `docs/procedures/multi-agent-orchestration.md`를 따른다.
 
-- M5 작업은 `.codex/agents/`의 프로젝트 전용 역할(`m5_architect`, `m5_contract_engineer`, `m5_electron_engineer`, `m5_rust_safety_engineer`, `m5_ui_engineer`, `m5_code_reviewer`, `m5_qa_executor`, `m5_gate_reviewer`) 중 책임에 맞는 것을 우선 사용한다.
+- **2026-11-12 사용자 결정**: 개발용 커스텀 역할과 고정 모델 프리셋을 제거했다. 메인이 직접 작업하며 필요한 독립 검토는 기본 에이전트에 읽기 전용 범위·대상 diff·검토 기준을 명시해 1명만 호출한다. 역할별 모델/추론 수준을 고정하지 않고 현재 설정을 상속한다. 구현 위임·추가 검토자의 별도 승인 경계는 유지한다.
 - 한 명의 오케스트레이터/통합 담당만 통합 브랜치를 수정한다.
 - 쓰기 구현 담당은 동시에 최대 3명이며, 각자 별도 Git branch와 `.worktrees/` 아래 실제 worktree를 사용한다. 같은 working directory에서 병렬 수정하지 않는다.
 - 작업 시작 전에 base commit, 소유 파일/디렉터리, 변경 금지 영역, 의존 계약, 합격 기준, 검증 명령, 중단 조건을 작업 계약으로 고정한다.
 - `package.json`/lockfile, Cargo workspace/lockfile, protocol/schema fixture, CI, `AGENTS.md`/`CLAUDE.md`는 한 파동에서 단일 소유자만 수정한다.
-- M5 구현 담당은 작업 계약 범위 안의 구현·테스트·리뷰 수정 결과를 자기 기능 branch에 작업 단위로 자동 커밋할 수 있다. 이 상시 승인은 `m5/coding-agent-ide` 전체 완료 때까지 유효하다.
-- 구현 담당은 merge/rebase/cherry-pick/push하지 않는다. 통합 담당은 독립 리뷰와 변경 영역 회귀·정적 검사를 통과한 기능 commit을 `m5/coding-agent-ide`에 추가 승인 없이 통합할 수 있다.
+- 로컬 기능 커밋은 기존 승인된 M5 작업 범위 안에서만 허용한다. 새 범위나 외부 게시 승인을 추정하지 않으며 아래 Git 규칙을 따른다.
+- 구현 담당은 merge/rebase/cherry-pick/push하지 않는다. 통합 대상은 현재 작업 계약에 명시하며, main 병합과 모든 push는 별도 사용자 승인을 받는다. 병합 전 `m5/coding-agent-ide` 통합 승인을 새 main 병합 승인으로 재사용하지 않는다.
 - **2026-09-03 간소화 운영**: 사용자 기능/결함 단위로 구현 담당과 독립 리뷰어 1명을 기본 배치한다. 개발 중에는 관련 검사만, 수정 후에는 영향받은 부분만 재검증하며 새 공용 계약이 없으면 별도 문서 심의를 만들지 않는다. 누적 QA·최종 gate는 최신 통합 commit의 파동 마감에 수행하고 helper마다 반복하지 않는다. 상세는 `docs/procedures/multi-agent-orchestration.md` §1.1이다.
 - 기능 통합과 파동 QA 완료는 구분한다. 구현자의 자체 테스트만으로 제품 완료를 선언하지 않으며 데이터 손상·권한·원본 보호·종료/복구의 차단 결함은 반드시 닫는다. 후속 개선을 현재 작업의 완료 조건에 계속 추가하지 않는다.
 - 하네스와 직접 Cargo 모두 `CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4` 이하, 컴퓨터당 무거운 실행 하나를 지킨다. 동일 코드의 검증 증거는 재사용하되 영향받은 변경을 옛 PASS로 덮지 않는다.
@@ -135,29 +136,27 @@
 ## 검증 명령
 
 ```bash
-pnpm build
-npm test                       # 프런트 순수 로직 (node --test)
-cargo test --manifest-path src-tauri/Cargo.toml
-pnpm test:harness              # 위 세 검증 + diff check를 실행하고 JSON 증거 저장
-pnpm tauri build
+pnpm build                    # 타입 검사 + 화면 빌드
+npm test                      # 프런트 단위 (node --test)
+pnpm test:harness             # 위 검증 + 공용 Rust 코어 테스트 + diff check, JSON 증거 저장
+pnpm m5:test:core             # Rust workspace 전체 테스트
+pnpm m5:package               # Electron 패키지 생성
+pnpm m5:package:smoke         # Electron 패키지 생성 + smoke
 
 cd website
 npm test
 npm run lint
 ```
 
-- 네트워크 격리 설치 E2E: `cargo test --manifest-path src-tauri/Cargo.toml isolated_install -- --ignored --nocapture`
 - M5 게이트 목록: `pnpm harness:list`; 최종 누적 게이트: `pnpm test:m5` (`NOT_READY`는 종료 코드 2이며 합격이 아님)
-- Rust 1.85+ 권장. `src-tauri/Cargo.toml`의 실제 edition은 **2021**이다(포맷 검사 시 `rustfmt --edition 2021`)
+- Rust 1.85+ 권장. 직접 Cargo를 쓸 때는 `CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4` 이하를 지킨다.
 
 ## Git 작업 규칙
 
-- 커밋과 push는 반드시 사용자 승인을 받은 뒤 실행한다. 단, 아래 M5 자동 승인 범위의 기능 커밋·통합 커밋은 이미 사용자 승인을 받았다.
+- PR #1은 main에 병합 완료됐다(기준 b6e2de81). 이후 최신 main에서 분기한 기능 브랜치에서 작업하며 시작할 때 현재 경로·브랜치·HEAD·기존 변경을 확인한다. 현재 후속 작업은 `feature/ade`다.
 - `git`은 `/usr/bin/git` 절대경로를 사용한다.
 - 커밋 메시지는 임시 파일 방식으로 작성하고 `Co-Authored-By` 트레일러를 포함한다.
 - 사용자 변경과 무관한 파일을 임의로 스테이징하거나 되돌리지 않는다.
-- **M5 통합 브랜치**: `m5/coding-agent-ide`. M5 관련 작업 전 현재 브랜치를 확인하며, 기능·실험 브랜치는 여기서 분기하고 이 브랜치로만 병합한다.
-- **M5 자동 승인 범위(2026-08-25 승인, 2026-09-03 검증 시점 간소화)**: 작업 계약에 명시된 기능 worktree의 원자적 구현·테스트·리뷰 수정 커밋과, 독립 리뷰 및 변경 영역 검증을 통과한 commit의 `m5/coding-agent-ide` 통합은 매번 다시 묻지 않고 실행한다. 파동 마감의 최신 통합 QA는 별도로 완료해야 한다. 범위 밖 파일, 안전 불변식·확정 결정 변경, 실제 유료 에이전트·사용자 프로젝트 시험, 외부 게시에는 적용하지 않는다.
-- M5 작업 중 `main`에 직접 커밋·병합·push하지 않는다. M5 전체 완료·검증 뒤 **사용자가 명시적으로 승인한 경우에만** `m5/coding-agent-ide`를 `main`에 병합한다.
-- 모든 branch의 push는 계속 별도 사용자 승인이 필요하다.
-- `m4/orchestration`은 완료된 M4 파일럿 기준선이다. 별도 M4 후속을 명시적으로 수행하지 않는 한 새 M5 작업의 분기·병합 대상으로 사용하지 않는다.
+- 로컬 커밋은 사용자 승인 범위를 따른다. 기존 M5의 작업 단위 구현·검증·기록 커밋 상시 승인은 해당 범위에서만 사용하며, 범위 밖 작업·안전 불변식 변경·실제 계정 시험·외부 게시의 승인을 추정하지 않는다.
+- main에 직접 커밋하거나 병합하지 않는다. main 병합 및 모든 브랜치의 push는 별도 사용자 승인이 필요하며 PR #1 승인은 이미 수행한 병합에만 적용된다.
+- `m5/coding-agent-ide`는 병합 전 개발 이력이다. 명시적인 별도 지시 없이 후속 작업의 분기·통합 대상으로 사용하지 않는다.

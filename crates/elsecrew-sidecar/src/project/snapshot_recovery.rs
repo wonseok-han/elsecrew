@@ -54,8 +54,17 @@ impl ProjectManager {
         let lock = storage
             .projection_record("lock", lock_id)?
             .ok_or_else(|| ProjectFailure::recovery("preparation lock missing"))?;
-        let worktree_path =
-            canonical_protocol_path_without_existing(&self.worktrees_root.join(worktree_id))?;
+        // A v1 copy is the managed child; a task worktree is the folder its
+        // preparation recorded, named `task-<8 hex>` after this id.
+        let managed = canonical_protocol_path_without_existing(&self.worktrees_root.join(worktree_id))?;
+        let short: String = worktree_id.trim_start_matches("worktree_").chars().take(8).collect();
+        let worktree_path = match project.get("worktree_path").and_then(Value::as_str) {
+            Some(recorded) if recorded != managed
+                && Path::new(recorded).is_absolute()
+                && Path::new(recorded).file_name().and_then(|name| name.to_str()) == Some(format!("task-{short}").as_str())
+                && !Path::new(recorded).starts_with(value_string(&project, "canonical_path")?) => recorded.to_owned(),
+            _ => managed,
+        };
         let manifest_path = canonical_protocol_path_without_existing(
             &self.manifests_root.join(format!("{worktree_id}.json")),
         )?;
@@ -76,16 +85,20 @@ impl ProjectManager {
                 "snapshot has no proof that export never started",
             ));
         }
-        for (dir, name) in [
-            (&self.worktrees_dir, worktree_id.to_owned()),
-            (&self.manifests_dir, format!("{worktree_id}.json")),
-        ] {
-            match dir.symlink_metadata(name) {
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                _ => {
-                    return Err(ProjectFailure::recovery(
-                        "unexpected activated snapshot artifact",
-                    ))
+        // A task worktree made before the app quit is a leftover of this
+        // preparation, undone on abandonment; anything else is not.
+        if !self.unstarted_task_worktree(worktree_id, Path::new(&worktree_path)) {
+            for (dir, name) in [
+                (&self.worktrees_dir, worktree_id.to_owned()),
+                (&self.manifests_dir, format!("{worktree_id}.json")),
+            ] {
+                match dir.symlink_metadata(name) {
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    _ => {
+                        return Err(ProjectFailure::recovery(
+                            "unexpected activated snapshot artifact",
+                        ))
+                    }
                 }
             }
         }
@@ -171,6 +184,8 @@ impl ProjectManager {
             hook(storage);
         }
         let mut project = registered_project(storage, project_id)?;
+        let worktree_id = value_string(&project, "worktree_id")?.to_owned();
+        self.remove_unstarted_task_worktree(&project, &worktree_id)?;
         let lock_id = value_string(&project, "lock_id")?.to_owned();
         let mut lock = storage
             .projection_record("lock", &lock_id)?

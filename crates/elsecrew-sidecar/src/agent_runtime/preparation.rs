@@ -1,6 +1,9 @@
 //! Shared durable preparation, without spawning or granting provider authority.
 use super::*;
 use elsecrew_core::provider::vendor_observation::codex_preflight::ExpectedPermission;
+mod activity;
+mod command_redact;
+mod secret_mask;
 #[cfg(target_os = "macos")]
 mod terminal;
 #[allow(dead_code)] // Claude launch admission/owner will call this output bridge.
@@ -19,6 +22,16 @@ enum CodexLaunchMode {
     OfflineOuter,
     ProxiedOuter,
     NamedTools,
+}
+
+/// Codex's approval policy for a run of this project, from its command
+/// permission when the run starts (2026-11-27 user decision): off makes Codex
+/// ask before every command that is not a known safe read.
+pub(crate) fn codex_approval_policy(storage: &Storage, projects: &ProjectManager, project_id: &str)
+    -> Result<elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy, SidecarError> {
+    let consent = projects.automation_permissions(storage, project_id)
+        .map_err(|_| SidecarError::new("agentInputChanged", "project consent unavailable"))?;
+    Ok(elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::for_commands_allowed(consent.commands))
 }
 
 fn codex_permission(profile: &AgentResolvedProfileV1) -> Result<ExpectedPermission, SidecarError> {
@@ -51,7 +64,17 @@ pub(crate) struct RunReservation {
     #[cfg(target_os = "macos")]
     pub(super) native_provider: Option<super::discovery::NativeProviderContext>,
     pub(super) claude_preflight: Option<elsecrew_protocol::agent_adapter_v1::phased_claude::Preflight>,
+    /// When the Git-level workspace check last passed for this run.
+    workspace_checked: std::sync::Mutex<Option<std::time::Instant>>,
 }
+
+/// The Git part of the workspace check spawns four git processes (one is
+/// `fsck --connectivity-only`). Running it on every streamed event made long
+/// turns spend most of their time in git and could exhaust the turn budget.
+/// Only the per-event streaming checks reuse a Git result this recent; the
+/// ledger, binding, manifest and lock checks still run every time, and every
+/// boundary (start, prompt, approval, terminal success) checks in full.
+const WORKSPACE_RECHECK: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// No Storage borrow: the dispatcher can service other requests between steps.
 #[cfg(target_os = "macos")]
@@ -66,6 +89,10 @@ pub(crate) struct RunTextState {
         >,
     >,
     run_id: String,
+    /// The workspace folder, so work history rows name files relative to it.
+    cwd: std::path::PathBuf,
+    /// Codex tool uses between start and end, for the work history.
+    tools: activity::CodexTools,
     finished: bool,
 }
 
@@ -132,6 +159,18 @@ impl OwnedTextRun {
         storage: &Storage,
         projects: &ProjectManager,
     ) -> Result<RunIdentity, SidecarError> {
+        self.registration_identity_with(storage, projects, false)
+    }
+
+    /// `viewing`: for showing what waits (an approval list or a look at one),
+    /// which may reuse a Git check of the last few seconds like each streamed
+    /// event does. Answering a request always checks in full.
+    pub(super) fn registration_identity_with(
+        &self,
+        storage: &Storage,
+        projects: &ProjectManager,
+        viewing: bool,
+    ) -> Result<RunIdentity, SidecarError> {
         if self.state.finished
             || self.state.run_id != self.reservation.run_id
             || !self.state.transport.matches_process(&self.process)
@@ -141,9 +180,12 @@ impl OwnedTextRun {
                 "native owner differs",
             ));
         }
-        self.reservation
-            .validate_text_input(storage, projects)
-            .map_err(|_| SidecarError::new("agentInputChanged", "native reservation differs"))?;
+        let checked = if viewing {
+            self.reservation.validate_text_input_streaming(storage, projects)
+        } else {
+            self.reservation.validate_text_input(storage, projects)
+        };
+        checked.map_err(|_| SidecarError::new("agentInputChanged", "native reservation differs"))?;
         let run = &self.reservation.run;
         Ok(RunIdentity {
             chat_id: self.reservation.request.chat_id.clone(),
@@ -232,6 +274,10 @@ impl OwnedTextRun {
 
 #[cfg(target_os = "macos")]
 impl RunReservation {
+    pub(crate) fn chat_id(&self) -> &str {
+        &self.request.chat_id
+    }
+
     pub(super) fn bind_provider_fence(
         &self,
         storage: &mut Storage,
@@ -287,6 +333,7 @@ impl RunReservation {
         let expected = elsecrew_core::provider::vendor_observation::codex_preflight::ExpectedProfile {
             model: &profile.model_selector,
             reasoning_effort: profile.reasoning_effort.as_deref().ok_or_else(failure)?,
+            approval: codex_approval_policy(storage, projects, self.run["projectId"].as_str().ok_or_else(failure)?)?,
         };
         if !observation.matches(&expected, permission, workspace, &process.codex_preflight_home()?) {
             return Err(failure());
@@ -331,7 +378,7 @@ impl RunReservation {
             projects,
             &self.run_id,
             evidence.confirmed(),
-            evidence.identities(),
+            evidence.recorded(),
             "native startup failed",
         )
         .map_err(|_| failure())?;
@@ -494,6 +541,7 @@ impl RunReservation {
         let expected = ExpectedProfile {
             model: &profile.model_selector,
             reasoning_effort: profile.reasoning_effort.as_deref().ok_or_else(failure)?,
+            approval: codex_approval_policy(storage, projects, self.run["projectId"].as_str().ok_or_else(failure)?)?,
         };
         executable.revalidate()?;
         helper.revalidate()?;
@@ -691,6 +739,7 @@ impl RunReservation {
         let expected = ExpectedProfile {
             model: &profile.model_selector,
             reasoning_effort: profile.reasoning_effort.as_deref().ok_or_else(failure)?,
+            approval: codex_approval_policy(storage, projects, self.run["projectId"].as_str().ok_or_else(failure)?)?,
         };
         let text = std::str::from_utf8(&self.prompt).map_err(|_| failure())?;
         let address = address_from_chat(&self.run).map_err(|_| failure())?;
@@ -732,10 +781,13 @@ impl RunReservation {
         if !process.retains_run_fence() {
             process.retain_fence_until_terminal()?;
         }
+        let cwd = workspace.cwd().to_path_buf();
         let transport = crate::provider_preflight_session::BoundTextSession::begin(
             process, flow, &workspace, text, output_budget,
         )?;
         Ok(RunTextState {
+            cwd,
+            tools: Default::default(),
             transport,
             pending_answer: None,
             pending_item: None,
@@ -777,6 +829,8 @@ impl RunReservation {
         }
         state.finished = true;
         if state.completion.is_none() {
+            let state_cwd = state.cwd.clone();
+            let tools = &mut state.tools;
             let outcome = state.transport.advance(
                 process,
                 cancel,
@@ -806,13 +860,19 @@ impl RunReservation {
                         TextAction::ObserveProcess => {
                             self.observe_process(storage, process)?;
                             return self
-                                .validate_text_input(storage, projects)
+                                .validate_text_input_streaming(storage, projects)
                                 .map_err(|_| failure());
                         }
                         TextAction::VerifyWorkspace => return Err(failure()),
                         TextAction::Public(event) => event,
+                        TextAction::Tool(tool) => {
+                            self.validate_text_input_streaming(storage, projects)
+                                .map_err(|_| failure())?;
+                            for row in activity::codex(tools, &tool, &state_cwd) { self.record_activity(storage, row); }
+                            return on_action(storage, TextAction::Tool(tool));
+                        }
                         action => {
-                            self.validate_text_input(storage, projects)
+                            self.validate_text_input_streaming(storage, projects)
                                 .map_err(|_| failure())?;
                             return on_action(storage, action);
                         }
@@ -867,7 +927,7 @@ impl RunReservation {
         // Preserve cleanup-before-final and terminal-before-fence-release ordering.
         let cleanup = process.poll_finish();
         if self
-            .persist_process_snapshot(storage, &process.tracked_for_cleanup())
+            .persist_process_snapshot(storage, &process.tracked_for_cleanup(), &process.recorded_for_ledger())
             .is_err()
         {
             process.invalidate_cleanup_evidence();
@@ -920,6 +980,7 @@ impl RunReservation {
             process,
             &result,
             cancel.load(std::sync::atomic::Ordering::Acquire),
+            None,
         )
         .map_err(|_| {
             SidecarError::new(
@@ -1086,10 +1147,29 @@ impl RunReservation {
         Ok(())
     }
 
+    /// Full check, including Git: every boundary uses this.
     fn validate_text_input(
         &self,
         storage: &Storage,
         projects: &ProjectManager,
+    ) -> Result<(), ProjectFailure> {
+        self.validate_text_input_with(storage, projects, false)
+    }
+
+    /// Per streamed event: may reuse a Git check from the last few seconds.
+    pub(super) fn validate_text_input_streaming(
+        &self,
+        storage: &Storage,
+        projects: &ProjectManager,
+    ) -> Result<(), ProjectFailure> {
+        self.validate_text_input_with(storage, projects, true)
+    }
+
+    fn validate_text_input_with(
+        &self,
+        storage: &Storage,
+        projects: &ProjectManager,
+        reuse_git: bool,
     ) -> Result<(), ProjectFailure> {
         let projection = actual_run_projection(storage, &self.run_id)?;
         let lock = storage
@@ -1127,12 +1207,30 @@ impl RunReservation {
                 &self.request.input_message_ids,
                 &self.request.role_id,
             )? != self.prompt
-            || projects.verify_workspace_for_run(storage, &address_from_chat(&self.run)?)?
-                != projection["workspace_manifest"]
         {
             return Err(ProjectFailure::recovery("reserved text input changed"));
         }
-        Ok(())
+        let address = address_from_chat(&self.run)?;
+        let checked_at = *self.workspace_checked.lock().map_err(|_| ProjectFailure::recovery("workspace check state is unavailable"))?;
+        let recent = reuse_git && checked_at.is_some_and(|at| at.elapsed() < WORKSPACE_RECHECK);
+        // Binding, manifest lifecycle, lock and directory: always. Git: unless recent.
+        let manifest = if recent {
+            projects.verify_workspace_binding_for_run(storage, &address)
+        } else {
+            projects.verify_workspace_for_run(storage, &address)
+        };
+        // Hold the lock only to record the outcome, never across the git checks.
+        let mut checked = self.workspace_checked.lock().map_err(|_| ProjectFailure::recovery("workspace check state is unavailable"))?;
+        match manifest {
+            Ok(manifest) if manifest == projection["workspace_manifest"] => {
+                if !recent { *checked = Some(std::time::Instant::now()); }
+                Ok(())
+            }
+            other => {
+                *checked = None;
+                other.and(Err(ProjectFailure::recovery("reserved text input changed")))
+            }
+        }
     }
 
     /// Keep the run's cumulative process evidence in step with its sole owner.
@@ -1144,7 +1242,7 @@ impl RunReservation {
         process: &mut crate::provider_login_process::LoginProcess<'_>,
     ) -> Result<(), SidecarError> {
         let (identities, observed) = process.observe_for_run();
-        let saved = self.persist_process_snapshot(storage, &identities);
+        let saved = self.persist_process_snapshot(storage, &identities, &process.recorded_for_ledger());
         if saved.is_err() || observed.is_err() {
             process.invalidate_transport();
             return Err(SidecarError::new(
@@ -1155,10 +1253,14 @@ impl RunReservation {
         Ok(())
     }
 
+    /// `owned` is every identity the owner ever saw (the earlier record must
+    /// be among them); `recorded` is what the record keeps now: the root and
+    /// every identity not yet observed gone.
     fn persist_process_snapshot(
         &self,
         storage: &mut Storage,
-        identities: &[ProcIdentity],
+        owned: &[ProcIdentity],
+        recorded: &[ProcIdentity],
     ) -> Result<(), ProjectFailure> {
         let projection = actual_run_projection(storage, &self.run_id)?;
         if !self.matches_current_record(&projection)
@@ -1174,8 +1276,9 @@ impl RunReservation {
             .as_array()
             .ok_or_else(|| ProjectFailure::recovery("run process binding is missing"))?;
         if prior.is_empty()
+            || recorded.is_empty()
             || prior.iter().any(|item| {
-                !identities.iter().any(|identity| {
+                !owned.iter().any(|identity| {
                     item["pid"].as_u64() == Some(identity.pid as u64)
                         && item["start_us"].as_i64() == Some(identity.start_us)
                 })
@@ -1185,7 +1288,7 @@ impl RunReservation {
                 "process owner differs from reserved run",
             ));
         }
-        persist_tracker_snapshot(storage, &self.run_id, identities)
+        persist_tracker_snapshot(storage, &self.run_id, recorded)
     }
 
     /// Keep process ownership with the caller on every failure, including a
@@ -1443,6 +1546,7 @@ impl RunPreparation {
         }
         storage.upsert_projection_records_atomic(upserts)?;
         Ok(RunReservation {
+            workspace_checked: std::sync::Mutex::new(None),
             running_record: std::sync::OnceLock::new(),
             #[cfg(target_os = "macos")]
             native_provider: None,

@@ -210,14 +210,37 @@ fn capture_workspace(
     check: &dyn Fn() -> Result<(), ProjectFailure>,
 ) -> Result<SourceInventory, ProjectFailure> {
     #[cfg(unix)]
-    {
+    let captured = {
         let _ = path;
         super::capture_checked(root, check)
-    }
+    };
     #[cfg(windows)]
+    let captured = crate::project::windows_source_inventory::capture(root, path, check);
+    captured.map(without_agent_scratch)
+}
+
+/// Bookkeeping an agent CLI keeps inside the copy for itself, never project
+/// content: Claude Code's private `.claude/.cc-writes` folder (created 0700).
+/// It is left out of every review so it neither blocks applying nor lands in
+/// the user's folder; a `.claude` folder holding nothing else goes with it.
+const AGENT_SCRATCH: &[&str] = &[".claude/.cc-writes"];
+
+fn is_agent_scratch(path: &str) -> bool {
+    AGENT_SCRATCH.iter().any(|scratch| {
+        path == *scratch || path.strip_prefix(scratch).is_some_and(|rest| rest.starts_with('/'))
+    })
+}
+
+/// Content there is written by the CLI itself (agents cannot write `.claude`),
+/// never goes to the original, and is left out whole, sub-entries included.
+fn without_agent_scratch(mut snapshot: SourceInventory) -> SourceInventory {
+    snapshot.entries.retain(|path, _| !is_agent_scratch(path));
+    if snapshot.entries.get(".claude").is_some_and(|entry| entry.kind() == 2)
+        && !snapshot.entries.keys().any(|path| path.starts_with(".claude/"))
     {
-        crate::project::windows_source_inventory::capture(root, path, check)
+        snapshot.entries.remove(".claude");
     }
+    snapshot
 }
 
 fn snapshot_digest(snapshot: &SourceInventory) -> Result<String, ProjectFailure> {
@@ -296,6 +319,13 @@ pub(in crate::project) fn prepare_target(
         }
     }
     let tracked: BTreeSet<&str> = baseline.tracked_paths().collect();
+    // Agent bookkeeping is left out of the snapshot; a tracked file there
+    // would then read as deleted. Refuse instead of ever removing it.
+    if tracked.iter().any(|path| is_agent_scratch(path)) {
+        return Err(ProjectFailure::dirty(
+            "tracked files inside agent bookkeeping folders cannot be reviewed",
+        ));
+    }
     let original = &baseline.inventory().entries;
     validate_paths(
         original

@@ -3,10 +3,12 @@
 //! 실제 유료 agent 실행과 원본 적용은 후속 게이트에서 추가한다.
 
 mod agent_runtime;
+mod background_check;
 mod orchestration;
 mod orchestration_dispatch;
 mod application_cancel;
 mod dispatch_timing;
+mod latency_log;
 mod chat;
 mod project;
 #[cfg(windows)]
@@ -59,6 +61,7 @@ mod provider_run_binding;
 mod storage;
 #[allow(dead_code)] // D1A keeps status internal until the later wire-activation wave.
 mod storage_lifetime;
+mod work_scope;
 
 use chrono::{SecondsFormat, Utc};
 use elsecrew_core as _;
@@ -203,6 +206,8 @@ where
         agent_runtime::run_agent_fixture_grandchild();
         return Ok(());
     }
+    // What the app says the last clean shutdown sealed (`storage::shutdown_seal`).
+    let mut storage_seal = None;
     let fixture_runtime = if mode.as_deref() == Some(std::ffi::OsStr::new("--stdio-agent-fixture"))
     {
         let scenario = args.next().ok_or_else(|| {
@@ -211,6 +216,17 @@ where
                 "stdio agent fixture scenario is required",
             )
         })?;
+        // The app adds a clean shutdown's seal on the next start; fixture runs
+        // take it too, so a probe can start the fake agent from a seal.
+        match args.next() {
+            None => {}
+            Some(flag) if flag == "--storage-seal" => {
+                storage_seal = Some(args.next().and_then(|value| value.into_string().ok())
+                    .filter(|value| storage::shutdown_seal::valid_seal(value))
+                    .ok_or_else(|| SidecarError::new("invalidArguments", "stdio agent fixture seal is invalid"))?);
+            }
+            Some(_) => return Err(SidecarError::new("invalidArguments", "stdio agent fixture has extra arguments")),
+        }
         if args.next().is_some() {
             return Err(SidecarError::new(
                 "invalidArguments",
@@ -226,6 +242,8 @@ where
             "long-stream" => agent_runtime::FakeScenario::LongStream,
             #[cfg(any(debug_assertions, feature = "qa-output-fixtures"))]
             "paced-long-stream" => agent_runtime::FakeScenario::PacedLongStream,
+            #[cfg(any(debug_assertions, feature = "qa-output-fixtures"))]
+            "paced-long-stream-read-only" => agent_runtime::FakeScenario::PacedLongStreamReadOnly,
             "final-delayed" => agent_runtime::FakeScenario::FinalDelayed,
             "cancel-clean" => agent_runtime::FakeScenario::CancelClean,
             "cancel-uncertain" => agent_runtime::FakeScenario::CancelUncertain,
@@ -274,11 +292,25 @@ where
             scenario,
         ))
     } else {
-        if mode.as_deref() != Some(std::ffi::OsStr::new("--stdio")) || args.next().is_some() {
-            return Err(SidecarError::new(
-                "invalidArguments",
-                "sidecar requires exactly one argument: --stdio",
-            ));
+        let invalid = || SidecarError::new(
+            "invalidArguments",
+            "sidecar requires --stdio, optionally followed by --storage-seal <sha256>",
+        );
+        if mode.as_deref() != Some(std::ffi::OsStr::new("--stdio")) {
+            return Err(invalid());
+        }
+        match args.next() {
+            None => {}
+            Some(flag) if flag == "--storage-seal" => {
+                let seal = args.next().and_then(|value| value.into_string().ok())
+                    .filter(|value| storage::shutdown_seal::valid_seal(value))
+                    .ok_or_else(invalid)?;
+                storage_seal = Some(seal);
+            }
+            Some(_) => return Err(invalid()),
+        }
+        if args.next().is_some() {
+            return Err(invalid());
         }
         None
     };
@@ -305,14 +337,26 @@ where
     let stdin = io::stdin();
     let stdout = io::stdout();
     match fixture_runtime {
-        Some(runtime) => serve_stdio_with_identity_and_runtime(
+        Some(runtime) => serve_stdio_sealed(
             &database_path,
             stdin,
             stdout.lock(),
             new_sidecar_instance_id(),
             runtime,
+            storage_seal,
         ),
-        None => run_stdio(&database_path, stdin, stdout.lock()),
+        None => serve_stdio_sealed(
+            &database_path,
+            stdin,
+            stdout.lock(),
+            new_sidecar_instance_id(),
+            if cfg!(target_os = "macos") {
+                agent_runtime::AgentRuntime::native_candidate()
+            } else {
+                agent_runtime::AgentRuntime::blocked()
+            },
+            storage_seal,
+        ),
     }
 }
 
@@ -346,35 +390,66 @@ fn serve_stdio_with_identity<R: Read + Send + 'static, W: Write>(
 fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
     database_path: &Path,
     input: R,
-    mut output: W,
+    output: W,
     sidecar_instance_id: String,
     runtime: agent_runtime::AgentRuntime,
 ) -> Result<(), SidecarError> {
+    serve_stdio_sealed(database_path, input, output, sidecar_instance_id, runtime, None)
+}
+
+fn serve_stdio_sealed<R: Read + Send + 'static, W: Write>(
+    database_path: &Path,
+    input: R,
+    mut output: W,
+    sidecar_instance_id: String,
+    runtime: agent_runtime::AgentRuntime,
+    storage_seal: Option<String>,
+) -> Result<(), SidecarError> {
     g4_platform_gate()?;
     let mut timings = dispatch_timing::DispatchTiming::default();
+    let mut latency = latency_log::LatencyLog::from_env();
     let mut sidecar = SidecarSession::new(sidecar_instance_id, runtime);
+    sidecar.storage_seal = storage_seal;
     let ready = EnvelopeV1::Event(sidecar.ready_event()?);
     let mut session = ProtocolSessionV1::default();
     session.observe(&ready).map_err(protocol_error)?;
     write_envelope(&mut output, &ready)?;
     sidecar.start_admission(database_path);
 
-    let (sender, receiver) = mpsc::sync_channel(1);
+    // Requests keep arriving (status polls) while a long step such as an
+    // application backup holds the loop. Queue them up to a byte budget: only
+    // a reader that would really have to stop reading (and could then miss a
+    // later stop request) stops an in-flight source copy.
+    let (sender, receiver) = mpsc::sync_channel(INPUT_QUEUE_MESSAGES);
+    let queued_bytes = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let reader_queued = queued_bytes.clone();
     let application_cancel = sidecar.application_cancel.clone();
     let input_instance = sidecar.ready.sidecar_instance_id.clone();
     thread::spawn(move || {
+        use std::sync::atomic::Ordering;
+        let queued_bytes = reader_queued;
         let mut input = BufReader::with_capacity(8 * 1024, input);
         loop {
             let message = match read_bounded_jsonl(&mut input) {
-                Ok(Some(line)) => InputMessage::Line(line),
+                Ok(Some(line)) => InputMessage::Line(line, Instant::now()),
                 Ok(None) => InputMessage::Eof,
                 Err(error) => InputMessage::Error(error),
             };
-            let finished = !matches!(message, InputMessage::Line(_));
-            if let InputMessage::Line(line) = &message {
+            let finished = !matches!(message, InputMessage::Line(..));
+            let size = if let InputMessage::Line(line, _) = &message {
                 application_cancel.observe(line, &input_instance);
+                line.len()
             } else {
                 application_cancel.stop();
+                0
+            };
+            if queued_bytes.fetch_add(size, Ordering::AcqRel) + size > INPUT_QUEUE_BYTES {
+                // Over budget: stop any source copy first, then really bound
+                // memory by reading nothing more until the loop catches up.
+                application_cancel.stop();
+                while queued_bytes.load(Ordering::Acquire) > INPUT_QUEUE_BYTES {
+                    thread::sleep(Duration::from_millis(10));
+                }
             }
             let sent = match sender.try_send(message) {
                 Ok(()) => true,
@@ -397,10 +472,27 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
         // Requests and polling work consume the same interval. Starting a fresh
         // 100ms wait after either would add idle latency to every output batch.
         let wait = runtime_poll_interval.saturating_sub(last_runtime_poll.elapsed());
-        let line = match receiver.recv_timeout(wait) {
-            Ok(InputMessage::Line(line)) => line,
+        let (line, received) = match receiver.recv_timeout(wait) {
+            Ok(InputMessage::Line(line, received)) => {
+                queued_bytes.fetch_sub(line.len(), std::sync::atomic::Ordering::AcqRel);
+                (line, received)
+            }
             Ok(InputMessage::Eof) => {
                 if sidecar.safe_to_quit() {
+                    // Hash under the lock, close, then make sure closing wrote
+                    // nothing: only then may the app sign it for the next start.
+                    let sealed = sidecar.shutdown_seal();
+                    drop(sidecar);
+                    if let Some((path, sealed, full_check_ms)) = sealed {
+                        if sealed.still_holds(&path) {
+                            // `full=`: when the state last proven by a full
+                            // check was taken, if the background check did one.
+                            match full_check_ms {
+                                Some(ms) => eprintln!("{} {} full={ms}", STORAGE_SEAL_LINE, sealed.digest),
+                                None => eprintln!("{} {}", STORAGE_SEAL_LINE, sealed.digest),
+                            }
+                        }
+                    }
                     return Ok(());
                 }
                 return Err(SidecarError::new(
@@ -412,12 +504,12 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
             Err(RecvTimeoutError::Timeout) => {
                 last_runtime_poll = Instant::now();
                 sidecar.poll_admission();
-                let mut events = timings.measure("watch", || sidecar.poll_watch_events());
-                let (responses, runtime_events) = timings.measure("runtime", || sidecar.poll_runtime_events())?;
+                let mut events = latency.measure("watch", || timings.measure("watch", || sidecar.poll_watch_events()));
+                let (responses, runtime_events) = latency.measure("runtime", || timings.measure("runtime", || sidecar.poll_runtime_events()))?;
                 write_responses(&mut session, &mut output, responses)?;
                 events.extend(runtime_events);
                 write_events(&mut session, &mut output, events)?;
-                timings.measure("maintenance", || sidecar.maintenance_tick())?;
+                latency.measure("maintenance", || timings.measure("maintenance", || sidecar.maintenance_tick()))?;
                 continue;
             }
             Err(RecvTimeoutError::Disconnected) => {
@@ -439,7 +531,13 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
                 "sidecar stdin accepts request envelopes only",
             ));
         };
+        let started = Instant::now();
+        // Only the protocol's name for the method, never anything the request carried.
+        let method = latency.enabled().then(|| latency_log::known_method(&request.method));
         let handled = timings.measure("request", || sidecar.handle_request(request))?;
+        if let Some(method) = method {
+            latency.request(method, received, started, Instant::now());
+        }
         if sidecar.safe_to_quit() { timings.emit(); }
         write_responses(&mut session, &mut output, handled.response)?;
         write_events(&mut session, &mut output, handled.events)?;
@@ -447,13 +545,13 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
         // recv_timeout from expiring. Preserve response-before-event ordering.
         if !sidecar.safe_to_quit() && last_runtime_poll.elapsed() >= runtime_poll_interval {
             last_runtime_poll = Instant::now();
-            let mut events = timings.measure("watch", || sidecar.poll_watch_events());
-            let (responses, runtime_events) = timings.measure("runtime", || sidecar.poll_runtime_events())?;
+            let mut events = latency.measure("watch", || timings.measure("watch", || sidecar.poll_watch_events()));
+            let (responses, runtime_events) = latency.measure("runtime", || timings.measure("runtime", || sidecar.poll_runtime_events()))?;
             write_responses(&mut session, &mut output, responses)?;
             events.extend(runtime_events);
             write_events(&mut session, &mut output, events)?;
         }
-        timings.measure("maintenance", || sidecar.maintenance_tick())?;
+        latency.measure("maintenance", || timings.measure("maintenance", || sidecar.maintenance_tick()))?;
     }
 }
 
@@ -470,8 +568,16 @@ fn write_responses<W: Write>(
     Ok(())
 }
 
+/// Bounds requests waiting behind a busy loop: enough for minutes of status
+/// polling. Bytes are the real memory bound (the reader waits past it); the
+/// count only caps the channel. A loop blocked for several minutes can still
+/// reach the count and stop an in-flight source copy.
+const INPUT_QUEUE_MESSAGES: usize = 1024;
+const INPUT_QUEUE_BYTES: usize = 8 * 1024 * 1024;
+
 enum InputMessage {
-    Line(Vec<u8>),
+    /// A request line and when the reader took it off stdin.
+    Line(Vec<u8>, Instant),
     Eof,
     Error(SidecarError),
 }
@@ -565,11 +671,28 @@ struct Sidecar {
     pending_agent_starts: BTreeMap<String, PendingAgentStart>,
     maintenance_scheduler: storage_lifetime::scheduler::CooperativeScheduler,
     maintenance_poisoned: bool,
+    /// The full storage check run on a copy while the app rests.
+    background_check: background_check::BackgroundCheck,
     workflow_chats: std::collections::BTreeSet<String>,
     workflow_requests: BTreeMap<String, (String, String)>,
     workflow_outbound: Vec<EventV1>,
     workflow_roots: BTreeMap<String, String>,
     workflow_announcements: Vec<EventV1>,
+    /// A team step that asks again later: since when its provider was busy
+    /// with another check (model list, sign-in check; `None` while it only
+    /// waits its turn, which is not a provider error, PR #20 review I2),
+    /// when to ask again, and how many times it asked.
+    workflow_busy: BTreeMap<String, (Option<Instant>, Instant, u32)>,
+    /// Team steps waiting their turn: their provider already runs as many as
+    /// allowed (ADE multi-project P3′). Told once per wait. Each holds its
+    /// place in line for its provider (`workflow_turn`): a slot that frees
+    /// goes to the earliest, never to a later step or a new start (review I2).
+    workflow_waiting: BTreeMap<String, (u64, String)>,
+    workflow_turn: u64,
+    /// Teams put in line at their very start: their first accepted run is
+    /// their own root (P3′). A later team of the same task never borrows an
+    /// earlier team's root (PR #20 review B3).
+    workflow_queued_roots: std::collections::BTreeSet<String>,
 }
 
 struct PendingAgentStart {
@@ -580,6 +703,9 @@ struct PendingAgentStart {
     #[cfg(target_os = "macos")]
     process: Option<provider_login_process::LoginProcess<'static>>,
     result: Option<Result<chat::G5Action, SidecarError>>,
+    /// How many times this start discovered again because its discovery
+    /// waited too long for the engine (ADE multi-project P5).
+    rediscoveries: u8,
 }
 
 struct AdmissionWorker {
@@ -607,7 +733,13 @@ struct SidecarSession {
     started_at: String,
     admission: AdmissionState,
     safe_to_quit: bool,
+    /// Taken by the admission worker: the app's claim of the last clean
+    /// shutdown's seal, checked against the file there.
+    storage_seal: Option<String>,
 }
+
+/// The one stderr line the app reads at a clean exit to sign the seal.
+const STORAGE_SEAL_LINE: &str = "elsecrew-storage-seal v1";
 
 impl SidecarSession {
     fn new(sidecar_instance_id: String, runtime: agent_runtime::AgentRuntime) -> Self {
@@ -635,6 +767,7 @@ impl SidecarSession {
                     .chain(std::iter::once(&"run.approval"))
                     .chain(std::iter::once(&"project.catalog"))
                     .chain(std::iter::once(&"provider.install"))
+                    .chain(elsecrew_protocol::preview_v1::PREVIEW_METHODS_V1.iter())
                     .map(|value| (*value).to_string())
                     .collect(),
                 sidecar_instance_id,
@@ -644,7 +777,20 @@ impl SidecarSession {
                 runtime: Some(runtime),
             },
             safe_to_quit: false,
+            storage_seal: None,
         }
+    }
+
+    /// A clean exit's seal of the database, if the engine opened it and
+    /// nothing is unsettled. The path is checked again after closing.
+    fn shutdown_seal(&self) -> Option<(std::path::PathBuf, storage::shutdown_seal::SealedFile, Option<u64>)> {
+        let AdmissionState::Ready { sidecar, .. } = &self.admission else { return None };
+        // A damaged ledger found in the background: the next start checks in full.
+        if sidecar.maintenance_poisoned || sidecar.background_check.failed() {
+            return None;
+        }
+        let sealed = sidecar.storage.shutdown_seal()?;
+        Some((sidecar.storage.database_path().to_path_buf(), sealed, sidecar.background_check.last_success_ms()))
     }
 
     fn ready_event(&self) -> Result<EventV1, SidecarError> {
@@ -675,6 +821,7 @@ impl SidecarSession {
             return;
         };
         let runtime = runtime.take().expect("admission runtime starts once");
+        let seal = self.storage_seal.take();
         let database_path = database_path.to_path_buf();
         let ready = self.ready.clone();
         let cancellation = Arc::new(AtomicBool::new(false));
@@ -687,7 +834,7 @@ impl SidecarSession {
                 admission_not_cancelled(&worker_cancellation)?;
                 thread::sleep(Duration::from_millis(1));
             }
-            Sidecar::initialize(database_path, ready, runtime, &worker_cancellation)
+            Sidecar::initialize_with_seal(database_path, ready, runtime, &worker_cancellation, seal.as_deref())
         });
         self.admission = AdmissionState::Verifying(AdmissionWorker {
             cancellation,
@@ -719,25 +866,31 @@ impl SidecarSession {
             .join();
         self.admission = match outcome {
             Ok(Ok(mut sidecar)) => {
+                if sidecar.storage.opened_from_seal() {
+                    eprintln!("storage admission: clean shutdown seal");
+                }
                 sidecar.projects.application_cancel = self.application_cancel.clone();
                 AdmissionState::Ready {
                     completed_at: now_utc(),
                     sidecar: Box::new(sidecar),
                 }
             }
-            Ok(Err(_)) | Err(_) => AdmissionState::Failed {
-                completed_at: now_utc(),
-            },
+            Ok(Err(error)) => {
+                // Fixed kind only: a failed admission otherwise leaves no cause.
+                eprintln!("storage admission failed: {}", error.kind());
+                if std::env::var_os("ELSECREW_DEBUG_ADMISSION").is_some() { eprintln!("storage admission detail: {}", error.detail()); }
+                AdmissionState::Failed { completed_at: now_utc() }
+            }
+            Err(_) => {
+                eprintln!("storage admission failed: workerPanicked");
+                AdmissionState::Failed { completed_at: now_utc() }
+            }
         };
     }
 
     fn handle_request(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
-        match self.handle_validated_request(request.clone()) {
-            Err(error) if error.kind() == "invalidParams" => Ok(HandledRequest::response(
-                error_response(&request, "invalidParams", "invalidRequest", error.detail()),
-            )),
-            other => other,
-        }
+        let result = self.handle_validated_request(request.clone());
+        answer_failed_request(&request, result)
     }
 
     fn handle_validated_request(
@@ -758,9 +911,10 @@ impl SidecarSession {
                         serde_json::to_value(self.system_status()?).map_err(json_error)?,
                     )));
                 }
-                let handled = sidecar.handle_request(request)?;
+                let handled = sidecar.handle_request(request);
+                // Whatever the outcome, mirror what the engine durably marked.
                 self.safe_to_quit = sidecar.safe_to_quit;
-                Ok(handled)
+                handled
             }
             AdmissionState::NotStarted { .. } | AdmissionState::Verifying(_) => {
                 self.handle_not_ready_request(request, StorageAdmissionStateV1::Verifying)
@@ -927,32 +1081,48 @@ impl Drop for SidecarSession {
 }
 
 impl Sidecar {
+    #[cfg(test)]
     fn initialize(
         database_path: std::path::PathBuf,
         ready: ReadyPayloadV1,
         agent_runtime: agent_runtime::AgentRuntime,
         cancellation: &AtomicBool,
     ) -> Result<Self, SidecarError> {
+        Self::initialize_with_seal(database_path, ready, agent_runtime, cancellation, None)
+    }
+
+    fn initialize_with_seal(
+        database_path: std::path::PathBuf,
+        ready: ReadyPayloadV1,
+        agent_runtime: agent_runtime::AgentRuntime,
+        cancellation: &AtomicBool,
+        seal: Option<&str>,
+    ) -> Result<Self, SidecarError> {
         // macOS native and explicit long-output fixtures use the same verified
         // migration/admission path. Blocked platforms keep their existing format.
         let mut storage = if agent_runtime.uses_durable_output() {
-            Storage::open_for_durable_admission(&database_path, cancellation)?
+            Storage::open_for_durable_admission_with_seal(&database_path, cancellation, seal)?
         } else {
             Storage::open_for_admission(&database_path, cancellation)?
         };
         admission_not_cancelled(cancellation)?;
+        if let Some(data_dir) = database_path.parent() {
+            background_check::clean_leftovers(data_dir);
+        }
+        let from_seal = storage.opened_from_seal();
         let mut projects = ProjectManager::new(&database_path)?;
         admission_not_cancelled(cancellation)?;
         storage.recover_unclean_shutdown()?;
         let g5 = chat::G5Manager::default();
-        agent_runtime.recover_unclean_runs(&mut storage, &mut projects)?;
+        agent_runtime.recover_unclean_runs_until(&mut storage, &mut projects, cancellation)?;
+        admission_not_cancelled(cancellation)?;
         agent_runtime.reconcile_resolved_catalogs(&mut storage, &projects)?;
         g5.recover_unclean_runs(&mut storage, &mut projects)?;
         orchestration::pause_after_restart(&mut storage).map_err(orchestration_dispatch::failure)?;
         admission_not_cancelled(cancellation)?;
         storage.register_app_instance(&ready)?;
         admission_not_cancelled(cancellation)?;
-        Ok(Self {
+        let mut sidecar = Self {
             storage,
             #[cfg(target_os = "macos")]
             login: provider_login_manager::LoginManager::default(),
@@ -975,15 +1145,30 @@ impl Sidecar {
             workflow_outbound: Vec::new(),
             workflow_roots: Default::default(),
             workflow_announcements: Vec::new(),
+            workflow_busy: BTreeMap::new(),
+            workflow_waiting: BTreeMap::new(),
+            workflow_turn: 0,
+            workflow_queued_roots: Default::default(),
             maintenance_scheduler: storage_lifetime::scheduler::CooperativeScheduler::default(),
             maintenance_poisoned: false,
-        })
+            background_check: background_check::BackgroundCheck::new(from_seal),
+        };
+        // A provider sign-in hold left by a run that has since durably ended
+        // (for example it was settled just before the app closed) is released
+        // before the first provider request can trip over it.
+        sidecar.release_settled_fences();
+        Ok(sidecar)
     }
 
     fn handle_request(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
         match self.handle_validated_request(request.clone()) {
             Err(error) if error.kind() == "invalidParams" => Ok(HandledRequest::response(
                 error_response(&request, "invalidParams", "invalidRequest", error.detail()),
+            )),
+            // An unconnected provider is an ordinary refusal of this request,
+            // not a broken service: answer it instead of ending the sidecar.
+            Err(error) if error.kind() == "providerDisconnected" => Ok(HandledRequest::response(
+                error_response(&request, "providerDisconnected", "requestBlocked", error.detail()),
             )),
             other => other,
         }
@@ -1011,9 +1196,14 @@ impl Sidecar {
                 "installation and provider work cannot overlap; check status or request cancellation",
             )));
         }
-        if !self.workflow_chats.is_empty() && (matches!(request.method.as_str(), "file.save" | "workspace.file.save")
-            || (request.method == "project.catalog" && matches!(request.params["action"].as_str(), Some("openApplicationConfirmation" | "startApplication" | "restoreApplication" | "discardChatWorkspace" | "retireApplication" | "cleanupBackup")))) {
-            return Ok(HandledRequest::response(error_response(&request, "orchestrationBusy", "requestBlocked", "finish or stop the team task before changing its workspace or applying to the original")));
+        // A save, merge, discard, cleanup or erasure waits only for its own
+        // task; applying a copy to the user's folder waits for every team
+        // (work_scope.rs, ADE multi-project P2′).
+        if let Some((code, detail)) = self.write_refusal(&request) {
+            if code == "invalidParams" {
+                return Err(invalid_params(detail.into()));
+            }
+            return Ok(HandledRequest::response(error_response(&request, code, "requestBlocked", detail)));
         }
         if self.projects.application_running()
             && !matches!(request.method.as_str(), "system.status" | "app.prepareQuit")
@@ -1156,6 +1346,8 @@ impl Sidecar {
                     self.projects.stop_watchers();
                     orchestration::pause_after_restart(&mut self.storage).map_err(orchestration_dispatch::failure)?;
                     self.workflow_chats.clear();
+                    self.workflow_waiting.clear();
+                    self.workflow_queued_roots.clear();
                     self.prepared_to_quit = true;
                 }
                 self.agent_runtime
@@ -1181,7 +1373,11 @@ impl Sidecar {
                 #[cfg(not(target_os = "macos"))]
                 let login_blockers: Vec<String> = Vec::new();
                 let login_stopped = login_blockers.is_empty();
-                let runtime_blockers = self.agent_runtime.owned_run_ids();
+                // Live work is listed by bare ID, apart from the stored `run:`
+                // and `lock:` records: the app may close over stored records
+                // only (the next start recovers them), never over live work.
+                let mut runtime_blockers = self.agent_runtime.owned_run_ids();
+                runtime_blockers.extend(self.g5.active_run_ids());
                 if blockers.is_empty()
                     && login_stopped
                     && runtime_blockers.is_empty()
@@ -1225,10 +1421,24 @@ impl Sidecar {
                 }
                 Some("cleanupWorkspace") => {
                     let params = require_exact_params(&request.params, &["action", "chatId", "confirmed"]).map_err(invalid_params)?;
-                    if params["confirmed"] != true || self.g5.cleanup_blocked() || !self.workflow_chats.is_empty() || !self.agent_runtime.owned_run_ids().is_empty() || !self.pending_agent_starts.is_empty() || !self.pending_agent_cancels.is_empty() {
+                    // The task itself must be idle: checked by `write_refusal`.
+                    if params["confirmed"] != true || self.g5.cleanup_blocked() {
                         return Err(invalid_params("cleanup requires explicit confirmation and idle execution".into()));
                     }
                     self.projects.cleanup_workspace(&mut self.storage, param_string(params,"chatId").map_err(invalid_params)?, &request.request_id)
+                }
+                Some("chatErasureList") => {
+                    require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
+                    self.projects.chat_erasure_list(&self.storage)
+                }
+                Some("eraseChatContent") => {
+                    // Same explicit-confirmation and idle gate as copy cleanup (docs/proposals/m5-chat-erasure.md).
+                    let params = require_exact_params(&request.params, &["action", "chatId", "confirmed"]).map_err(invalid_params)?;
+                    // The task itself must be idle: checked by `write_refusal`.
+                    if params["confirmed"] != true || self.g5.cleanup_blocked() {
+                        return Err(invalid_params("chat erasure requires explicit confirmation and idle execution".into()));
+                    }
+                    self.projects.erase_chat_content(&mut self.storage, param_string(params,"chatId").map_err(invalid_params)?, &request.request_id)
                 }
 
                 Some("getAutomationPermissions" | "setAutomationPermissions") => {
@@ -1255,12 +1465,7 @@ impl Sidecar {
                     self.projects.open_application_confirmation(&mut self.storage, param_string(params, "projectId").map_err(invalid_params)?, param_string(params, "chatId").map_err(invalid_params)?, param_string(params, "fingerprint").map_err(invalid_params)?, &request.request_id)
                 }
                 Some("inspectChatDiscard" | "discardChatWorkspace") => {
-                    if !self.workflow_chats.is_empty() || !self.agent_runtime.owned_run_ids().is_empty()
-                        || !self.pending_agent_starts.is_empty()
-                        || !self.pending_agent_cancels.is_empty()
-                    {
-                        return Ok(HandledRequest::response(error_response(&request, "requestBlocked", "requestBlocked", "workspace discard requires idle native execution")));
-                    }
+                    // This task's agents must be idle: checked by `write_refusal`.
                     let committing = request.params["action"] == "discardChatWorkspace";
                     let fields = ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"];
                     let params = if committing {
@@ -1286,6 +1491,58 @@ impl Sidecar {
                         self.g5.preview_workspace_discard(&self.storage, &self.projects, &address, task_id)
                             .map(|inspection| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"inspectChatDiscard","inspection":inspection}), ..Default::default() })
                     }
+                }
+                Some(action @ ("getWorkspaceFolder" | "setWorkspaceFolder" | "resetWorkspaceFolder")) => {
+                    let result = match action {
+                        "setWorkspaceFolder" => {
+                            let params = require_exact_params(&request.params, &["action", "path"]).map_err(invalid_params)?;
+                            self.projects.set_workspace_folder(&self.storage, Some(param_string(params, "path").map_err(invalid_params)?))
+                        }
+                        "resetWorkspaceFolder" => {
+                            require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
+                            self.projects.set_workspace_folder(&self.storage, None)
+                        }
+                        _ => {
+                            require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
+                            self.projects.workspace_folder()
+                        }
+                    };
+                    result.map(|folder| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":action,"folder":folder}), ..Default::default() })
+                }
+                Some("inspectSourceChanges") => {
+                    let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;
+                    self.projects.source_uncommitted(&self.storage, param_string(params, "projectId").map_err(invalid_params)?)
+                        .map(|changes| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"inspectSourceChanges","changes":changes}), ..Default::default() })
+                }
+                Some(action @ ("inspectChatMerge" | "mergeChatWorkspace")) => {
+                    let merging = action == "mergeChatWorkspace";
+                    // No agent of this task may be writing (`write_refusal`).
+                    // Other tasks write only their own workspaces, and the
+                    // app's Git writes all run on this dispatcher thread.
+                    let mut fields = vec!["action", "chatId", "projectId", "worktreeId", "workspaceIdentity"];
+                    if merging { fields.extend(["expectedHead", "expectedBase", "keepConflicts", "confirmed"]); }
+                    let params = require_exact_params(&request.params, &fields).map_err(invalid_params)?;
+                    if merging && params["confirmed"] != true { return Err(invalid_params("merging requires explicit confirmation".into())); }
+                    let address = project::WorkspaceAddress {
+                        chat_id: param_string(params, "chatId").map_err(invalid_params)?.to_owned(),
+                        project_id: param_string(params, "projectId").map_err(invalid_params)?.to_owned(),
+                        worktree_id: param_string(params, "worktreeId").map_err(invalid_params)?.to_owned(),
+                        workspace_identity: param_string(params, "workspaceIdentity").map_err(invalid_params)?.to_owned(),
+                    };
+                    let result = if merging {
+                        let oid = |key: &str| param_string(params, key).map_err(invalid_params).and_then(|value| {
+                            (matches!(value.len(), 40 | 64) && value.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()))
+                                .then_some(value).ok_or_else(|| invalid_params("invalid commit id".into()))
+                        });
+                        let (head, base) = (oid("expectedHead")?, oid("expectedBase")?);
+                        let keep = params["keepConflicts"].as_bool().ok_or_else(|| invalid_params("invalid keepConflicts".into()))?;
+                        self.projects.workspace_merge(&self.storage, &address, head, base, keep)
+                            .map(|mut outcome| { outcome["schemaVersion"] = serde_json::json!(1); outcome["action"] = serde_json::json!(action); outcome })
+                    } else {
+                        self.projects.workspace_merge_inspect(&self.storage, &address)
+                            .map(|merge| serde_json::json!({"schemaVersion":1,"action":action,"merge":merge}))
+                    };
+                    result.map(|result| project::ProjectAction { result, ..Default::default() })
                 }
                 Some("applicationCapabilities") => {
                     require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
@@ -1334,14 +1591,27 @@ impl Sidecar {
                     };
                     connections.map(|connections| project::ProjectAction {result:serde_json::json!({"schemaVersion":1,"action":action,"connections":connections}),..Default::default()})
                 }
+                Some(action @ ("getRunLimits" | "setRunLimit")) => {
+                    // How many runs of a provider may work at once (ADE multi-project P3′).
+                    let limits = if action == "setRunLimit" {
+                        let params = require_exact_params(&request.params, &["action", "runtime", "limit"]).map_err(invalid_params)?;
+                        let limit = params["limit"].as_u64().ok_or_else(|| invalid_params("invalid run limit".into()))?;
+                        self.projects.set_run_limit(param_string(params, "runtime").map_err(invalid_params)?, limit)
+                    } else {
+                        require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
+                        self.projects.run_limits()
+                    };
+                    limits.map(|limits| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":action,"limits":limits}), ..Default::default() })
+                }
                 Some("getAppRoleDefaults") => {
                     require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
-                    self.projects.app_role_defaults().map(|settings| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"getAppRoleDefaults","settings":settings}), ..Default::default() })
+                    self.storage.custom_roles_enabled().map_err(|error| ProjectFailure::manifest(error.detail)).and_then(|custom| self.projects.app_role_defaults(custom)).map(|settings| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"getAppRoleDefaults","settings":settings}), ..Default::default() })
                 }
                 Some("updateAppRoleDefaults") => {
-                    let params = require_exact_params(&request.params, &["action", "expectedRevision", "roles"]).map_err(invalid_params)?;
+                    let keys: &[&str] = if request.params.get("roleDefinitions").is_some() { &["action", "expectedRevision", "roles", "roleDefinitions"] } else { &["action", "expectedRevision", "roles"] };
+                    let params = require_exact_params(&request.params, keys).map_err(invalid_params)?;
                     let revision = params.get("expectedRevision").and_then(Value::as_u64).ok_or_else(|| invalid_params("invalid settings revision".into()))?;
-                    self.projects.update_app_role_defaults(&self.storage, revision, params["roles"].clone()).map(|settings| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"updateAppRoleDefaults","settings":settings}), ..Default::default() })
+                    self.projects.update_app_role_defaults(&self.storage, revision, params["roles"].clone(), params.get("roleDefinitions").cloned()).map(|settings| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"updateAppRoleDefaults","settings":settings}), ..Default::default() })
                 }
                 Some("backupStorageUsage") => {
                     require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
@@ -1406,14 +1676,9 @@ impl Sidecar {
                     let params = require_exact_params(&request.params, &["action", "projectId", "chatId"]).map_err(invalid_params)?;
                     self.projects.chat_application_preview(&self.storage, param_string(params, "projectId").map_err(invalid_params)?, param_string(params, "chatId").map_err(invalid_params)?)
                 }
-                Some("prepareApplicationWorkspace") => {
-                    let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;
-                    self.projects.prepare_application_workspace(&mut self.storage, param_string(params, "projectId").map_err(invalid_params)?, &request.request_id)
-                }
-                Some("applicationPreview") => {
-                    let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;
-                    self.projects.application_preview(&self.storage, param_string(params, "projectId").map_err(invalid_params)?)
-                }
+                // `prepareApplicationWorkspace` and `applicationPreview` (the manual,
+                // project-level application flow) were retired on 2026-11-13; a
+                // task's own workspace and review page replace them.
                 Some("applicationHistory") => {
                     let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;
                     self.projects.application_history(&self.storage, param_string(params, "projectId").map_err(invalid_params)?)
@@ -1422,14 +1687,33 @@ impl Sidecar {
                     let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;
                     self.projects.application_status(&self.storage,param_string(params,"projectId").map_err(invalid_params)?)
                 }
+                Some("applyChatLatest") => {
+                    // Latest wins (user decision 2026-11-17): the workspace as it
+                    // is now is written over the original, no review step.
+                    let params = require_exact_params(&request.params, &["action", "projectId", "chatId"]).map_err(invalid_params)?;
+                    self.projects.apply_chat_latest(&self.storage, param_string(params, "projectId").map_err(invalid_params)?, param_string(params, "chatId").map_err(invalid_params)?)
+                }
+                Some("inspectChatApply") => {
+                    let params = require_exact_params(&request.params, &["action", "projectId", "chatId"]).map_err(invalid_params)?;
+                    self.projects.inspect_chat_apply(&self.storage, param_string(params, "projectId").map_err(invalid_params)?, param_string(params, "chatId").map_err(invalid_params)?)
+                }
                 Some("chatApplicationStatus") => {
                     let params = require_exact_params(&request.params, &["action", "projectId", "chatId"]).map_err(invalid_params)?;
                     self.projects.chat_application_status(&self.storage, param_string(params,"projectId").map_err(invalid_params)?, param_string(params,"chatId").map_err(invalid_params)?)
                 }
                 Some("inspectPreparation") => {
                     let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;
-                    self.projects.inspect_unstarted_snapshot(&self.storage, param_string(params, "projectId").map_err(invalid_params)?)
-                        .map(|inspection| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"inspectPreparation","inspection":inspection}), ..Default::default() })
+                    let project_id = param_string(params, "projectId").map_err(invalid_params)?;
+                    // A project that is not stuck mid-preparation has nothing to
+                    // close: say so plainly instead of failing.
+                    let stuck = self.storage.projection_record("project", project_id)?
+                        .is_some_and(|project| project.get("lifecycle").and_then(serde_json::Value::as_str) == Some("recoveryRequired"));
+                    if stuck {
+                        self.projects.inspect_unstarted_snapshot(&self.storage, project_id)
+                            .map(|inspection| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"inspectPreparation","inspection":inspection}), ..Default::default() })
+                    } else {
+                        Ok(project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"inspectPreparation","inspection":null}), ..Default::default() })
+                    }
                 }
                 Some("abandonPreparation") => {
                     let params = require_exact_params(&request.params, &["action", "inspection"]).map_err(invalid_params)?;
@@ -1437,15 +1721,73 @@ impl Sidecar {
                     self.projects.abandon_unstarted_snapshot(&mut self.storage, inspection, &request.request_id)
                         .map(|()| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"abandonPreparation","inspection":inspection}), ..Default::default() })
                 }
-                Some("removeProject" | "removeChat" | "restoreChats") => {
-                    if !self.workflow_chats.is_empty() || !self.agent_runtime.owned_run_ids().is_empty() || !self.pending_agent_starts.is_empty() || !self.pending_agent_cancels.is_empty() {
-                        return Ok(HandledRequest::response(error_response(&request, "requestBlocked", "requestBlocked", "list removal requires idle agent execution")));
-                    }
+                Some("deleteProject" | "deleteChat") => {
+                    // Deleting is the user's call (docs/proposals/m5-project-deletion.md):
+                    // record it, stop what still runs there, then remove the
+                    // app-owned files once those runs have provably exited.
                     let action = request.params["action"].as_str().unwrap();
-                    let fields: &[&str] = if action == "removeChat" { &["action", "projectId", "chatId"] } else { &["action", "projectId"] };
+                    let fields: &[&str] = if action == "deleteChat" { &["action", "projectId", "chatId", "confirmed"] } else { &["action", "projectId", "confirmed"] };
                     let params = require_exact_params(&request.params, fields).map_err(invalid_params)?;
-                    let chat_id = if action == "removeChat" { Some(param_string(params, "chatId").map_err(invalid_params)?) } else { None };
-                    self.projects.change_catalog_visibility(&mut self.storage, param_string(params, "projectId").map_err(invalid_params)?, chat_id, action, &request.request_id)
+                    if params["confirmed"] != true { return Err(invalid_params("deletion requires explicit confirmation".into())); }
+                    let project_id = param_string(params, "projectId").map_err(invalid_params)?;
+                    let chat_id = if action == "deleteChat" { Some(param_string(params, "chatId").map_err(invalid_params)?) } else { None };
+                    let deleted = match chat_id {
+                        Some(chat_id) => self.projects.delete_chat(&mut self.storage, project_id, chat_id, &request.request_id),
+                        None => self.projects.delete_project(&mut self.storage, project_id, &request.request_id),
+                    };
+                    if deleted.is_ok() {
+                        // A stop that could not be recorded leaves the runs to
+                        // their ordinary owners; deletion waits for their exit.
+                        if let Err(error) = self.stop_sessions_for_removal(project_id, chat_id) {
+                            eprintln!("deletion could not stop every session: {}", error.kind);
+                        }
+                        if self.deletion_idle() {
+                            if let Err(error) = self.settle_deleted_work(&request.request_id) {
+                                eprintln!("deletion files are still pending: {}", error.kind);
+                            }
+                        }
+                    }
+                    deleted
+                }
+                Some("taskInbox") => {
+                    // Every project's tasks at work, waiting for the person or a
+                    // review (ADE multi-project P4); `waiting`: in line for a run.
+                    require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
+                    let busy = self.busy_chats();
+                    self.g5.task_inbox(&self.storage).map(|items| {
+                        let items: Vec<Value> = items.into_iter().map(|mut item| {
+                            let chat = item["chatId"].as_str().unwrap_or_default().to_owned();
+                            item["waiting"] = serde_json::json!(self.workflow_waiting.contains_key(&chat));
+                            item["working"] = serde_json::json!(busy.contains(&chat) && !matches!(busy, work_scope::BusyChats::Unknown));
+                            item
+                        }).collect();
+                        // The project badges count every task at work, not only
+                        // those the shortened list shows (PR #20 review I4).
+                        let working_tasks: Vec<Value> = items.iter()
+                            .filter(|item| item["state"] != "reviewReady" && !matches!(item["state"].as_str(), Some("needsAttention" | "recoveryRequired" | "waitingForUser"))
+                                || item["state"] == "reviewReady" && (item["working"] == true || item["waiting"] == true))
+                            .take(chat::TASK_INBOX_WORKING_MAX)
+                            .map(|item| serde_json::json!({"projectId":item["projectId"],"chatId":item["chatId"]}))
+                            .collect();
+                        let items = chat::order_task_inbox(items);
+                        project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"taskInbox","items":items,"workingTasks":working_tasks}), ..Default::default() }
+                    })
+                }
+                Some("workStatus") => {
+                    // Any task of any project at work: a run, a start or stop on
+                    // its way, or a team between steps (the app update waits).
+                    require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
+                    let working = !self.busy_chats().is_empty();
+                    Ok(project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"workStatus","working":working}), ..Default::default() })
+                }
+                Some("finishDeletions") => {
+                    require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
+                    let pending = if self.deletion_idle() {
+                        self.settle_deleted_work(&request.request_id)
+                    } else {
+                        self.projects.pending_deletions(&self.storage)
+                    };
+                    pending.map(|pending| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"finishDeletions","pending":pending}), ..Default::default() })
                 }
                 Some("releaseView") => {
                     let params = require_exact_params(&request.params, &["action", "projectId"])
@@ -1479,12 +1821,23 @@ impl Sidecar {
             },
             "project.open" => {
                 let initializing = request.params.get("emptyFolderIdentity").is_some();
-                let keys: &[&str] = if initializing { &["selectedPath", "emptyFolderIdentity"] } else { &["selectedPath"] };
+                // A plain folder with files gets a shadow history (link file).
+                let recording = request.params.get("folderRecordIdentity").is_some();
+                let keys: &[&str] = if initializing { &["selectedPath", "emptyFolderIdentity"] }
+                    else if recording { &["selectedPath", "folderRecordIdentity"] } else { &["selectedPath"] };
                 let params = require_exact_params(&request.params, keys).map_err(invalid_params)?;
                 let selected = param_string(params, "selectedPath").map_err(invalid_params)?;
-                let prepared = if initializing {
-                    self.projects.initialize_empty_project(selected, param_string(params, "emptyFolderIdentity").map_err(invalid_params)?)
-                } else { Ok(()) };
+                // First, before anything is written to the folder (a new Git
+                // record for an empty or plain folder): it may not meet a
+                // task's workspace (PR #18 re-review B1).
+                let empty_identity = if initializing { Some(param_string(params, "emptyFolderIdentity").map_err(invalid_params)?) } else { None };
+                let record_identity = if recording { Some(param_string(params, "folderRecordIdentity").map_err(invalid_params)?) } else { None };
+                let prepared = self.projects.refuse_workspace_overlap(&self.storage, std::path::Path::new(selected), "the project folder")
+                    .and_then(|()| match (empty_identity, record_identity) {
+                        (Some(identity), _) => self.projects.initialize_empty_project(selected, identity),
+                        (_, Some(identity)) => self.projects.initialize_folder_project(selected, identity),
+                        _ => Ok(()),
+                    });
                 prepared.and_then(|()| self.projects.open_project(&mut self.storage, selected, &request.request_id))
             }
             "project.getTree" => {
@@ -1603,6 +1956,39 @@ impl Sidecar {
                         &self.storage,
                         &address,
                         param_string(params, "path").map_err(invalid_params)?,
+                    )
+                    .map(|action| addressed_action(action, &address))
+            }
+            // Result preview (read-only). The address comes from the chat
+            // binding at resolve; each read re-checks it (project/preview.rs).
+            "preview.resolve" => {
+                let params = require_exact_params(&request.params, &["projectId", "chatId", "entry"])
+                    .map_err(invalid_params)?;
+                self.projects.preview_resolve(
+                    &self.storage,
+                    param_string(params, "projectId").map_err(invalid_params)?,
+                    param_string(params, "chatId").map_err(invalid_params)?,
+                    param_nullable_string(params, "entry").map_err(invalid_params)?,
+                )
+            }
+            "preview.readAsset" => {
+                let params = require_exact_params(
+                    &request.params,
+                    &["chatId", "projectId", "worktreeId", "workspaceIdentity", "previewHandle", "path", "offset"],
+                )
+                .map_err(invalid_params)?;
+                let address = workspace_address(params).map_err(invalid_params)?;
+                let offset = param_u64(params, "offset").map_err(invalid_params)?;
+                if offset >= elsecrew_protocol::preview_v1::PREVIEW_ASSET_MAX_BYTES_V1 {
+                    return Err(invalid_params("preview read offset is out of range".into()));
+                }
+                self.projects
+                    .preview_read_asset(
+                        &self.storage,
+                        param_string(params, "previewHandle").map_err(invalid_params)?,
+                        &address,
+                        param_string(params, "path").map_err(invalid_params)?,
+                        offset,
                     )
                     .map(|action| addressed_action(action, &address))
             }
@@ -1862,11 +2248,13 @@ impl Sidecar {
                     }
                 }
                 "project.updateRoleSettings" => {
-                    let params = require_exact_params(
-                        &request.params,
-                        &["projectId", "expectedRevision", "roles"],
-                    )
-                    .map_err(ProjectFailure::manifest)?;
+                    let keys: &[&str] = if request.params.get("roleDefinitions").is_some() {
+                        &["projectId", "expectedRevision", "roles", "roleDefinitions"]
+                    } else {
+                        &["projectId", "expectedRevision", "roles"]
+                    };
+                    let params = require_exact_params(&request.params, keys)
+                        .map_err(ProjectFailure::manifest)?;
                     chat::G5Action {
                         result: self.g5.update_role_settings(
                             &mut self.storage,
@@ -1874,6 +2262,7 @@ impl Sidecar {
                             param_u64(params, "expectedRevision")
                                 .map_err(ProjectFailure::manifest)?,
                             params.get("roles").cloned().unwrap_or(Value::Null),
+                            params.get("roleDefinitions").cloned(),
                             &request.request_id,
                         )?,
                         ..chat::G5Action::default()
@@ -2084,6 +2473,9 @@ impl Sidecar {
             return self.login.blocks_installation(&self.storage)
                 || self.claude_login.blocks_installation(&self.storage)
                 || !self.agent_runtime.owned_run_ids().is_empty()
+                // A team between steps, waiting its turn or a busy provider,
+                // starts a run on its own later (PR #20 review B1).
+                || !self.workflow_chats.is_empty()
                 || !self.pending_agent_starts.is_empty()
                 || !self.pending_agent_capabilities.is_empty()
                 || !self.pending_agent_cancels.is_empty();
@@ -2106,9 +2498,66 @@ impl Sidecar {
         Ok(())
     }
 
+    /// The provider a start request's role runs on, from its task's team.
+    fn start_runtime(&self, request: &RequestV1) -> Option<String> {
+        let chat = self.storage.projection_record("chat", request.params["chatId"].as_str()?).ok()??;
+        chat["record"]["roleSnapshots"].as_array()?.iter().find(|role| role["roleId"] == request.params["roleId"])?["runtime"].as_str().map(str::to_owned)
+    }
+
+    /// Runs of a provider started, starting or settling now.
+    pub(crate) fn live_runs_of(&self, runtime: &str) -> usize {
+        self.agent_runtime.live_runs_of(runtime) + self.pending_agent_starts.values().filter(|start| start.runtime == runtime).count()
+    }
+
+    /// A start beyond the provider's limit waits its turn (ADE multi-project P3′).
+    pub(crate) fn run_capacity_full(&self, runtime: &str) -> bool {
+        self.live_runs_of(runtime) >= self.projects.run_limit(runtime)
+    }
+
+    /// Whether a start of this task must wait: no slot is free, or another
+    /// task waits for this provider from earlier (PR #20 review I2).
+    pub(crate) fn must_wait_turn(&self, chat: &str, runtime: &str) -> bool {
+        self.run_capacity_full(runtime) || self.ahead_in_line(chat, runtime)
+    }
+
+    /// Another task waits for this provider from before this one (or at all,
+    /// when this one is not in line).
+    pub(crate) fn ahead_in_line(&self, chat: &str, runtime: &str) -> bool {
+        let own = self.workflow_waiting.get(chat).map(|(turn, _)| *turn);
+        self.workflow_waiting.iter().any(|(other, (turn, waits_for))| other != chat
+            && waits_for == runtime && own.is_none_or(|own| *turn < own))
+    }
+
+    /// Puts a task in line for a provider; true the first time (to tell it once).
+    pub(crate) fn wait_turn(&mut self, chat: &str, runtime: &str) -> bool {
+        if self.workflow_waiting.contains_key(chat) { return false; }
+        self.workflow_turn += 1;
+        self.workflow_waiting.insert(chat.to_owned(), (self.workflow_turn, runtime.to_owned()));
+        true
+    }
+
     fn handle_agent_request_inner(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
         use elsecrew_protocol::agent_adapter_v1::AgentRunStartRequestV1;
         self.require_provider_connection(&request)?;
+        // The team loop sends its checks and starts here directly, past the
+        // outer admission: an installation in progress holds them as well
+        // (PR #20 review B1).
+        #[cfg(target_os = "macos")]
+        if matches!(request.method.as_str(), "agent.getCapabilities" | "agent.getModelChoices" | "run.startAgent")
+            && self.install.blocks_provider_launch(&self.storage)
+        {
+            return Ok(HandledRequest::response(error_response(&request, "providerBusy", "requestBlocked",
+                "installation and provider work cannot overlap; check status or request cancellation")));
+        }
+        if request.method == "run.startAgent" {
+            if let Some(runtime) = self.start_runtime(&request) {
+                let chat = request.params["chatId"].as_str().unwrap_or_default().to_owned();
+                if self.must_wait_turn(&chat, &runtime) {
+                    return Ok(HandledRequest::response(error_response(&request, "providerCapacity", "requestBlocked",
+                        "as many runs of this provider as allowed are working; this one waits its turn")));
+                }
+            }
+        }
         if request.method == "agent.getModelChoices" {
             if !self.agent_runtime.uses_native_providers() || !matches!(request.params["runtime"].as_str(), Some("codex" | "claude-code")) {
                 return Err(SidecarError::new("agentDiscoveryRejected", "model choices require a native provider context"));
@@ -2173,6 +2622,8 @@ impl Sidecar {
                 self.agent_runtime.request_cancel(&identity)?;
                 orchestration::stop(&mut self.storage, &identity.chat_id, &identity.run_id).map_err(|e| ProjectFailure::manifest(e.detail))?;
                 self.workflow_chats.remove(&identity.chat_id);
+                self.workflow_waiting.remove(&identity.chat_id);
+                self.workflow_queued_roots.remove(&identity.chat_id);
                 Ok(identity)
             })();
             return match queued {
@@ -2254,6 +2705,11 @@ impl Sidecar {
                 )))
             }
         };
+        // Settling a stopped run is what a provider sign-in hold bound to it
+        // was waiting for: release it now instead of on a later manual check.
+        if request.method == "recovery.resolveAgent" && action.result["outcome"] == "resolvedAbandoned" {
+            self.release_settled_fences();
+        }
         Ok(HandledRequest {
             response: Some(ResponseV1 {
                 protocol_version: PROTOCOL_VERSION,
@@ -2394,7 +2850,7 @@ impl Sidecar {
             .map_err(|_| SidecarError::new("invalidParams", "invalid start request"))?;
         let runtime = self.agent_runtime.begin_scoped_start(&self.storage, &self.projects, &input, &request.request_id)?;
         self.pending_agent_starts.insert(request.request_id.clone(), PendingAgentStart {
-            runtime, request, input, reservation: None, process: None, result: None,
+            runtime, request, input, reservation: None, process: None, result: None, rediscoveries: 0,
         });
         Ok(HandledRequest { response: None, events: Vec::new() })
     }
@@ -2416,6 +2872,17 @@ impl Sidecar {
         let ids: Vec<_> = self.pending_agent_starts.keys().cloned().collect();
         for id in ids {
             let mut pending = self.pending_agent_starts.remove(&id).unwrap();
+            if pending.result.is_none() && pending.rediscoveries < 2
+                && self.agent_runtime.drop_stale_start_discovery(&id)
+            {
+                // Beside other runs of the agent a finished discovery can wait
+                // for the engine longer than a start may use it: discover again.
+                pending.rediscoveries += 1;
+                match self.agent_runtime.begin_scoped_start(&self.storage, &self.projects, &pending.input, &id) {
+                    Ok(_) => { self.pending_agent_starts.insert(id, pending); continue; }
+                    Err(error) => pending.result = Some(Err(error)),
+                }
+            }
             if pending.result.is_none() {
                 if pending.runtime == "claude-code" {
                     let Some(observed) = self.agent_runtime.take_claude_discovery(&self.storage, &self.projects, &id) else {
@@ -2475,7 +2942,7 @@ impl Sidecar {
                     responses.push(match result {
                         Ok((choices, usage)) => success_response(&request, serde_json::json!({
                             "schemaVersion":1, "runtime":runtime, "scope":null, "usage":usage,
-                            "models":choices.into_iter().map(|choice| serde_json::json!({"modelSelector":choice.model,"reasoningEfforts":choice.reasoning_efforts,"isDefault":choice.is_default})).collect::<Vec<_>>()
+                            "models":choices.into_iter().map(|choice| model_choice_json(choice)).collect::<Vec<_>>()
                         })),
                         Err(error) => error_response(&request, error.kind(), "requestBlocked", error.detail()),
                     });
@@ -2492,7 +2959,7 @@ impl Sidecar {
                 responses.push(match result {
                     Ok((scope, choices)) => success_response(&request, serde_json::json!({
                         "schemaVersion":1, "runtime":runtime, "scope":scope,
-                        "models":choices.into_iter().map(|choice| serde_json::json!({"modelSelector":choice.model,"reasoningEfforts":choice.reasoning_efforts,"isDefault":choice.is_default})).collect::<Vec<_>>()
+                        "models":choices.into_iter().map(|choice| model_choice_json(choice)).collect::<Vec<_>>()
                     })),
                     Err(error) => error_response(&request, error.kind(), "requestBlocked", error.detail()),
                 });
@@ -2556,11 +3023,17 @@ impl Sidecar {
         &mut self,
     ) -> Result<storage_lifetime::scheduler::MaintenanceTickResult, SidecarError> {
         if self.prepared_to_quit {
+            self.background_check.stop();
             return Ok(storage_lifetime::scheduler::MaintenanceTickResult::NoWork);
         }
         if self.maintenance_poisoned {
             return Err(maintenance_poisoned_error());
         }
+        let idle = self.agent_runtime.owned_run_ids().is_empty()
+            && self.workflow_chats.is_empty()
+            && self.pending_agent_starts.is_empty()
+            && self.pending_agent_capabilities.is_empty();
+        self.background_check.tick(&self.storage, idle);
         match self.maintenance_scheduler.tick(&mut self.storage) {
             Ok(result) => Ok(result),
             Err(error) => {
@@ -2780,6 +3253,50 @@ fn admission_blocked_response(request: &RequestV1, state: StorageAdmissionStateV
     }
 }
 
+/// One request that fails is answered as failed; it never ends the whole
+/// engine. Ending it would stop every running task of every project and leave
+/// them needing recovery, for something that concerned only this request.
+/// Each part of the engine keeps its own state safe (ledger transactions,
+/// locks, recovery records); a failed request has changed nothing it could
+/// not prove.
+///
+/// Only failures known to stay within the request are answered. Any other
+/// kind (ledger, projection or run-state integrity, or one not listed here)
+/// still ends the engine; the app then starts it again and recovery runs on
+/// the stored state, as after a crash.
+fn answer_failed_request(request: &RequestV1, result: Result<HandledRequest, SidecarError>) -> Result<HandledRequest, SidecarError> {
+    const REQUEST_SCOPED: &[&str] = &[
+        "agentInputChanged", "agentDiscoveryRejected", "agentApprovalChanged", "agentLaunchRejected",
+        "agentRegistrationRejected", "orchestrationBlocked", "operationConflict", "checkpointBusy",
+        "storageReadFailed", "storageStatusUnavailable", "chatErasureDenied", "invalidPreparation",
+        "invalidArguments", "unsupportedPlatform", "unsupportedMethod", "hookProbeFailed",
+        "configProbeFailed", "agentOutputStorageFull",
+    ];
+    let scoped = |kind: &str| REQUEST_SCOPED.contains(&kind) || kind.starts_with("provider");
+    match result {
+        Ok(handled) => Ok(handled),
+        Err(error) if error.kind() == "invalidParams" => Ok(HandledRequest::response(
+            error_response(request, "invalidParams", "invalidRequest", nonempty(error.detail(), error.kind())),
+        )),
+        // An unconnected provider is an ordinary refusal of this request.
+        Err(error) if error.kind() == "providerDisconnected" => Ok(HandledRequest::response(
+            error_response(request, "providerDisconnected", "requestBlocked", nonempty(error.detail(), error.kind())),
+        )),
+        Err(error) if !scoped(error.kind()) => Err(error),
+        Err(error) => {
+            eprintln!("request {} failed: {}", request.method, error.kind());
+            Ok(HandledRequest::response(error_response(
+                request, error.kind(), "requestBlocked", nonempty(error.detail(), error.kind()),
+            )))
+        }
+    }
+}
+
+/// The app rejects an error without detail as a broken protocol.
+fn nonempty<'a>(detail: &'a str, kind: &'a str) -> &'a str {
+    if detail.trim().is_empty() { kind } else { detail }
+}
+
 fn error_response(request: &RequestV1, code: &str, kind: &str, detail: &str) -> ResponseV1 {
     ResponseV1 {
         protocol_version: PROTOCOL_VERSION,
@@ -2853,4 +3370,16 @@ mod unsupported_platform_tests {
         assert!(output.is_empty());
         assert!(!database.exists());
     }
+}
+
+/// Display-only model choice. `resolvedModel` is present only when a provider
+/// alias reports the concrete model it maps to; the selector stays the alias.
+fn model_choice_json(
+    choice: elsecrew_core::provider::vendor_observation::codex_preflight::CatalogModel,
+) -> serde_json::Value {
+    let mut value = serde_json::json!({"modelSelector":choice.model,"reasoningEfforts":choice.reasoning_efforts,"isDefault":choice.is_default});
+    if let Some(resolved) = choice.resolved_model {
+        value["resolvedModel"] = resolved.into();
+    }
+    value
 }

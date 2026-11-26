@@ -35,7 +35,9 @@ test("renderer smoke preload exposes the complete V7 bridge with ready admission
   });
 });
 
-test("packaged renderer build mounts lazy Monaco and creates a local worker in Chromium", { timeout: 20_000 }, () => {
+// Once per brightness: each run also measures the rendered contrast at every
+// capture point in that theme (PR #10 review I4, tests/m5-rendered-contrast-probe.cjs).
+for (const theme of ["dark", "light"] as const) test(`packaged renderer build mounts lazy Monaco and creates a local worker in Chromium (${theme})`, { timeout: 60_000 }, () => {
   const temporaryRoot = mkdtempSync(resolve(tmpdir(), "elsecrew-renderer-test-"));
   const result = spawnSync(electronPath, ["tests/m5-renderer-smoke-runner.cjs"], {
     cwd: resolve("."),
@@ -46,6 +48,7 @@ test("packaged renderer build mounts lazy Monaco and creates a local worker in C
       M5_MEASURE_PARALLEL_PAINT: "0",
       M5_MEASURE_MESSAGE_PAINT: "0",
       M5_RENDERER_DIR: resolve(".vite/renderer/main_window"),
+      M5_SMOKE_THEME: theme,
       ELECTRON_DISABLE_SECURITY_WARNINGS: "true",
     },
   });

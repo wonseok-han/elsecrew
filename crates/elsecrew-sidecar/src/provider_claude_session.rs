@@ -63,10 +63,25 @@ pub(crate) fn scoped_arguments(model: &str, effort: Option<&str>, access: ToolAc
     literal(workspace)?;
     let mut denied = vec![literal(home)?, literal(source)?];
     for name in [".git", ".claude", ".codex", ".agents"] { denied.push(literal(&workspace.join(name))?); }
+    // A task worktree (user decision 2026-11-18): sandboxed commands may read
+    // its `.git` link and the repository's Git data so Git works; writes and
+    // the file tools stay denied. Only the repository's own `.git` reopens.
+    let source_git = elsecrew_core::provider::vendor_observation::codex_preflight::named_config::linked_source_git(workspace)
+        .filter(|git| elsecrew_core::provider::vendor_observation::codex_preflight::named_config::source_git_dir(source).as_deref() == Some(git.as_path()));
+    let unreadable: Vec<String> = match &source_git {
+        Some(_) => { let link = literal(&workspace.join(".git"))?; denied.iter().filter(|path| **path != link).cloned().collect() }
+        None => denied.clone(),
+    };
+    // Claude Code also applies `Read(...)` deny rules to sandboxed commands,
+    // so the worktree's `.git` link gets no Read rule (its Edit rule and the
+    // sandbox write denial stay); otherwise `git` fails with "error reading
+    // .git" even though the sandbox reopened it (found 2026-11-19).
+    let readable_link = source_git.as_ref().map(|_| literal(&workspace.join(".git"))).transpose()?;
     let mut rules = Vec::new();
     for path in &denied {
         // File permission rules use // for absolute paths; sandbox paths use /.
         for tool in ["Read", "Edit"] {
+            if tool == "Read" && readable_link.as_ref() == Some(path) { continue; }
             rules.push(format!("{tool}(/{path})"));
             rules.push(format!("{tool}(/{path}/**)"));
         }
@@ -74,7 +89,10 @@ pub(crate) fn scoped_arguments(model: &str, effort: Option<&str>, access: ToolAc
     if access == ToolAccess::ReadOnly { rules.push("Edit".into()); }
     let mut settings = shell_settings();
     settings["permissions"]["deny"] = serde_json::json!(rules);
-    settings["sandbox"]["filesystem"]["denyRead"] = serde_json::json!(denied);
+    settings["sandbox"]["filesystem"]["denyRead"] = serde_json::json!(unreadable);
+    if let Some(git) = &source_git {
+        settings["sandbox"]["filesystem"]["allowRead"] = serde_json::json!([literal(git)?]);
+    }
     settings["sandbox"]["filesystem"]["denyWrite"] = serde_json::json!(denied);
     let mut args = arguments(model, effort, access)?;
     let index = args.iter().position(|arg| arg == "--settings").ok_or_else(failure)?;
@@ -143,7 +161,15 @@ pub(crate) struct ControlInitialization {
     deadline: Instant,
     flushed: bool,
     failed: bool,
+    /// The last tick, and the engine's stalls so far: see `advance_inner`.
+    ticked: Option<Instant>,
+    stalled: Duration,
 }
+
+/// A gap between ticks longer than this is the engine's, not Claude's.
+const TICK_GAP: Duration = Duration::from_secs(1);
+/// How far the engine's stalls may move the deadline in all.
+const STALL_ALLOWANCE: Duration = Duration::from_secs(120);
 
 /// Digest of what the app requests, not evidence of effective managed settings.
 pub(crate) fn requested_policy_digest(model: &str, effort: Option<&str>, access: ToolAccess,
@@ -166,7 +192,9 @@ pub(crate) struct SessionChannel {
     session_model: String,
     prompt_attempted: bool,
     transmitting: bool,
-    deadline: Instant,
+    // No wall-clock bound (2026-11-17 user decision): a coding session may run
+    // for hours and may wait on the user. Cancel, quit cleanup and the
+    // per-session request/event budgets remain the bounds.
     permissions: elsecrew_core::provider::vendor_observation::claude_session::Session,
 }
 
@@ -211,6 +239,8 @@ pub(crate) struct PermissionAllow {
 impl PermissionAllow {
     pub(crate) fn connection(&self) -> uuid::Uuid { self.connection }
     pub(crate) fn as_str(&self) -> &str { self.reply.as_str() }
+    /// The large-input budget of the echoed input; the transport keeps it until written.
+    pub(crate) fn take_hold(&mut self) -> Option<elsecrew_core::provider::vendor_observation::claude_approval::LargeInputHold> { self.reply.take_hold() }
 }
 
 impl PermissionDenial {
@@ -237,6 +267,7 @@ impl SessionChannel {
         self.permissions.is_permission_pending(request_id)
     }
     pub(crate) fn can_queue_reply(&self) -> bool { !self.transmitting && !self.permissions.is_closed() }
+    pub(crate) fn cwd(&self) -> &std::path::Path { &self.cwd }
 
     pub(crate) fn matches_role(&self, model: &str, access: ToolAccess) -> bool {
         self.requested_model == model && self.cwd.to_str().is_some_and(|cwd| self.permissions.matches_expected(
@@ -288,7 +319,6 @@ impl SessionChannel {
             if self.permissions.is_closed()
                 || self.connection != process.connection_id()
                 || cancel.load(Ordering::Acquire)
-                || Instant::now() >= self.deadline
             {
                 return Err(failure());
             }
@@ -327,7 +357,6 @@ impl SessionChannel {
         let result = (|| {
             if self.prompt_attempted
                 || self.transmitting
-                || Instant::now() >= self.deadline
                 || self.permissions.is_closed()
                 || process.connection_id() != self.connection
                 || cancel.load(Ordering::Acquire)
@@ -380,11 +409,11 @@ impl SessionChannel {
         admit: &mut impl FnMut(&mut LoginProcess<'_>, &elsecrew_core::provider::vendor_observation::claude_approval::Request) -> Result<(), SidecarError>,
     ) -> Result<(), SidecarError> {
         if !self.can_queue_reply() || process.connection_id() != self.connection
-            || Instant::now() >= self.deadline || cancel.load(Ordering::Acquire)
+            || cancel.load(Ordering::Acquire)
             || !self.is_permission_pending(&request.request_id)
         { self.permissions.close(); return Err(failure()); }
         admit(process, request)?;
-        if Instant::now() >= self.deadline || cancel.load(Ordering::Acquire) {
+        if cancel.load(Ordering::Acquire) {
             self.permissions.close(); return Err(failure());
         }
         let reply = self.permissions.allow_once(request).map_err(|_| failure())?;
@@ -400,10 +429,7 @@ impl SessionChannel {
         request_id: &str,
         interrupt: bool,
     ) -> Result<(), SidecarError> {
-        if process.connection_id() != self.connection
-            || self.transmitting
-            || Instant::now() >= self.deadline
-        {
+        if process.connection_id() != self.connection || self.transmitting {
             self.permissions.close();
             return Err(failure());
         }
@@ -422,6 +448,16 @@ impl SessionChannel {
         }
         result
     }
+}
+
+/// `.git`, `.claude`, `.codex`, `.agents` in any letter case (macOS folders
+/// ignore case, so `.CLAUDE` is `.claude`), and any dot name with non-ASCII
+/// letters, which the file system may fold onto one of them. Not valid UTF-8
+/// is refused too.
+pub(crate) fn protected_name(name: &std::ffi::OsStr) -> bool {
+    let Some(text) = name.to_str() else { return true };
+    (text.starts_with('.') && !text.is_ascii())
+        || [".git", ".claude", ".codex", ".agents"].iter().any(|blocked| text.eq_ignore_ascii_case(blocked))
 }
 
 fn inspect_snapshot_file(
@@ -445,10 +481,7 @@ fn inspect_snapshot_file(
         let Component::Normal(name) = part else {
             return Err(failure());
         };
-        if matches!(
-            name.to_str(),
-            Some(".git" | ".claude" | ".codex" | ".agents")
-        ) {
+        if protected_name(name) {
             return Err(failure());
         }
         current.push(name);
@@ -461,7 +494,11 @@ fn inspect_snapshot_file(
                     } else {
                         metadata.is_dir()
                     }) => {}
-            Err(error) if last && allow_new && error.kind() == std::io::ErrorKind::NotFound => {}
+            // A new file may also bring new folders (Claude's Write makes
+            // them): every missing name is still a plain, unprotected name
+            // under a real, link-free folder of the workspace (found
+            // 2026-11-19: `docs/plan.md` in an empty project was refused).
+            Err(error) if allow_new && error.kind() == std::io::ErrorKind::NotFound => {}
             _ => return Err(failure()),
         }
     }
@@ -513,7 +550,6 @@ impl ControlInitialization {
             session_model: expected.model.into(),
             prompt_attempted: false,
             transmitting: false,
-            deadline: Instant::now() + Duration::from_secs(10 * 60),
             permissions:
                 elsecrew_core::provider::vendor_observation::claude_session::Session::for_native_builtin_guards(
                     expected,
@@ -541,6 +577,8 @@ impl ControlInitialization {
             deadline: Instant::now() + Duration::from_secs(15),
             flushed: false,
             failed: false,
+            ticked: None,
+            stalled: Duration::ZERO,
         })
     }
 
@@ -573,7 +611,18 @@ impl ControlInitialization {
         if cancel.load(Ordering::Acquire) {
             return Err(initialization_failure("cancellation"));
         }
-        if Instant::now() >= self.deadline {
+        // Runs of one agent start side by side (ADE multi-project P5): another
+        // run's start can hold the engine's one thread for seconds, and that
+        // time is not Claude's to answer in. A gap between ticks moves the
+        // deadline by itself, within a bounded allowance.
+        let now = Instant::now();
+        if let Some(gap) = self.ticked.map(|ticked| now.saturating_duration_since(ticked)).filter(|gap| *gap > TICK_GAP) {
+            let moved = gap.min(STALL_ALLOWANCE.saturating_sub(self.stalled));
+            self.stalled += moved;
+            self.deadline += moved;
+        }
+        self.ticked = Some(now);
+        if now >= self.deadline {
             return Err(initialization_failure("response deadline"));
         }
         if !self.flushed {
@@ -607,7 +656,7 @@ mod tests {
                 "models":[{"value":"opus","resolvedModel":"claude-opus-test","supportsEffort":true,"supportedEffortLevels":["high"]}]}
         }});
         exchange.accept_response(&elsecrew_core::provider::BoundedObservation::new(response.to_string().into_bytes()).unwrap()).unwrap();
-        let initialization = ControlInitialization {exchange,connection:uuid::Uuid::new_v4(),deadline:Instant::now()+Duration::from_secs(15),flushed:true,failed:false};
+        let initialization = ControlInitialization {exchange,connection:uuid::Uuid::new_v4(),deadline:Instant::now()+Duration::from_secs(15),flushed:true,failed:false,ticked:None,stalled:Duration::ZERO};
         let expected = elsecrew_core::provider::vendor_observation::claude_init::ExpectedInit {
             cwd:"/snapshot",model:"opus",permission_mode:"default",tools:expected_tools(ToolAccess::ReadOnly),
         };
@@ -626,16 +675,31 @@ mod tests {
         std::os::unix::fs::symlink("existing", root.join("link")).unwrap();
         assert!(inspect_snapshot_file(&root, "existing", false).is_ok());
         assert!(inspect_snapshot_file(&root, "new", true).is_ok());
+        // A new file in new folders, as Claude's Write makes them.
+        assert!(inspect_snapshot_file(&root, "docs/plan.md", true).is_ok());
+        assert!(inspect_snapshot_file(&root, "a/b/c.txt", true).is_ok());
+        std::fs::create_dir(root.join("dir")).unwrap();
+        std::os::unix::fs::symlink(root.join("dir"), root.join("dirlink")).unwrap();
         for path in [
             "../outside",
             "/outside",
             "link",
             ".git/config",
-            "missing/child",
+            ".Git/config",
+            ".CLAUDE/settings.json",
+            "sub/.GIT/x",
+            "missing/.Codex/config.toml",
+            ".\u{17F}omething",
+            "missing/.git/config",
+            "missing/.claude/settings.json",
+            "dirlink/child",
+            "existing/child",
+            "missing/../escape",
         ] {
-            assert!(inspect_snapshot_file(&root, path, true).is_err());
+            assert!(inspect_snapshot_file(&root, path, true).is_err(), "{path}");
         }
         assert!(inspect_snapshot_file(&root, "missing", false).is_err());
+        assert!(inspect_snapshot_file(&root, "missing/child", false).is_err());
     }
 
     #[test]
@@ -656,6 +720,30 @@ mod tests {
         ] {
             assert!(prompt_wire(&text).is_err());
         }
+    }
+
+    #[test]
+    fn a_task_worktree_reopens_only_the_repository_git_data_for_commands() {
+        let (_temp, source, workspace) = crate::provider_preflight_session::named_permissions::tests::real_worktree();
+        let home = workspace.parent().unwrap().join("profile");
+        let args = scoped_arguments("selected-model", Some("medium"), ToolAccess::Edit, &home, &workspace, &source).unwrap();
+        let index = args.iter().position(|arg| arg == "--settings").unwrap();
+        let settings: serde_json::Value = serde_json::from_str(args[index+1].to_str().unwrap()).unwrap();
+        let filesystem = &settings["sandbox"]["filesystem"];
+        let text = |path: &Path| serde_json::json!(path.to_str().unwrap());
+        assert_eq!(filesystem["allowRead"], serde_json::json!([source.join(".git").to_str().unwrap()]));
+        assert!(filesystem["denyRead"].as_array().unwrap().contains(&text(&source)));
+        assert!(!filesystem["denyRead"].as_array().unwrap().contains(&text(&workspace.join(".git"))));
+        assert!(filesystem["denyWrite"].as_array().unwrap().contains(&text(&workspace.join(".git"))));
+        assert!(filesystem["denyWrite"].as_array().unwrap().contains(&text(&source)));
+        // Read deny rules also bind sandboxed commands: none for the link,
+        // while editing it and reading the user's folder stay denied.
+        let rules = settings["permissions"]["deny"].as_array().unwrap();
+        let link = workspace.join(".git");
+        assert!(!rules.contains(&serde_json::json!(format!("Read(/{})", link.display()))), "{rules:?}");
+        assert!(!rules.contains(&serde_json::json!(format!("Read(/{}/**)", link.display()))), "{rules:?}");
+        assert!(rules.contains(&serde_json::json!(format!("Edit(/{})", link.display()))));
+        assert!(rules.contains(&serde_json::json!(format!("Read(/{}/**)", source.display()))));
     }
 
     #[test]
@@ -730,7 +818,10 @@ mod tests {
 
     #[test]
     fn owned_toy_control_exchange_handles_reply_cancel_and_deadline_without_prompt() {
-        for case in ["ready", "mismatch", "cancel", "deadline"] {
+        // "stalled": the engine was busy elsewhere past the deadline (another
+        // run's start, P5); that time is not Claude's. "overstalled": the
+        // engine's stalls already used the whole allowance.
+        for case in ["ready", "mismatch", "cancel", "deadline", "stalled", "overstalled"] {
             let temp = tempfile::tempdir().unwrap();
             let root = temp.path().canonicalize().unwrap();
             let storage = Storage::open(&root.join("elsecrew.sqlite3")).unwrap();
@@ -766,6 +857,11 @@ mod tests {
             if case == "deadline" {
                 session.deadline = Instant::now();
             }
+            if case == "stalled" || case == "overstalled" {
+                session.ticked = Some(Instant::now() - Duration::from_secs(20));
+                session.deadline = Instant::now() - Duration::from_secs(1);
+                if case == "overstalled" { session.stalled = STALL_ALLOWANCE; }
+            }
             let observed = loop {
                 match session.advance(&mut process, &cancel, &mut |_| Ok(())) {
                     Ok(false) => std::thread::sleep(Duration::from_millis(2)),
@@ -775,11 +871,174 @@ mod tests {
             let cleanup = process.finish();
             assert!(cleanup.is_ok());
             assert!(process.closure_evidence().is_some_and(|e| e.confirmed()));
-            assert_eq!(observed.is_ok(), case == "ready");
+            assert_eq!(observed.is_ok(), case == "ready" || case == "stalled", "{case}");
             assert!(session
                 .advance(&mut process, &cancel, &mut |_| Ok(()))
                 .is_err());
         }
+    }
+
+    /// D2 (2026-11-26): a fake Claude reads ten large images (each tool result
+    /// a ~148 KB stream-json line) and then answers. The session must keep
+    /// going; before the fix the first such line ended it (`sessionChannel`).
+    fn large_image_session(admit: bool) -> (Result<Vec<&'static str>, SidecarError>, bool) {
+        use elsecrew_core::provider::vendor_observation::claude_events::Projection;
+        use elsecrew_core::provider::vendor_observation::claude_session::Event;
+        let _slots = crate::provider_login_io::LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let storage = Storage::open(&root.join("elsecrew.sqlite3")).unwrap();
+        let profile = ClaudeProfileBinding::from_storage(&storage).unwrap();
+        let home = profile.revalidate().unwrap();
+        let mut process = LoginProcess::reserve_claude_owned(profile).unwrap();
+        let id = format!("init_{}", process.connection_id().simple());
+        let init = serde_json::json!({"type":"control_response","response":{"subtype":"success","request_id":id,"response":{}}});
+        let reported = serde_json::json!({"type":"system","subtype":"init","uuid":"init","session_id":"s","cwd":"/snapshot","model":"model","permissionMode":"default","tools":["Read"],"mcp_servers":[],"skills":[],"plugins":[]});
+        let answer = serde_json::json!({"type":"assistant","uuid":"a1","session_id":"s","parent_tool_use_id":null,
+            "message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"I looked at the screenshots."}]}});
+        let script = format!(
+            "IFS= read -r first || exit 1\nprintf '%s\\n' '{init}' '{reported}'\n\
+             i=0; while [ $i -lt 10 ]; do \
+               printf '{{\"type\":\"user\",\"uuid\":\"u%s\",\"session_id\":\"s\",\"parent_tool_use_id\":null,\"message\":{{\"role\":\"user\",\"content\":[{{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_%s\",\"content\":[{{\"type\":\"image\",\"source\":{{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":\"' $i $i; \
+               head -c 151552 /dev/zero | tr '\\0' A; printf '\"}}}}]}}]}}}}\\n'; i=$((i+1)); done\n\
+             printf '%s\\n' '{answer}'\nIFS= read -r last\n"
+        );
+        process.launch_gated_command(Path::new("/bin/sh"), &["-c".as_ref(), script.as_ref()], &home).unwrap();
+        let cancel = AtomicBool::new(false);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let result = (|| -> Result<Vec<&'static str>, SidecarError> {
+            let mut session = ControlInitialization::start(&mut process, &cancel)?;
+            while !session.advance(&mut process, &cancel, &mut |_| Ok(()))? {
+                if Instant::now() >= deadline { return Err(failure()); }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            let mut channel = session.into_session_channel(
+                &elsecrew_core::provider::vendor_observation::claude_init::ExpectedInit {
+                    cwd: "/snapshot", model: "model", permission_mode: "default", tools: &["Read"],
+                },
+            )?;
+            if admit {
+                process.admit_session_lines(elsecrew_core::provider::oversized_line::OversizedLinePolicy::ClaudeStreamJson)?;
+            }
+            let mut seen = Vec::new();
+            while seen.len() < 12 {
+                if Instant::now() >= deadline { return Err(failure()); }
+                match channel.advance(&mut process, &cancel, &mut |_| Ok(()))? {
+                    Some(Event::Initialized { .. }) => seen.push("init"),
+                    Some(Event::Output(Projection::ToolResults(_))) => seen.push("tool result"),
+                    Some(Event::Output(Projection::Assistant { .. })) => seen.push("answer"),
+                    Some(_) => seen.push("other"),
+                    None => std::thread::sleep(Duration::from_millis(2)),
+                }
+            }
+            Ok(seen)
+        })();
+        let cleanup = process.finish();
+        (result, cleanup.is_ok() && process.closure_evidence().is_some_and(|e| e.confirmed()))
+    }
+
+    /// 2026-11-26 big Write: a fake Claude asks to write a 300 KB file whole
+    /// (one permission request over the 128 KiB line bound). The session does
+    /// not end; the allow reply it reads is the exact original (checked by
+    /// SHA-256 on the provider side), and the session goes on to its answer.
+    /// `admit` false: the strict bounds still apply outside a session.
+    fn large_write_session(admit: bool) -> (Result<Vec<&'static str>, SidecarError>, bool) {
+        use elsecrew_core::provider::vendor_observation::claude_approval::Observation;
+        use elsecrew_core::provider::vendor_observation::claude_events::Projection;
+        use elsecrew_core::provider::vendor_observation::claude_session::Event;
+        use sha2::{Digest, Sha256};
+        let _slots = crate::provider_login_io::LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let storage = Storage::open(&root.join("elsecrew.sqlite3")).unwrap();
+        let profile = ClaudeProfileBinding::from_storage(&storage).unwrap();
+        let home = profile.revalidate().unwrap();
+        let mut process = LoginProcess::reserve_claude_owned(profile).unwrap();
+        let id = format!("init_{}", process.connection_id().simple());
+        let init = serde_json::json!({"type":"control_response","response":{"subtype":"success","request_id":id,"response":{}}});
+        let reported = serde_json::json!({"type":"system","subtype":"init","uuid":"init","session_id":"s","cwd":"/snapshot","model":"model","permissionMode":"default","tools":["Write"],"mcp_servers":[],"skills":[],"plugins":[]});
+        let answer = serde_json::json!({"type":"assistant","uuid":"a1","session_id":"s","parent_tool_use_id":null,
+            "message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"Wrote the file."}]}});
+        let content = "A".repeat(300_000);
+        // The exact reply the provider must read: the original input echoed whole.
+        let expected = serde_json::json!({"type":"control_response","response":{"subtype":"success","request_id":"perm_big",
+            "response":{"behavior":"allow","updatedInput":{"content":content,"file_path":"notes.md"}}}}).to_string();
+        let expected_sha = format!("{:x}", Sha256::digest(expected.as_bytes()));
+        let script = format!(
+            "IFS= read -r first || exit 1\nprintf '%s\\n' '{init}' '{reported}'\n\
+             printf '{{\"type\":\"control_request\",\"request_id\":\"perm_big\",\"request\":{{\"subtype\":\"can_use_tool\",\"tool_name\":\"Write\",\"input\":{{\"file_path\":\"notes.md\",\"content\":\"'; \
+             head -c 300000 /dev/zero | tr '\\0' A; printf '\"}},\"tool_use_id\":\"toolu_big\"}}}}\\n'\n\
+             IFS= read -r reply || exit 2\n\
+             [ \"$(printf '%s' \"$reply\" | /usr/bin/shasum -a 256 | /usr/bin/cut -d' ' -f1)\" = '{expected_sha}' ] || exit 3\n\
+             printf '%s\\n' '{answer}'\nIFS= read -r last\n"
+        );
+        process.launch_gated_command(Path::new("/bin/sh"), &["-c".as_ref(), script.as_ref()], &home).unwrap();
+        let cancel = AtomicBool::new(false);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let result = (|| -> Result<Vec<&'static str>, SidecarError> {
+            let mut session = ControlInitialization::start(&mut process, &cancel)?;
+            while !session.advance(&mut process, &cancel, &mut |_| Ok(()))? {
+                if Instant::now() >= deadline { return Err(failure()); }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            let mut channel = session.into_session_channel(
+                &elsecrew_core::provider::vendor_observation::claude_init::ExpectedInit {
+                    cwd: "/snapshot", model: "model", permission_mode: "default", tools: &["Write"],
+                },
+            )?;
+            if admit {
+                process.admit_session_lines(elsecrew_core::provider::oversized_line::OversizedLinePolicy::ClaudeStreamJson)?;
+            }
+            let mut seen = Vec::new();
+            while !seen.contains(&"answer") {
+                if Instant::now() >= deadline { return Err(failure()); }
+                match channel.advance(&mut process, &cancel, &mut |_| Ok(()))? {
+                    Some(Event::Initialized { .. }) => seen.push("init"),
+                    Some(Event::Permission(Observation::Requested(request))) => {
+                        if request.withheld() || request.inspect_input().len() < 300_000 { return Err(failure()); }
+                        seen.push("large request");
+                        channel.allow_once(&mut process, &request, &cancel, &mut |_, _| Ok(()))?;
+                    }
+                    Some(Event::Output(Projection::Assistant { .. })) => seen.push("answer"),
+                    Some(_) => seen.push("other"),
+                    None => std::thread::sleep(Duration::from_millis(2)),
+                }
+            }
+            Ok(seen)
+        })();
+        let cleanup = process.finish();
+        (result, cleanup.is_ok() && process.closure_evidence().is_some_and(|e| e.confirmed()))
+    }
+
+    #[test]
+    fn a_large_write_request_is_allowed_whole_and_the_session_goes_on() {
+        let (seen, cleaned) = large_write_session(true);
+        assert_eq!(seen.unwrap(), vec!["init", "large request", "answer"]);
+        assert!(cleaned);
+    }
+
+    #[test]
+    fn without_session_lines_a_large_write_request_ends_the_session() {
+        let (seen, cleaned) = large_write_session(false);
+        assert!(seen.is_err());
+        assert!(cleaned);
+    }
+
+    #[test]
+    fn a_session_keeps_going_after_reading_ten_large_images() {
+        let (seen, cleaned) = large_image_session(true);
+        let mut expected = vec!["init"];
+        expected.extend(["tool result"; 10]);
+        expected.push("answer");
+        assert_eq!(seen.unwrap(), expected);
+        assert!(cleaned);
+    }
+
+    #[test]
+    fn without_session_lines_the_first_large_image_ends_the_session() {
+        let (seen, cleaned) = large_image_session(false);
+        assert!(seen.is_err(), "the strict line bound still applies outside a session");
+        assert!(cleaned);
     }
 
     #[test]
@@ -801,7 +1060,7 @@ mod tests {
         }});
         let expected = serde_json::json!({"type":"control_response","response":{
             "subtype":"success","request_id":"permission_a","response":{
-                "behavior":"deny","message":"Tool request declined by the application user.","interrupt":false
+                "behavior":"deny","message":"Tool request not allowed: declined by the application user, or outside the permissions or working directory of this role (stay inside it, read only files that exist, keep out of .git, .claude, .codex and .agents). Continue without it.","interrupt":false
             }
         }});
         let cancelled =
@@ -883,15 +1142,15 @@ mod tests {
             {
                 return Err(failure());
             }
-            // Expiry closes the channel; moving the clock bound cannot reopen it.
-            permissions.deadline = Instant::now();
+            // Cancel closes the channel; clearing the flag cannot reopen it.
+            cancel.store(true, Ordering::Release);
             if permissions
                 .advance(&mut process, &cancel, &mut |_| Ok(()))
                 .is_ok()
             {
                 return Err(failure());
             }
-            permissions.deadline = Instant::now() + Duration::from_secs(60);
+            cancel.store(false, Ordering::Release);
             if permissions
                 .advance(&mut process, &cancel, &mut |_| Ok(()))
                 .is_ok()

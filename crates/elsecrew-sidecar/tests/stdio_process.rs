@@ -127,11 +127,32 @@ fn binary_ready_status_quit_flow_marks_clean_and_exits_zero() {
             .chain(std::iter::once(&"chat.appendMessage"))
             .chain(["agent.outputHead", "agent.outputPage"].iter())
             .chain(std::iter::once(&"provider.login"))
-            .chain(["run.approval", "project.catalog", "provider.install"].iter())
+            .chain(["run.approval", "project.catalog", "provider.install", "preview.resolve", "preview.readAsset"].iter())
             .map(|value| (*value).to_string())
             .collect::<Vec<_>>()
     );
     wait_for_storage_ready_reader(&mut stdin, &mut stdout, &ready.sidecar_instance_id, false);
+
+    // A provider the user has not connected is refused with a response; the
+    // sidecar must keep serving (it used to exit on this error).
+    #[cfg(target_os = "macos")]
+    {
+        write_request(&mut stdin, &ready.sidecar_instance_id, "native_disconnected", "agent.getCapabilities",
+            serde_json::json!({"runtime":"codex","refresh":true}));
+        let mut line = String::new();
+        stdout.read_line(&mut line).unwrap();
+        let EnvelopeV1::Response(response) = decode_jsonl(line.as_bytes()).unwrap() else { panic!("disconnected response") };
+        assert!(!response.ok);
+        assert_eq!(response.error.unwrap().code, "providerDisconnected");
+        for (request_id, runtime) in [("connect_codex", "codex"), ("connect_claude", "claude-code")] {
+            write_request(&mut stdin, &ready.sidecar_instance_id, request_id, "project.catalog",
+                serde_json::json!({"action":"setProviderConnection","runtime":runtime,"connected":true}));
+            let mut line = String::new();
+            stdout.read_line(&mut line).unwrap();
+            let EnvelopeV1::Response(response) = decode_jsonl(line.as_bytes()).unwrap() else { panic!("connection response") };
+            assert!(response.ok, "{response:?}");
+        }
+    }
 
     #[cfg(target_os = "macos")]
     for (request_id, method, params, success) in [
@@ -218,7 +239,21 @@ fn binary_ready_status_quit_flow_marks_clean_and_exits_zero() {
         .expect("read stderr");
     let status = child.wait().expect("wait sidecar");
     assert_eq!(status.code(), Some(0));
-    assert!(stderr.is_empty());
+    // A clean exit prints only its storage seal: the database file's SHA-256
+    // and the engine context (`storage::shutdown_seal`).
+    let stderr = String::from_utf8(stderr).expect("utf-8 stderr");
+    let token = stderr
+        .strip_prefix("elsecrew-storage-seal v1 ")
+        .and_then(|rest| rest.strip_suffix('\n'))
+        .unwrap_or_else(|| panic!("only the seal line: {stderr:?}"));
+    let (hash, context) = token.split_once('.').expect("hash.context");
+    let bytes = std::fs::read(root.path().join("elsecrew.sqlite3")).expect("read database");
+    let actual: String = <sha2::Sha256 as sha2::Digest>::digest(&bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert_eq!(hash, actual);
+    assert!(context.starts_with(env!("CARGO_PKG_VERSION")), "{context}");
 
     let database = Connection::open(root.path().join("elsecrew.sqlite3"))
         .expect("inspect sidecar database");
@@ -488,7 +523,7 @@ fn g5a_public_event_flow(continuous_requests: bool, cancellation: Option<&str>) 
             .chain(std::iter::once(&"chat.appendMessage"))
             .chain(["agent.outputHead", "agent.outputPage"].iter())
             .chain(std::iter::once(&"provider.login"))
-            .chain(["run.approval", "project.catalog", "provider.install"].iter())
+            .chain(["run.approval", "project.catalog", "provider.install", "preview.resolve", "preview.readAsset"].iter())
             .map(|value| (*value).to_string())
             .collect::<Vec<_>>()
     );
@@ -1430,7 +1465,7 @@ fn binary_project_worktree_read_stream_and_quit_follow_g4_order() {
             .chain(std::iter::once(&"chat.appendMessage"))
             .chain(["agent.outputHead", "agent.outputPage"].iter())
             .chain(std::iter::once(&"provider.login"))
-            .chain(["run.approval", "project.catalog", "provider.install"].iter())
+            .chain(["run.approval", "project.catalog", "provider.install", "preview.resolve", "preview.readAsset"].iter())
             .map(|value| (*value).to_string())
             .collect::<Vec<_>>()
     );
@@ -1803,6 +1838,23 @@ fn binary_fresh_b_failure_and_exact_abandon_preserve_bound_a() {
         "project.getRoleSettings",
         serde_json::json!({"projectId":project_id}),
     );
+    let EnvelopeV1::Response(settings) = receive_envelope(&envelopes) else {
+        panic!("settings")
+    };
+    let settings = settings.result.unwrap();
+    // The built-in V3 team names no model; a chat needs every role filled.
+    let roles: Vec<serde_json::Value> = settings["roles"].as_array().unwrap().iter().map(|role| {
+        let mut role = role.clone();
+        let codex = role["runtime"] == "codex";
+        role["modelSelector"] = serde_json::json!(if codex { "fixture-codex" } else { "opus" });
+        role["reasoningEffort"] = if codex { serde_json::json!("medium") } else { serde_json::Value::Null };
+        role
+    }).collect();
+    let mut update = serde_json::json!({"projectId":project_id,"expectedRevision":1,"roles":roles});
+    if let Some(definitions) = settings.get("roleDefinitions") {
+        update["roleDefinitions"] = definitions.clone();
+    }
+    write_request(&mut stdin, &ready.sidecar_instance_id, "req_ab_settings_models", "project.updateRoleSettings", update);
     assert!(matches!(receive_envelope(&envelopes), EnvelopeV1::Response(response) if response.ok));
     let prepared_a = prepare_workspace(
         &mut stdin,
@@ -1820,7 +1872,7 @@ fn binary_fresh_b_failure_and_exact_abandon_preserve_bound_a() {
             "preparationId":prepared_a["preparationId"],"projectId":project_id,
             "worktreeId":prepared_a["manifest"]["worktreeId"],
             "workspaceIdentity":prepared_a["manifest"]["workspaceIdentity"],
-            "goal":"bound a","expectedSettingsRevision":1,
+            "goal":"bound a","expectedSettingsRevision":2,
         }),
     );
     let EnvelopeV1::Response(chat_a) = receive_envelope(&envelopes) else {

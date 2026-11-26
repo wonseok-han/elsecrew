@@ -89,6 +89,14 @@ fn four_chat_streams(durable: bool) {
             {"roleId":"review","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"}
         ]}),
     );
+    // Four runs of one agent at once: above the default limit of three
+    // (ADE multi-project P3′), so the person's setting allows four.
+    request(
+        &mut stdin,
+        "run_limit",
+        "project.catalog",
+        json!({"action":"setRunLimit","runtime":"claude-code","limit":4}),
+    );
     let mut chats = Vec::new();
     let mut inputs = Vec::new();
     for index in 0..4 {

@@ -10,6 +10,7 @@ impl RunReservation {
         process: &crate::provider_login_process::LoginProcess<'_>,
         result: &Result<TurnOutcome, SidecarError>,
         cancel_requested: bool,
+        failure: Option<&Value>,
     ) -> Result<(), ProjectFailure> {
         let evidence = process
             .closure_evidence()
@@ -23,6 +24,11 @@ impl RunReservation {
             _ => return Err(ProjectFailure::recovery("reserved permission changed")),
         };
         let identities = evidence.identities();
+        // Records keep the root and what was not observed gone: after a
+        // confirmed close the root alone, otherwise every process that may
+        // still run (a list of at most RECORDED_PROCESSES_MAX, all of them in
+        // the internal identities).
+        let recorded = evidence.recorded();
         let prior = projection["process_identity_internal"]
             .as_array()
             .ok_or_else(|| ProjectFailure::recovery("reserved process identities are missing"))?;
@@ -66,8 +72,13 @@ impl RunReservation {
         } else {
             "recoveryRequired"
         };
-        let tracked: Vec<_> = identities
+        // A record lists at most RECORDED_PROCESSES_MAX processes. More than
+        // that still possibly running (a very parallel build) stay complete
+        // in the internal identities and in the hold, which a later start
+        // stops and settles.
+        let tracked: Vec<_> = recorded
             .iter()
+            .take(super::super::RECORDED_PROCESSES_MAX)
             .map(|identity| process_value(*identity, Path::new("/redacted/agent"), confirmed))
             .collect();
         let termination = json!({
@@ -100,7 +111,7 @@ impl RunReservation {
                 "terminal workspace binding changed",
             ));
         }
-        let run = agent_run_record(
+        let mut run = agent_run_record(
             &self.run_id,
             chat,
             &profile,
@@ -111,11 +122,14 @@ impl RunReservation {
             Some(outcome),
             &self.created,
         )?;
+        if matches!(state, "failed" | "recoveryRequired") {
+            if let Some(failure) = failure { run["failure"] = failure.clone(); }
+        }
+        validate_agent_adapter_payload_v1("runRecord", &run).map_err(contract_failure)?;
         let updated_chat = updated_chat(
             chat,
             match state {
-                "succeeded" if matches!(self.request.role_id.as_str(), "coordinator" | "design" | "planning") => "waitingForUser",
-                "succeeded" => "reviewReady",
+                "succeeded" => super::super::succeeded_chat_state(&profile.role_id, &profile.permission),
                 "canceled" => "canceled",
                 "recoveryRequired" => "recoveryRequired",
                 _ => "needsAttention",
@@ -129,7 +143,7 @@ impl RunReservation {
         updated_run.insert("recovery".into(), recovery);
         updated_run.insert(
             "process_identity_internal".into(),
-            json!(identities
+            json!(recorded
                 .iter()
                 .map(|identity| json!({"pid":identity.pid,"start_us":identity.start_us}))
                 .collect::<Vec<_>>()),

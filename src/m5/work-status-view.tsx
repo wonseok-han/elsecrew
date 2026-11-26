@@ -1,13 +1,19 @@
 import { useI18n } from "../i18n.tsx";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { RecoveryGuide } from "./recovery-guide.tsx";
+import { useEffect, useRef, useState } from "react";
 import type { SupportedM5Bridge } from "./bridge-boundary.ts";
 import type { M5BridgeV6 } from "./contracts/bridge-v6.ts";
 import { summarizeWorkStatus, type WorkStatusSummary } from "./work-status.ts";
 
-/** Read-only status: no automatic cancellation, lock release, or recovery mutation. */
-export function WorkStatusNotice({ bridge, ready, refreshKey, feedback, errors, errorTitle, hasFeedback = false, feedbackTitle }: {
-  bridge: SupportedM5Bridge; ready: boolean; refreshKey: string;
-  feedback?: ReactNode; errors?: ReactNode; errorTitle?: string; hasFeedback?: boolean; feedbackTitle?: string;
+/**
+ * Read-only status of work that still holds the app (a run to finish or to
+ * confirm stopped). It lives at the top of the bell panel and reports whether
+ * there is anything, so the bell can show a warning mark.
+ * No automatic cancellation, lock release, or recovery mutation.
+ */
+export function WorkStatusPanel({ bridge, ready, refreshKey, onAttention, liveRunIds = [] }: {
+  bridge: SupportedM5Bridge; ready: boolean; refreshKey: string; onAttention: (attention: boolean) => void;
+  liveRunIds?: readonly string[];
 }) {
   const { t } = useI18n();
   const [summary, setSummary] = useState<WorkStatusSummary | null>(null);
@@ -27,35 +33,23 @@ export function WorkStatusNotice({ bridge, ready, refreshKey, feedback, errors, 
       try {
         const status = await (bridge as M5BridgeV6).getSystemStatus();
         if (!current) return;
-        setSummary(summarizeWorkStatus(status)); setFailed(false);
+        setSummary(summarizeWorkStatus(status, liveRunIds)); setFailed(false);
       } catch { if (current) setFailed(true); }
       finally { if (current) setBusy(false); }
     })();
     inFlight.current = request;
     return () => { current = false; };
-  }, [bridge, ready, refreshKey, refresh]);
-  const hasWorkStatus = ready && bridge.version >= 6 && (summary !== null || failed);
-  const attention = Boolean(errorTitle || failed || hasWorkStatus);
-  return <details className={`m5-status-strip m5-notifications${attention ? " m5-status-strip-attention" : ""}`}>
-    <summary title={t("m5.notifications.title")} aria-label={`${t("m5.notifications.title")}${errorTitle || feedbackTitle ? ` · ${errorTitle || feedbackTitle}` : attention ? ` · ${t("m5.notifications.attention")}` : ""}`}>
-      <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
-      {(attention || hasFeedback) && <span className="m5-status-indicator" aria-hidden="true" />}
-      <span className="m5-sr-only" role="status">{errorTitle || feedbackTitle || (failed ? t("m5.work.failed") : hasWorkStatus ? t("m5.work.active") : "")}</span>
-    </summary>
-    <div className="m5-status-content"><h3>{t("m5.notifications.title")}</h3>
-      {!attention && !hasFeedback && <p>{t("m5.notifications.empty")}</p>}
-      {errors}
-      <div className="m5-inline-feedback">{feedback}</div>
-      {hasWorkStatus && <section aria-label={t("m5.work.title")} aria-busy={busy}>
-        <strong>{failed ? t("m5.work.failed") : t("m5.work.active")}</strong>
-        <p>{failed ? t("m5.work.error") : t("m5.work.help")}</p>
-        <p>{t("m5.work.safety")}</p>
-        {summary && <details><summary>{t("m5.work.details", { count: summary.total })}{failed ? t("m5.work.stale") : ""}</summary>
-          <ul>{summary.ids.map((id, index) => <li key={index}><code>{id}</code></li>)}</ul>
-          {summary.omitted > 0 && <p>{t("m5.work.omitted", { count: summary.omitted })}</p>}
-        </details>}
-        <button type="button" className="m5-secondary" disabled={busy} onClick={() => setRefresh(value => value + 1)}>{busy ? t("m5.work.busy") : t("m5.work.refresh")}</button>
-      </section>}
-    </div>
-  </details>;
+  }, [bridge, ready, refreshKey, refresh, liveRunIds.join(" ")]);
+  const attention = ready && bridge.version >= 6 && (summary !== null || failed);
+  useEffect(() => { onAttention(attention); }, [attention, onAttention]);
+  if (!attention) return null;
+  // F3 (ADE U7): the same F11 guide as other failures — what is going on, one
+  // thing to do now, and the run list only inside the help details.
+  const details = summary ? [t("m5.work.details", { count: summary.total }) + (failed ? t("m5.work.stale") : ""), t("m5.work.safety"), ...summary.ids,
+    ...(summary.omitted > 0 ? [t("m5.work.omitted", { count: summary.omitted })] : [])].join("\n") : null;
+  return <RecoveryGuide tone="attention" live={false} className="m5-bell-problem" label={t("m5.work.title")} busy={busy}
+    title={failed ? t("m5.work.failed") : t("m5.work.active")}
+    what={failed ? t("m5.work.error") : t("m5.work.help")}
+    primary={{ label: busy ? t("m5.work.busy") : t("m5.work.refresh"), onClick: () => setRefresh(value => value + 1), disabled: busy }}
+    details={details} />;
 }

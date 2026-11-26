@@ -1,12 +1,14 @@
+import { sealFromStderr } from "./storage-seal.ts";
 import { validateSaveRecoveryResolveRequest, validateSaveRecoveryResolveResult, type SaveRecoveryResolveRequest, type SaveRecoveryResolveResult } from "../src/m5/contracts/save-recovery-v1.ts";
 import { validateSaveRecoveryRequest, validateSaveRecoveryResult, type SaveRecoveryResult } from "../src/m5/contracts/save-recovery-v1.ts";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID, type Hash } from "node:crypto";
 import { validateAgentRunBindingV1 } from "../src/m5/contracts/agent-adapter-v1.ts";
 import { validateDecodedOutputPage, validateOutputHead, validateOutputPageRequest, type OutputHead, type OutputPage, type OutputPageRequest } from "../src/m5/contracts/agent-output-pages.ts";
 import { validateModelChoicesRequest, validateModelChoicesResult, type ModelChoicesRequest, type ModelChoicesResult } from "../src/m5/contracts/model-choices-v1.ts";
 import { validateApprovalRequest, validateApprovalResult, type ApprovalRequest, type ApprovalResult } from "../src/m5/contracts/approval-v1.ts";
 import { validateLoginRequest, validateLoginStatus, type LoginRequest, type LoginStatus } from "../src/m5/contracts/provider-login-v1.ts";
 import { validateInstallRequest, validateInstallStatus, type InstallRequest, type InstallStatus } from "../src/m5/contracts/provider-install-v1.ts";
+import { validatePreviewReadAssetRequestV1, validatePreviewReadAssetResultV1, validatePreviewResolveRequestV1, validatePreviewResolveResultV1, type PreviewReadAssetRequestV1, type PreviewReadAssetResultV1, type PreviewResolveRequestV1, type PreviewResolveResultV1 } from "../src/m5/contracts/preview-v1.ts";
 import { validateProjectCatalogRequest, validateProjectCatalogResult, type ProjectCatalogRequest, type ProjectCatalogResult } from "../src/m5/contracts/project-catalog-v1.ts";
 import type { ChildProcess, SpawnOptionsWithoutStdio } from "node:child_process";
 import { spawn } from "node:child_process";
@@ -45,13 +47,13 @@ import {
   validateProjectIdentityV1,
   validateTreePageV1,
   validateWatchEventV1,
-  validateWorktreeManifestV1,
+  validateWorktreeManifest,
   type ProjectCloseResultV1,
   type ProjectWatchResultV1,
   type ProjectIdentityV1,
   type TreePageV1,
   type WatchEventV1,
-  type WorktreeManifestV1,
+  type WorktreeManifest,
 } from "../src/m5/contracts/project-v1.ts";
 import {
   sha256FileVersionV1,
@@ -191,13 +193,35 @@ import {
   type StorageStatusV1,
 } from "../src/m5/contracts/storage-lifetime-v1.ts";
 
+/** A busy provider profile is retried this many times, this far apart. */
+const MODEL_BUSY_RETRIES = 5;
+const MODEL_BUSY_WAIT_MS = 1_500;
+/** Catalog requests wait out the engine's storage check (up to three minutes; a debug build takes over one). */
+const CATALOG_VERIFYING_RETRIES = 360;
+const CATALOG_VERIFYING_WAIT_MS = 500;
+
 export const SIDECAR_READY_TIMEOUT_MS = 3_000;
 export const MAX_SIDECAR_STDERR_TAIL_BYTES = 32 * 1024;
 const MAX_FILE_STREAM_BYTES = 5 * 1024 * 1024;
 const MAX_DIFF_STREAM_BYTES = 10 * 1024 * 1024;
 const MAX_ACTIVE_STREAMS = 16;
+const chunkEncoder = new TextEncoder();
 const MAX_ACTIVE_STREAM_BYTES = 160 * 1024 * 1024;
 const MAX_STREAM_EVENTS = 256;
+/** Refused streams whose remaining chunks are still expected (counted, never kept). */
+const MAX_DISCARDED_STREAMS = 64;
+
+/**
+ * The client refused one more text stream because too many were still open.
+ * Only that request fails: the descriptor itself was valid, so this is not a
+ * protocol violation and must not restart the engine (2026-11-26 D1).
+ */
+export class SidecarStreamCapacityError extends Error {
+  constructor() {
+    super("sidecar active stream bound exceeded");
+    this.name = "SidecarStreamCapacityError";
+  }
+}
 
 export interface SidecarLaunchV1 {
   command: string;
@@ -245,8 +269,24 @@ interface AgentChatContextV1 extends Omit<AgentRunContextV1, "roleId" | "capabil
 interface TextStreamV1 {
   byteLength: number;
   expectedVersion: FileVersionV1 | null;
-  text: string;
+  /** Bytes and digest so far, advanced one chunk at a time: a many-chunk file
+   * or diff is never encoded again from its start (PR #15 review I3). */
+  received: number;
+  digest: Hash;
   events: number;
+  /** The chunk event this stream's descriptor implies, and for a task
+   * workspace the address its chunks must carry (PR #17 review I3). */
+  event: "blob.chunk" | "workspace.blob.chunk";
+  workspace: ChatWorkspaceRefV1 | null;
+  /** Refused for capacity: checked exactly like the others, then dropped. */
+  refused: boolean;
+}
+
+type StreamBindingV1 = Pick<TextStreamV1, "event" | "workspace">;
+const PROJECT_STREAM: StreamBindingV1 = { event: "blob.chunk", workspace: null };
+function workspaceStream(value: ChatWorkspaceRefV1): StreamBindingV1 {
+  const { chatId, projectId, worktreeId, workspaceIdentity } = value;
+  return { event: "workspace.blob.chunk", workspace: { chatId, projectId, worktreeId, workspaceIdentity } };
 }
 
 type AgentRunObservedStateV1 = "preparing" | "running" | "cancelling" | "terminal";
@@ -272,6 +312,10 @@ export class SidecarClientV1 {
   readonly #workspaceSaves = new Map<string, WorkspaceSaveSessionV1>();
   readonly #preparedWorkspaces = new Map<string, PreparedWorkspaceSessionV1>();
   readonly #teamRoots = new Map<string, { context: AgentChatContextV1; count: number }>();
+  /** Coordinator starts the engine took but put in line (`providerCapacity`,
+   * ADE multi-project P3′), by chat: their run, announced later as its own
+   * root, is the one the person asked for. */
+  readonly #queuedRoots = new Map<string, AgentChatContextV1>();
   readonly #agentChatContexts = new Map<string, AgentChatContextV1>();
   readonly #activeAgentRuns = new Map<string, AgentRunBindingV1>();
   readonly #seenAgentRuns = new Map<string, SeenAgentRunV1>();
@@ -279,6 +323,7 @@ export class SidecarClientV1 {
   readonly #agentRunStreams = new Map<string, string>();
   readonly #agentStreamRuns = new Map<string, string>();
   readonly #streams = new Map<string, TextStreamV1>();
+  #refusedStreams = 0;
   #streamBytes = 0;
   readonly #decoder = new TextDecoder("utf-8", { fatal: true });
   #process: SidecarProcessV1 | undefined;
@@ -298,6 +343,9 @@ export class SidecarClientV1 {
   readonly #onDiagnosticTail: ((tail: string) => void) | undefined;
   readonly #onTransportProgress: ((method: string, requestId: string | null, phase: string) => void) | undefined;
   #terminationAttempted = false;
+  readonly #failureListeners = new Set<(code: NonNullable<SidecarClientV1["failureCode"]>) => void>();
+  #exited = false;
+  readonly #exitListeners = new Set<() => void>();
 
   constructor(
     launch: SidecarLaunchV1,
@@ -351,7 +399,11 @@ export class SidecarClientV1 {
       process.stderr.on("data", (chunk: Buffer) => this.#onStderr(Buffer.from(chunk)));
       process.once("error", (error: unknown) => this.#fail(asError(error, "sidecar failed to start"), "processError"));
       process.once("exit", (code: unknown, signal: unknown) => {
+        this.#exitDetail = `${String(code ?? "null")}/${String(signal ?? "none")}`;
         this.#fail(new Error(`sidecar exited (${String(code ?? "null")}, ${String(signal ?? "none")})`), "processExit");
+        this.#exited = true;
+        for (const listener of this.#exitListeners) listener();
+        this.#exitListeners.clear();
       });
     } catch (error) {
       this.#fail(asError(error, "sidecar failed to start"), "processError");
@@ -370,6 +422,31 @@ export class SidecarClientV1 {
   /** Fixed local classification only; never includes provider output or credentials. */
   get failureCode() { return this.#failureCode; }
 
+  #exitDetail: string | null = null;
+  /** Exit code and signal of the engine process once it ended ("code/signal"). */
+  get exitDetail(): string | null { return this.#exitDetail; }
+
+  /** Called once when the engine fails, with the fixed failure code. */
+  onFailure(listener: (code: NonNullable<SidecarClientV1["failureCode"]>) => void): void {
+    this.#failureListeners.add(listener);
+  }
+
+  /** Ends the engine's input. The engine then stops its agent processes and
+   * exits by itself; it never needs a signal for a normal close. */
+  closeInput(): void {
+    try { this.#process?.stdin?.end(); } catch { /* already closed */ }
+  }
+
+  /** Resolves true once the engine process has ended, or false after the timeout. */
+  waitForExit(timeoutMs: number): Promise<boolean> {
+    if (this.#exited) return Promise.resolve(true);
+    return new Promise(resolve => {
+      const timer = setTimeout(() => { this.#exitListeners.delete(done); resolve(false); }, timeoutMs);
+      const done = () => { clearTimeout(timer); resolve(true); };
+      this.#exitListeners.add(done);
+    });
+  }
+
   failConsumerTooSlow(): void { this.#fail(new Error("consumerTooSlow: renderer event credit exhausted"), "consumerTooSlow"); }
   failRendererDisconnected(): void { this.#fail(new Error("rendererDisconnected: renderer delivery ended before acknowledgement"), "rendererDisconnected"); }
 
@@ -384,6 +461,12 @@ export class SidecarClientV1 {
    */
   get technicalDetail(): string {
     return normalizeDiagnostic(this.#stderrTail);
+  }
+
+  /** The seal line the engine printed last at a clean exit, if any. The app
+   * signs it only after hashing the database itself (`storage-seal.ts`). */
+  get storageSeal(): { token: string; fullCheckAt: number | null } | null {
+    return sealFromStderr(this.#stderrTail.toString("utf8"));
   }
 
   onEvent(listener: (event: EventV1) => void): () => void {
@@ -450,13 +533,31 @@ export class SidecarClientV1 {
     return this.#request("run.approval", validateApprovalRequest(input)) as Promise<ApprovalResult>;
   }
 
-  openProject(selectedPath: string, emptyFolderIdentity?: string): Promise<ProjectIdentityV1> { return this.#request("project.open", { selectedPath, ...(emptyFolderIdentity ? { emptyFolderIdentity } : {}) }) as Promise<ProjectIdentityV1>; }
+  openProject(selectedPath: string, emptyFolderIdentity?: string, folderRecordIdentity?: string): Promise<ProjectIdentityV1> {
+    return this.#request("project.open", { selectedPath, ...(emptyFolderIdentity ? { emptyFolderIdentity } : folderRecordIdentity ? { folderRecordIdentity } : {}) }) as Promise<ProjectIdentityV1>;
+  }
   projectCatalog(input: ProjectCatalogRequest): Promise<ProjectCatalogResult> {
-    if (!this.#ready?.capabilities.includes("project.catalog")) return Promise.reject(new Error("project catalog unavailable"));
-    return this.#request("project.catalog", validateProjectCatalogRequest(input)) as Promise<ProjectCatalogResult>;
+    const request = validateProjectCatalogRequest(input);
+    const send = async (): Promise<ProjectCatalogResult> => {
+      // ...and while the engine still checks its storage (a few seconds at
+      // launch), ask again shortly instead of failing the page's first reads.
+      for (let attempt = 0; ; attempt++) {
+        if (!this.#ready?.capabilities.includes("project.catalog")) throw new Error("project catalog unavailable");
+        try { return await this.#request("project.catalog", request) as ProjectCatalogResult; }
+        catch (error) {
+          const verifying = /storage admission is still verifying/.test(error instanceof Error ? error.message : String(error));
+          if (!verifying || attempt >= CATALOG_VERIFYING_RETRIES) throw error;
+          await new Promise(resolve => setTimeout(resolve, CATALOG_VERIFYING_WAIT_MS));
+        }
+      }
+    };
+    // The page may ask before the engine finished starting: wait for it
+    // instead of failing (the startup log showed this twice per launch).
+    if (!this.#ready && this.#readyPromise) return this.#readyPromise.catch(() => undefined).then(send);
+    return send();
   }
   getProjectTree(input: { projectId: string; parentPath: string; cursor: string | null }): Promise<TreePageV1> { return this.#request("project.getTree", input) as Promise<TreePageV1>; }
-  createProjectWorktree(input: { projectId: string }): Promise<WorktreeManifestV1> { return this.#request("project.createWorktree", input) as Promise<WorktreeManifestV1>; }
+  createProjectWorktree(input: { projectId: string }): Promise<WorktreeManifest> { return this.#request("project.createWorktree", input) as Promise<WorktreeManifest>; }
   closeProject(input: { projectId: string }): Promise<ProjectCloseResultV1> { return this.#request("project.close", input) as Promise<ProjectCloseResultV1>; }
   readFile(input: { projectId: string; path: string }): Promise<FileReadDescriptorV1> { return this.#request("file.read", input) as Promise<FileReadDescriptorV1>; }
   beginFileSave(input: Omit<SaveBeginV1, "saveId" | "chunkBytes">): Promise<{ saveId: string; chunkBytes: SaveBeginV1["chunkBytes"] }> { return this.#request("file.save", input) as Promise<{ saveId: string; chunkBytes: SaveBeginV1["chunkBytes"] }>; }
@@ -554,7 +655,17 @@ export class SidecarClientV1 {
     if (!this.#nativeAdapterNegotiated || !this.#ready?.capabilities.includes("agent.getModelChoices")) {
       throw new Error("native model choices unavailable: capability was not advertised");
     }
-    return this.#request("agent.getModelChoices", validateModelChoicesRequest(input)) as Promise<ModelChoicesResult>;
+    const request = validateModelChoicesRequest(input);
+    // Another provider check (sign-in status, usage) may hold the profile for
+    // a moment at startup: wait and ask again rather than fail the list.
+    for (let attempt = 0; ; attempt++) {
+      try { return await this.#request("agent.getModelChoices", request) as ModelChoicesResult; }
+      catch (error) {
+        const busy = /another provider check currently owns this profile/.test(error instanceof Error ? error.message : String(error));
+        if (!busy || attempt >= MODEL_BUSY_RETRIES) throw error;
+        await new Promise(resolve => setTimeout(resolve, MODEL_BUSY_WAIT_MS));
+      }
+    }
   }
   startAgentRun(input: AgentRunStartRequestV1): Promise<AgentRunAcceptedV1> {
     return this.#requestAgent("run.startAgent", { ...validateAgentRunStartRequestV1(input) }) as Promise<AgentRunAcceptedV1>;
@@ -564,6 +675,15 @@ export class SidecarClientV1 {
   }
   inspectAgentRecovery(input: AgentRecoveryInspectRequestV1): Promise<AgentRecoveryRecordV1> {
     return this.#requestAgent("recovery.inspectAgent", { ...validateAgentRecoveryInspectRequestV1(input) }) as Promise<AgentRecoveryRecordV1>;
+  }
+  /** Result preview (read-only). Main alone calls these; the page never does. */
+  previewResolve(input: PreviewResolveRequestV1): Promise<PreviewResolveResultV1> {
+    if (!this.#ready?.capabilities.includes("preview.resolve")) return Promise.reject(new Error("preview unavailable"));
+    return this.#request("preview.resolve", { ...validatePreviewResolveRequestV1(input) }) as Promise<PreviewResolveResultV1>;
+  }
+  previewReadAsset(input: PreviewReadAssetRequestV1): Promise<PreviewReadAssetResultV1> {
+    if (!this.#ready?.capabilities.includes("preview.readAsset")) return Promise.reject(new Error("preview unavailable"));
+    return this.#request("preview.readAsset", { ...validatePreviewReadAssetRequestV1(input) }) as Promise<PreviewReadAssetResultV1>;
   }
   getAgentOutputHead(input: AgentRunBindingV1): Promise<OutputHead | null> {
     this.#requireAgentAdapter();
@@ -622,8 +742,10 @@ export class SidecarClientV1 {
     };
 
     try {
-      this.#session.observe(request);
+      // Encode before the session records the request: a request that cannot
+      // be sent must not stay pending in the session.
       const encoded = encodeJsonl(request);
+      this.#session.observe(request);
       return new Promise<unknown>((resolve, reject) => {
         this.#pending.set(requestId, {
           method,
@@ -638,8 +760,9 @@ export class SidecarClientV1 {
         });
       });
     } catch (error) {
-      this.#fail(asError(error, "invalid sidecar request"), "requestInvalid");
-      return Promise.reject(this.#failure);
+      // Nothing was written: refuse this request only, the engine is fine.
+      this.#pending.delete(requestId);
+      return Promise.reject(asError(error, "invalid sidecar request"));
     }
   }
 
@@ -689,6 +812,13 @@ export class SidecarClientV1 {
     if (envelope.kind === "event") {
       if (envelope.event === "system.ready") {
         const advertisedReady = parseReadyPayload(envelope);
+        // Result preview: an optional pair after the installation suffix.
+        const hasPreview = advertisedReady.capabilities.at(-2) === "preview.resolve"
+          && advertisedReady.capabilities.at(-1) === "preview.readAsset";
+        if (hasPreview) {
+          if (advertisedReady.capabilities.at(-3) !== "provider.install") throw new Error("invalid preview capability baseline");
+          advertisedReady.capabilities = advertisedReady.capabilities.slice(0, -2);
+        }
         const hasInstall = advertisedReady.capabilities.at(-1) === "provider.install";
         if (hasInstall) {
           if (advertisedReady.capabilities.at(-2) !== "project.catalog") throw new Error("invalid installation capability baseline");
@@ -738,6 +868,7 @@ export class SidecarClientV1 {
         if (hasApproval) negotiatedReady.capabilities = [...negotiatedReady.capabilities, "run.approval"];
         if (hasCatalog) negotiatedReady.capabilities = [...negotiatedReady.capabilities, "project.catalog"];
         if (hasInstall) negotiatedReady.capabilities = [...negotiatedReady.capabilities, "provider.install"];
+        if (hasPreview) negotiatedReady.capabilities = [...negotiatedReady.capabilities, "preview.resolve", "preview.readAsset"];
         this.#ready = negotiatedReady;
         this.#agentAdapterNegotiated = negotiatedG5A || negotiatedG5DAgent;
         this.#nativeAdapterNegotiated = negotiatedNative;
@@ -748,7 +879,15 @@ export class SidecarClientV1 {
         this.#resolveReady = undefined;
         this.#rejectReady = undefined;
       }
-      if (envelope.event === "blob.chunk") this.#acceptChunk(envelope);
+      // Task-workspace reads and diffs register their streams too: their
+      // chunks must settle them, or after 16 opened files the next read
+      // exceeded the active-stream bound and failed the engine (2026-11-26).
+      // A task-workspace chunk is held to its contract whether or not its
+      // stream was refused (PR #17 review I3).
+      if (envelope.event === "workspace.blob.chunk") validateWorkspaceEventV1(envelope);
+      // A refused stream's chunk is checked like any other, then dropped: no
+      // listener and no renderer delivery on either path (review I2).
+      if ((envelope.event === "blob.chunk" || envelope.event === "workspace.blob.chunk") && !this.#acceptChunk(envelope)) return;
       if (["file.changed", "file.conflict", "diff.changed"].includes(envelope.event)) {
         const watch = validateWatchEventV1(envelope.payload);
         for (const listener of this.#projectListeners) listener(watch, envelope);
@@ -783,6 +922,19 @@ export class SidecarClientV1 {
       if (envelope.event === "agent.teamRunAccepted") {
         if (!this.#agentAdapterNegotiated) throw new Error("team run requires agent negotiation");
         const notice = strictObject(envelope.payload, ["rootRunId", "accepted"], "team run announcement");
+        // A coordinator that waited its turn starts as its own root, only for
+        // the chat whose start the engine put in line (ADE multi-project P3′).
+        const queued = typeof envelope.chatId === "string" ? this.#queuedRoots.get(envelope.chatId) : undefined;
+        if (queued && notice.rootRunId === envelope.runId && !this.#teamRoots.has(String(notice.rootRunId))) {
+          const value = validateAgentRunAcceptedV1(notice.accepted);
+          if (value.roleId !== "coordinator") throw new Error("a waiting team's first run must be its coordinator");
+          validateAgentRunAcceptedAgainstContextV1(value, { ...queued, roleId: value.roleId, capabilityFingerprint: value.capabilityFingerprint });
+          if (value.chatId !== envelope.chatId || value.taskId !== envelope.taskId || value.runId !== envelope.runId) throw new Error("team run envelope identity mismatch");
+          this.#registerAcceptedAgentRun(value);
+          this.#teamRoots.set(value.runId, { context: queued, count: 0 });
+          this.#queuedRoots.delete(envelope.chatId as string);
+          return;
+        }
         const root = typeof notice.rootRunId === "string" ? this.#teamRoots.get(notice.rootRunId) : undefined;
         if (!root || root.count >= 11) throw new Error("team run lacks an authorized root or exceeds its call budget");
         const value = validateAgentRunAcceptedV1(notice.accepted);
@@ -870,6 +1022,11 @@ export class SidecarClientV1 {
     if (!response.ok) {
       this.#pending.delete(response.requestId);
       this.#discardWorkspaceSave(pending);
+      if (pending.method === "run.startAgent" && response.error?.code === "providerCapacity") {
+        const request = validateAgentRunStartRequestV1(pending.params);
+        const chat = this.#agentChatContexts.get(request.chatId);
+        if (chat && request.roleId === "coordinator") this.#queuedRoots.set(request.chatId, chat);
+      }
       pending.reject(new Error(`${response.error?.kind ?? "sidecarError"}: ${response.error?.detail ?? "unknown error"}`));
       return;
     }
@@ -884,7 +1041,17 @@ export class SidecarClientV1 {
       pending.resolve(status);
       return;
     }
-    const result = this.#validateResult(pending, response);
+    let result: unknown;
+    try {
+      result = this.#validateResult(pending, response);
+    } catch (error) {
+      // Capacity is the client's own limit, not a broken sidecar: fail only
+      // this request. Every other validation error is still a protocol failure.
+      if (!(error instanceof SidecarStreamCapacityError)) throw error;
+      this.#pending.delete(response.requestId);
+      pending.reject(error);
+      return;
+    }
     this.#pending.delete(response.requestId);
     pending.resolve(result);
   }
@@ -893,6 +1060,8 @@ export class SidecarClientV1 {
     switch (pending.method) {
       case "app.prepareQuit": return parsePrepareQuitResult(response);
       case "storage.status": return validateStorageStatusV1(response.result);
+      case "preview.resolve": return validatePreviewResolveResultV1(response.result, validatePreviewResolveRequestV1(pending.params));
+      case "preview.readAsset": return validatePreviewReadAssetResultV1(response.result, validatePreviewReadAssetRequestV1(pending.params));
       case "project.open": return validateProjectIdentityV1(response.result);
       case "project.catalog": return validateProjectCatalogResult(response.result, validateProjectCatalogRequest(pending.params));
       case "project.getTree": {
@@ -902,7 +1071,7 @@ export class SidecarClientV1 {
         return value;
       }
       case "project.createWorktree": {
-        const value = validateWorktreeManifestV1(response.result);
+        const value = validateWorktreeManifest(response.result);
         assertResponseField(value, pending.params, "projectId");
         return value;
       }
@@ -915,7 +1084,7 @@ export class SidecarClientV1 {
         const value = validateFileReadDescriptorV1(response.result);
         assertResponseField(value, pending.params, "projectId");
         assertResponseField(value, pending.params, "path");
-        this.#registerStream(value.byteLength, value.stream, value.version, MAX_FILE_STREAM_BYTES);
+        this.#registerStream(value.byteLength, value.stream, value.version, MAX_FILE_STREAM_BYTES, PROJECT_STREAM);
         return value;
       }
       case "diff.getSummary": {
@@ -929,7 +1098,7 @@ export class SidecarClientV1 {
         assertResponseField(value, pending.params, "path");
         // The immutable G4 diff descriptor has no digest for its rendered patch
         // stream. Its size and protocol sequence are still bounded and checked.
-        this.#registerStream(value.byteLength, value.stream, null, MAX_DIFF_STREAM_BYTES);
+        this.#registerStream(value.byteLength, value.stream, null, MAX_DIFF_STREAM_BYTES, PROJECT_STREAM);
         return value;
       }
       case "file.watch": return isWatchResult(response.result) ? response.result : failResult("file.watch result is invalid");
@@ -946,7 +1115,7 @@ export class SidecarClientV1 {
       case "workspace.file.read": {
         const value = validateWorkspaceFileReadDescriptorV1(response.result);
         assertWorkspaceResponse(value, pending.params); assertResponseField(value, pending.params, "path");
-        this.#registerStream(value.byteLength, value.stream, value.version, MAX_FILE_STREAM_BYTES);
+        this.#registerStream(value.byteLength, value.stream, value.version, MAX_FILE_STREAM_BYTES, workspaceStream(value));
         return value;
       }
       case "workspace.file.watch": {
@@ -958,7 +1127,7 @@ export class SidecarClientV1 {
       case "workspace.diff.getFile": {
         const value = validateWorkspaceDiffFileDescriptorV1(response.result);
         assertWorkspaceResponse(value, pending.params); assertResponseField(value, pending.params, "path");
-        this.#registerStream(value.byteLength, value.stream, null, MAX_DIFF_STREAM_BYTES);
+        this.#registerStream(value.byteLength, value.stream, null, MAX_DIFF_STREAM_BYTES, workspaceStream(value));
         return value;
       }
       case "workspace.resolveSaveRecovery": {
@@ -1157,41 +1326,64 @@ export class SidecarClientV1 {
     assertPreparedResponse(prepared, input);
   }
 
-  #registerStream(byteLength: number, stream: { streamId: string } | null, expectedVersion: FileVersionV1 | null, limit: number): void {
+  #registerStream(byteLength: number, stream: { streamId: string } | null, expectedVersion: FileVersionV1 | null, limit: number, binding: StreamBindingV1): void {
     if (!stream) return;
     if (byteLength > limit) throw new Error(`sidecar text stream exceeds ${limit / 1024 / 1024} MiB client bound`);
-    if (this.#streams.size >= MAX_ACTIVE_STREAMS || this.#streamBytes + byteLength > MAX_ACTIVE_STREAM_BYTES) {
-      throw new Error("sidecar active stream bound exceeded");
-    }
     if (this.#streams.has(stream.streamId)) throw new Error("duplicate sidecar text stream");
     const empty = new Uint8Array();
     if (byteLength === 0 && expectedVersion && sha256FileVersionV1(empty) !== expectedVersion) {
       throw new Error("empty text stream hash does not match declared version");
     }
+    // An empty stream has no chunks and holds no slot.
     if (byteLength === 0) return;
+    const active = this.#streams.size - this.#refusedStreams;
+    const refused = active >= MAX_ACTIVE_STREAMS || this.#streamBytes + byteLength > MAX_ACTIVE_STREAM_BYTES;
+    // The sidecar sends a refused stream's chunks right after the response.
+    // They are checked like any other (size, count, hash, kind, address) but
+    // never kept or delivered; only their running digest is held.
+    if (refused && this.#refusedStreams >= MAX_DISCARDED_STREAMS) throw new Error("sidecar refused stream bound exceeded");
     this.#streams.set(stream.streamId, {
       byteLength,
       expectedVersion,
-      text: "",
+      received: 0,
+      digest: createHash("sha256"),
       events: 0,
+      ...binding,
+      refused,
     });
+    if (refused) {
+      this.#refusedStreams += 1;
+      throw new SidecarStreamCapacityError();
+    }
     this.#streamBytes += byteLength;
   }
 
-  #acceptChunk(event: EventV1): void {
+  /** False when the chunk belonged to a refused stream and was dropped. */
+  #acceptChunk(event: EventV1): boolean {
     const stream = this.#streams.get(event.streamId);
     if (!stream) throw new Error("blob.chunk references an unknown or completed stream");
+    if (event.event !== stream.event) throw new Error("blob.chunk kind does not match its stream");
+    if (stream.workspace) {
+      const payload = event.payload as Record<string, unknown>;
+      for (const key of ["chatId", "projectId", "worktreeId", "workspaceIdentity"] as const) {
+        if (payload[key] !== stream.workspace[key]) throw new Error("workspace.blob.chunk address does not match its stream");
+      }
+    }
     const text = event.payload.text;
     if (typeof text !== "string") throw new Error("blob.chunk text is invalid");
     if (++stream.events > MAX_STREAM_EVENTS) throw new Error("blob.chunk exceeds 256 events per stream");
-    stream.text += text;
-    const bytes = new TextEncoder().encode(stream.text);
-    if (bytes.byteLength > stream.byteLength) throw new Error("blob.chunk exceeds declared stream size");
-    if (bytes.byteLength === stream.byteLength) {
-      if (stream.expectedVersion && sha256FileVersionV1(bytes) !== stream.expectedVersion) throw new Error("blob.chunk hash does not match declared version");
+    // Chunks are whole UTF-8 text, so their bytes concatenate to the stream's.
+    const bytes = chunkEncoder.encode(text);
+    stream.received += bytes.byteLength;
+    if (stream.received > stream.byteLength) throw new Error("blob.chunk exceeds declared stream size");
+    stream.digest.update(bytes);
+    if (stream.received === stream.byteLength) {
+      if (stream.expectedVersion && `sha256:${stream.digest.digest("hex")}` !== stream.expectedVersion) throw new Error("blob.chunk hash does not match declared version");
       this.#streams.delete(event.streamId);
-      this.#streamBytes -= stream.byteLength;
+      if (stream.refused) this.#refusedStreams -= 1;
+      else this.#streamBytes -= stream.byteLength;
     }
+    return !stream.refused;
   }
 
   #fail(error: Error, code: NonNullable<SidecarClientV1["failureCode"]>): void {
@@ -1208,14 +1400,20 @@ export class SidecarClientV1 {
     this.#preparedWorkspaces.clear();
     this.#agentChatContexts.clear();
     this.#teamRoots.clear();
+    this.#queuedRoots.clear();
     this.#activeAgentRuns.clear();
     this.#seenAgentRuns.clear();
     this.#agentEventIds.clear();
     this.#agentRunStreams.clear();
     this.#agentStreamRuns.clear();
     this.#streams.clear();
+    this.#refusedStreams = 0;
     this.#streamBytes = 0;
     this.#terminateOnce();
+    for (const listener of this.#failureListeners) {
+      try { listener(code); } catch { /* a listener never changes the reported failure */ }
+    }
+    this.#failureListeners.clear();
   }
 
   #terminateOnce(): void {

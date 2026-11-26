@@ -10,6 +10,70 @@ const stages = ["start binding", "control initialization", "profile matching", "
   "init plugins disabled builtins", "init plugins organization guard", "init plugins telemetry", "init plugins privacy",
   "init plugins other builtins", "init plugins other registration", "init agents",
   "init plugin errors", "init capabilities"] as const;
+/** Requests the provider can send; a failure while handling one names it.
+ * Mirrors `SERVER_REQUESTS` in codex_events/stream.rs. */
+export const CODEX_SERVER_REQUESTS = [
+  "item/commandExecution/requestApproval",
+  "item/fileChange/requestApproval",
+  "item/tool/requestUserInput",
+  "mcpServer/elicitation/request",
+  "item/permissions/requestApproval",
+  "item/tool/call",
+  "account/chatgptAuthTokens/refresh",
+  "attestation/generate",
+  "currentTime/read",
+  "applyPatchApproval",
+  "execCommandApproval",
+] as const;
+/** Provider notifications the engine does not accept; a failure names which
+ * one. Mirrors `UNHANDLED_NOTIFICATIONS` in codex_events/stream.rs. */
+export const CODEX_UNHANDLED_NOTIFICATIONS = [
+  "thread/started",
+  "thread/readState/changed",
+  "thread/archived",
+  "thread/deleted",
+  "thread/unarchived",
+  "thread/closed",
+  "thread/reverted",
+  "skills/changed",
+  "thread/section/changed",
+  "thread/attachment/updated",
+  "thread/goal/updated",
+  "thread/prediction/updated",
+  "thread/goal/cleared",
+  "thread/queue/changed",
+  "project/changed",
+  "thread/project/updated",
+  "thread/environment/connected",
+  "thread/environment/disconnected",
+  "item/autoApprovalReview/started",
+  "item/autoApprovalReview/completed",
+  "autoApprovalReview/strictReviewRequired",
+  "rawResponseItem/completed",
+  "rawResponse/completed",
+  "command/exec/outputDelta",
+  "process/outputDelta",
+  "process/exited",
+  "item/commandExecution/terminalInteraction",
+  "item/fileChange/patchUpdated",
+  "item/mcpToolCall/progress",
+  "mcpServer/oauthLogin/completed",
+  "account/gatewayOAuth/changed",
+  "remoteControl/status/changed",
+  "externalAgentConfig/import/progress",
+  "externalAgentConfig/import/completed",
+  "fs/changed",
+  "modelProvider/authRecoveryStarted",
+  "modelProvider/authRecoveryCompleted",
+  "fuzzyFileSearch/sessionUpdated",
+  "fuzzyFileSearch/sessionCompleted",
+  "thread/realtime/started",
+  "thread/realtime/closed",
+  "thread/realtime/error",
+  "windows/worldWritableWarning",
+  "windowsSandbox/setupCompleted",
+  "account/login/completed",
+] as const;
 const codexStages = [
   "turn item start envelope",
   "turn item start projection",
@@ -28,6 +92,7 @@ const codexStages = [
   "turn item start unsupported mcp tool",
   "turn item start unsupported collaboration",
   "turn item start unsupported hook",
+  "turn item start unsupported web search",
   "turn item start unsupported other",
   "turn start state", "turn start envelope", "turn start notification shape", "turn start notification correlation",
   "turn start notification state", "turn start reply shape", "turn start reply correlation", "turn start reply state",
@@ -37,7 +102,9 @@ const codexStages = [
   "turn stream plan metadata", "turn stream thread name", "turn stream thread settings", "turn stream hook",
   "turn stream model metadata", "turn stream warning", "turn stream account metadata", "turn stream mcp metadata",
   "turn stream moderation metadata", "turn stream other frame",
-] as const;
+  ...CODEX_UNHANDLED_NOTIFICATIONS.map(method => `turn stream unhandled ${method}`),
+  ...CODEX_SERVER_REQUESTS.map(method => `turn stream request ${method}`),
+] as readonly string[];
 export type SessionDiagnostics = { scope: "currentAppSession"; claudeCheckpoints: string[]; codexCheckpoints?: string[] };
 
 export function validateSessionDiagnostics(input: unknown): SessionDiagnostics {

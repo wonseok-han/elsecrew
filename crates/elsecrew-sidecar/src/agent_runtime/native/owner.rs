@@ -20,14 +20,16 @@ impl NativeOwner {
             Self::Claude(owner) => owner.connection_id(),
         }
     }
-    pub(super) fn registration_identity(
+    /// `viewing`: an approval list or a look at one (see the owners).
+    pub(super) fn registration_identity_with(
         &self,
         storage: &Storage,
         projects: &ProjectManager,
+        viewing: bool,
     ) -> Result<RunIdentity, SidecarError> {
         match self {
-            Self::Codex(owner) => owner.registration_identity(storage, projects),
-            Self::Claude(owner) => owner.registration_identity(storage, projects),
+            Self::Codex(owner) => owner.registration_identity_with(storage, projects, viewing),
+            Self::Claude(owner) => owner.registration_identity_with(storage, projects, viewing),
         }
     }
     pub(super) fn request_cancel(&self, identity: &RunIdentity) -> Result<(), SidecarError> {

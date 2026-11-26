@@ -581,7 +581,7 @@ fn verify_frozen_relation(
         return Ok(());
     }
     let deleted:bool=connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM ledger_compaction_prefixes p JOIN ledger_baselines b ON b.baseline_id=p.baseline_id WHERE p.aggregate_type=?1 AND p.aggregate_id=?2 AND (p.deleted_through_sequence=?3 OR ((SELECT storage_schema_version FROM storage_schema_meta WHERE singleton=1) IN (9,10,11,12) AND p.deleted_through_sequence>=?3)) AND b.aggregate_type=p.aggregate_type AND b.aggregate_id=p.aggregate_id AND b.cutoff_aggregate_sequence=p.deleted_through_sequence AND b.projection_digest=p.baseline_projection_digest)",
+        "SELECT EXISTS(SELECT 1 FROM ledger_compaction_prefixes p JOIN ledger_baselines b ON b.baseline_id=p.baseline_id WHERE p.aggregate_type=?1 AND p.aggregate_id=?2 AND (p.deleted_through_sequence=?3 OR ((SELECT storage_schema_version FROM storage_schema_meta WHERE singleton=1) IN (9,10,11,12,13) AND p.deleted_through_sequence>=?3)) AND b.aggregate_type=p.aggregate_type AND b.aggregate_id=p.aggregate_id AND b.cutoff_aggregate_sequence=p.deleted_through_sequence AND b.projection_digest=p.baseline_projection_digest)",
         params![identity.aggregate_type,identity.aggregate_id,identity.aggregate_sequence],|r|r.get(0),
     ).map_err(|_|session_error())?;
     usage.work_units += 1;
@@ -919,7 +919,7 @@ enum SnapshotProgressMarker {
         i64,
         Option<(&'static str, canonical::ScanPosition, u64)>,
     ),
-    Messages(bool, bool, i64, Option<(i64, String, String, i64)>),
+    Messages(bool, bool, i64, Option<(i64, String, String, i64, bool)>),
     Workspaces(workspace::ProgressMarker),
     Catchup(catchup::ProgressMarker),
 }
@@ -975,6 +975,7 @@ impl SnapshotProgress {
                         outer.message.clone(),
                         outer.chat.clone(),
                         outer.candidate,
+                        outer.indexed_done,
                     )
                 }),
             ),
@@ -997,6 +998,9 @@ struct MessageOuter {
     message: String,
     chat: String,
     candidate: i64,
+    /// The indexed chat events were looked at in one lookup; what is left
+    /// is walking the chat events that have no source index row.
+    indexed_done: bool,
 }
 impl MessageScan {
     fn step(
@@ -1006,10 +1010,41 @@ impl MessageScan {
         usage: &mut ByteUsage,
     ) -> Result<Disposition, SidecarError> {
         if let Some(outer) = self.outer.as_mut() {
+            // The same set of chat events as walking them all one by one, in
+            // two parts: those with a source index row in one lookup (its
+            // introduced id is what the walk read for them), then only those
+            // without one, each read and verified as before. Every chat event
+            // is still read and verified by the outer forward pass. This keeps
+            // the check from growing with (introductions x chat events).
+            if !outer.indexed_done {
+                let found: bool = if self.backward {
+                    connection.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM event_source_index s JOIN events e ON e.rowid=s.event_rowid \
+                         WHERE s.introduced_message_id=?1 AND e.aggregate_type='chat' AND e.aggregate_id=?2)",
+                        params![outer.message, outer.chat], |r| r.get(0))
+                } else {
+                    connection.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM event_source_index s JOIN events e ON e.rowid=s.event_rowid \
+                         WHERE s.introduced_message_id=?1 AND s.event_rowid<>?2 AND e.aggregate_type='chat')",
+                        params![outer.message, outer.rowid], |r| r.get(0))
+                }.map_err(|_| session_error())?;
+                usage.work_units += 1;
+                outer.indexed_done = true;
+                if found {
+                    if !self.backward {
+                        return Err(session_error());
+                    }
+                    self.after = outer.rowid;
+                    self.outer = None;
+                }
+                return Ok(Disposition::Pending);
+            }
             let next:Option<i64>=if self.backward {
-                connection.query_row("SELECT rowid FROM events WHERE aggregate_type='chat' AND aggregate_id=?1 AND rowid>?2 ORDER BY rowid LIMIT 1",params![outer.chat,outer.candidate],|r|r.get(0))
+                connection.query_row("SELECT e.rowid FROM events e WHERE e.aggregate_type='chat' AND e.aggregate_id=?1 AND e.rowid>?2 \
+                    AND NOT EXISTS(SELECT 1 FROM event_source_index s WHERE s.event_rowid=e.rowid) ORDER BY e.rowid LIMIT 1",params![outer.chat,outer.candidate],|r|r.get(0))
             }else{
-                connection.query_row("SELECT rowid FROM events WHERE aggregate_type='chat' AND rowid>?1 ORDER BY rowid LIMIT 1",[outer.candidate],|r|r.get(0))
+                connection.query_row("SELECT e.rowid FROM events e WHERE e.aggregate_type='chat' AND e.rowid>?1 \
+                    AND NOT EXISTS(SELECT 1 FROM event_source_index s WHERE s.event_rowid=e.rowid) ORDER BY e.rowid LIMIT 1",[outer.candidate],|r|r.get(0))
             }.optional().map_err(|_|session_error())?;
             usage.work_units += 1;
             let Some(next) = next else {
@@ -1024,19 +1059,9 @@ impl MessageScan {
             if !self.backward && next == outer.rowid {
                 return Ok(Disposition::Pending);
             }
-            let indexed:Option<bool>=connection.query_row("SELECT introduced_message_id IS ?2 FROM event_source_index WHERE event_rowid=?1",params![next,outer.message],|r|r.get(0)).optional().map_err(|_|session_error())?;
-            usage.work_units += 1;
-            let matches = match indexed {
-                Some(matches) => matches,
-                None => {
-                    let identity =
-                        SourceIdentity::load(connection, RawColumn::EventPayload, next, usage)?;
-                    let (_, introduced) =
-                        verify_live_relation(connection, &identity, cutoff, false, usage)?;
-                    introduced.as_deref() == Some(outer.message.as_str())
-                }
-            };
-            if matches {
+            let identity = SourceIdentity::load(connection, RawColumn::EventPayload, next, usage)?;
+            let (_, introduced) = verify_live_relation(connection, &identity, cutoff, false, usage)?;
+            if introduced.as_deref() == Some(outer.message.as_str()) {
                 if !self.backward {
                     return Err(session_error());
                 }
@@ -1080,6 +1105,7 @@ impl MessageScan {
                         message,
                         chat: String::new(),
                         candidate: 0,
+                        indexed_done: false,
                     });
                 }
                 None => self.after = rowid,
@@ -1125,6 +1151,7 @@ impl MessageScan {
             message,
             chat,
             candidate: 0,
+            indexed_done: false,
         });
         Ok(Disposition::Pending)
     }
@@ -1236,7 +1263,7 @@ fn verify_prefix_row(
          AND NOT EXISTS(SELECT 1 FROM events e WHERE e.rowid=s.source_event_rowid) AND NOT EXISTS(SELECT 1 FROM event_source_index i WHERE i.event_rowid=s.source_event_rowid) \
          AND b.aggregate_type=p.aggregate_type AND b.aggregate_id=p.aggregate_id AND b.cutoff_aggregate_sequence=p.deleted_through_sequence AND b.projection_digest=p.baseline_projection_digest \
          AND a.source_event_rowid=p.anchor_event_rowid AND a.source_event_id=p.anchor_event_id AND a.operation_id=p.anchor_operation_id AND a.aggregate_sequence=p.anchor_aggregate_sequence \
-         AND ((SELECT storage_schema_version FROM storage_schema_meta WHERE singleton=1) IN (9,10,11,12) OR p.deleted_through_sequence=1 OR EXISTS(SELECT 1 FROM ledger_compaction_prefixes prev WHERE prev.aggregate_type=p.aggregate_type AND prev.aggregate_id=p.aggregate_id AND prev.deleted_through_sequence=p.deleted_through_sequence-1 AND prev.anchor_event_rowid=s.source_event_rowid AND prev.anchor_event_id=s.source_event_id AND prev.anchor_operation_id=s.operation_id AND prev.anchor_aggregate_sequence=s.aggregate_sequence)) \
+         AND ((SELECT storage_schema_version FROM storage_schema_meta WHERE singleton=1) IN (9,10,11,12,13) OR p.deleted_through_sequence=1 OR EXISTS(SELECT 1 FROM ledger_compaction_prefixes prev WHERE prev.aggregate_type=p.aggregate_type AND prev.aggregate_id=p.aggregate_id AND prev.deleted_through_sequence=p.deleted_through_sequence-1 AND prev.anchor_event_rowid=s.source_event_rowid AND prev.anchor_event_id=s.source_event_id AND prev.anchor_operation_id=s.operation_id AND prev.anchor_aggregate_sequence=s.aggregate_sequence)) \
          AND ((EXISTS(SELECT 1 FROM ledger_compaction_prefixes newer WHERE newer.aggregate_type=p.aggregate_type AND newer.aggregate_id=p.aggregate_id AND newer.deleted_through_sequence>p.deleted_through_sequence) \
               AND NOT EXISTS(SELECT 1 FROM events e WHERE e.rowid=a.source_event_rowid) AND NOT EXISTS(SELECT 1 FROM event_source_index i WHERE i.event_rowid=a.source_event_rowid)) \
            OR (NOT EXISTS(SELECT 1 FROM ledger_compaction_prefixes newer WHERE newer.aggregate_type=p.aggregate_type AND newer.aggregate_id=p.aggregate_id AND newer.deleted_through_sequence>p.deleted_through_sequence) \
@@ -1445,6 +1472,31 @@ pub(crate) struct ReopenMaintenanceSession<'connection> {
     force_no_progress_once: bool,
 }
 
+/// A materialization batch is armed (`attempting`) in its own commit, and
+/// every writer then stores its rows together with the return to `pending` in
+/// one transaction (a cancelled or failed batch rolls back before it touches
+/// the marker). A marker still `attempting` when a new engine is admitted, on
+/// its exclusive connection, therefore names a batch that never committed: the
+/// engine stopped between the arm and the batch. Return it to `pending`, as an
+/// in-session cancellation does after its rollback, instead of refusing the
+/// database for good. A `failed` job stays refused. The release commits with
+/// the session start even if a later admission step refuses the database: the
+/// marker it removes was already false. `Storage::open` (legacy and old-schema
+/// migrations) keeps refusing an `attempting` job.
+fn release_interrupted_attempt(
+    tx: &Transaction<'_>,
+    materialization: &str,
+) -> Result<(), SidecarError> {
+    verify_v6_materialization_snapshot(tx, materialization, false)?;
+    tx.execute(
+        "UPDATE lifetime_materialization_job SET state='pending',updated_at=?1 \
+         WHERE singleton=1 AND state='attempting';",
+        [Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)],
+    )
+    .map_err(|_| session_error())?;
+    Ok(())
+}
+
 #[derive(Clone, Copy)]
 enum ReopenStartContext {
     Legacy,
@@ -1497,11 +1549,14 @@ impl<'connection> ReopenMaintenanceSession<'connection> {
                 match storage_schema_version(&tx)? {
                     Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9) => verify_schema_v9(&tx)?,
                     Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10) => verify_schema_v10(&tx)?,
-                    Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12) => agent_output::schema::verify(&tx)?,
+                    Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13) => agent_output::schema::verify(&tx)?,
                     _ => return Err(session_error()),
                 }
             }
         };
+        if !matches!(context, ReopenStartContext::Legacy) {
+            release_interrupted_attempt(&tx, &materialization)?;
+        }
         verify_v6_materialization_snapshot(&tx, &materialization, true)?;
         closure::reject_hidden_rowids(&tx)?;
         projection::reject_hidden_rowids(&tx)?;
@@ -1719,7 +1774,8 @@ impl<'connection> ReopenMaintenanceSession<'connection> {
                 tx.rollback().map_err(|_| session_error())?;
                 if was_armed {
                     // We confirmed rollback of our own attempt before clearing
-                    // its marker. An error/unknown COMMIT never takes this path.
+                    // its marker. An error/unknown COMMIT never takes this path here; a
+                    // later admission releases it (`release_interrupted_attempt`).
                     let SnapshotProgress::Catchup(catchup) = &progress else {
                         return Err(session_error());
                     };

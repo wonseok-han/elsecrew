@@ -44,10 +44,10 @@ async function probeCleanupConsent() {
     await wait(() => button(recovery, '정리 대상 다시 확인'));
     for (const [action, section, inspect, confirm] of [
       ['cleanupBackup', '백업 파일 정리', '정리 대상 다시 확인', '확인한 백업 파일 정리'],
-      ['retireApplication', '현재 복구점 종료 내용 확인', '현재 복구점 종료 내용 확인', '복구점 종료하고 이력에 보존'],
+      ['retireApplication', '지금 되돌리기 기준 정리 내용 확인', '지금 되돌리기 기준 정리 내용 확인', '되돌리기 기준 정리하고 기록 남기기'],
     ]) {
       if (action === 'retireApplication') {
-        button(recovery, '반영·복원 기록 확인').click();
+        button(recovery, '다시 확인').click();
         await wait(() => button(recovery, inspect));
       }
       const scope = recovery.querySelector('section[aria-label="' + section + '"]');

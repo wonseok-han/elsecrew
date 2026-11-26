@@ -39,6 +39,15 @@ fn runtime_error_survives_a_concurrent_completed_response() {
     assert!(sidecar.deferred_runtime_error.is_none());
 }
 
+
+/// Native discovery is gated on the user's explicit app connection
+/// (`providerDisconnected` otherwise); these tests exercise later rejections.
+fn connect_test_providers(session: &mut SidecarSession) {
+    let AdmissionState::Ready { sidecar, .. } = &mut session.admission else { panic!("admission not ready") };
+    sidecar.projects.set_provider_connection("codex", true).unwrap();
+    sidecar.projects.set_provider_connection("claude-code", true).unwrap();
+}
+
 #[test]
 fn discovery_admission_rejection_keeps_session_available() {
     let (_root, path) = database();
@@ -46,6 +55,7 @@ fn discovery_admission_rejection_keeps_session_available() {
     let mut session = SidecarSession::new(instance.into(), agent_runtime::AgentRuntime::native_candidate());
     session.start_admission(&path);
     wait_until_admitted(&mut session);
+    connect_test_providers(&mut session);
     for (method, runtime) in [
         ("agent.getModelChoices", "codex"),
         ("agent.getCapabilities", "codex"),
@@ -120,6 +130,9 @@ fn discovery_rejection_stdio_returns_error_then_status_and_clean_quit() {
         assert!(Instant::now() < admission_deadline, "storage admission did not finish: {:?}", status.result);
         thread::sleep(Duration::from_millis(10));
     }
+    send("connect", "project.catalog", json!({"action":"setProviderConnection","runtime":"codex","connected":true}));
+    let EnvelopeV1::Response(connected) = next() else { panic!("connection response") };
+    assert!(connected.ok, "{connected:?}");
     send("reject", "agent.getModelChoices", json!({"runtime":"codex","refresh":true,"chatId":"chat_missing","roleId":"coding"}));
     let EnvelopeV1::Response(rejected) = next() else { panic!("rejection response") };
     assert_eq!(rejected.request_id, "reject");
@@ -178,6 +191,7 @@ fn native_session_negotiates_adapter_without_granting_unscoped_execution() {
     session.start_admission(&path);
     wait_until_admitted(&mut session);
     assert!(matches!(session.admission, AdmissionState::Ready { .. }));
+    connect_test_providers(&mut session);
     for runtime in ["codex", "claude-code"] {
         let response = session.handle_request(request_value(instance, runtime, "agent.getCapabilities", json!({"runtime":runtime,"refresh":true}))).unwrap().response.unwrap();
         assert!(response.ok, "{response:?}");
@@ -322,8 +336,15 @@ fn approval_errors_are_request_scoped_and_do_not_stop_the_session() {
     sidecar.start_admission(&path);
     wait_until_admitted(&mut sidecar);
     let identity = json!({"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_01"});
+    // A run that is not (or no longer) live has nothing waiting: not an error.
+    let listed = sidecar
+        .handle_request(request_value(instance, "approval_request", "run.approval", json!({"action":"list","identity":identity})))
+        .unwrap()
+        .response
+        .unwrap();
+    assert!(listed.ok);
+    assert_eq!(listed.result.unwrap()["pending"], json!([]));
     for params in [
-        json!({"action":"list","identity":identity}),
         json!({"action":"accept","identity":identity}),
         json!({"action":"decline","identity":identity,"approvalId":"../x"}),
         json!({"action":"list","identity":identity,"force":true}),
@@ -388,6 +409,9 @@ fn g5d_shell_ready_precedes_storage_and_verifying_blocks_before_params_or_side_e
 
     let ready = sidecar.ready_event().expect("shell ready");
     let mut baseline = ready.payload.clone();
+    for preview in ["preview.readAsset", "preview.resolve"] {
+        assert_eq!(baseline["capabilities"].as_array_mut().unwrap().pop(), Some(json!(preview)));
+    }
     assert_eq!(
         baseline["capabilities"].as_array_mut().unwrap().pop(),
         Some(json!("provider.install"))
@@ -1068,6 +1092,16 @@ fn cli_rejects_missing_or_extra_arguments_before_touching_stdio() {
             OsString::from("database.sqlite3"),
         ],
         vec![OsString::from("sidecar"), OsString::from("--other")],
+        // A clean shutdown's seal: exactly `--storage-seal <hash>.<context>`.
+        vec![OsString::from("sidecar"), OsString::from("--stdio"), OsString::from("--storage-seal")],
+        vec![OsString::from("sidecar"), OsString::from("--stdio"), OsString::from("--storage-seal"), OsString::from("not-a-seal")],
+        vec![
+            OsString::from("sidecar"),
+            OsString::from("--stdio"),
+            OsString::from("--storage-seal"),
+            OsString::from(format!("{}.0.1.0+s13", "a".repeat(64))),
+            OsString::from("extra"),
+        ],
     ] {
         let error = run_cli(args).expect_err("invalid argv");
         assert_eq!(error.kind(), "invalidArguments");
@@ -1106,6 +1140,7 @@ fn review_discard_dispatcher_rejects_deferred_native_start_and_cancel() {
                     reservation: None,
                     process: None,
                     result: None,
+                    rediscoveries: 0,
                 },
             );
         } else {
@@ -1175,4 +1210,32 @@ fn explicit_provider_connections_persist_and_gate_native_work_without_auth_chang
     let reopened=Sidecar::initialize(path,ready,agent_runtime::AgentRuntime::native_candidate(),&AtomicBool::new(false)).unwrap();
     assert_eq!(reopened.projects.provider_connections().unwrap()["codex"],false);
     assert_eq!(reopened.projects.provider_connections().unwrap()["claude-code"],true);
+}
+
+#[test]
+fn one_failed_request_is_answered_and_never_ends_the_engine() {
+    let request = request_value("sidecar_failed_request", "req_failed", "recovery.resolveAgent", json!({}));
+    for (kind, code, category) in [
+        ("invalidParams", "invalidParams", "invalidRequest"),
+        ("providerDisconnected", "providerDisconnected", "requestBlocked"),
+        ("operationConflict", "operationConflict", "requestBlocked"),
+        ("providerLoginFailed", "providerLoginFailed", "requestBlocked"),
+    ] {
+        let handled = answer_failed_request(&request, Err(SidecarError::new(kind, "detail"))).expect("answered, not ended");
+        let response = handled.response.expect("answered");
+        assert!(!response.ok, "{kind}");
+        let error = response.error.expect("error");
+        assert_eq!((error.code.as_str(), error.kind.as_str()), (code, category), "{kind}");
+        assert_eq!(response.request_id, "req_failed");
+    }
+    let ok = HandledRequest::response(success_response(&request, json!({"fine":true})));
+    assert!(answer_failed_request(&request, Ok(ok)).unwrap().response.unwrap().ok);
+    // A failure without detail still gets one: the app treats an empty detail as a broken protocol.
+    let empty = answer_failed_request(&request, Err(SidecarError::new("operationConflict", ""))).unwrap();
+    assert_eq!(empty.response.unwrap().error.unwrap().detail, "operationConflict");
+    // Failures that mean stored state can no longer be trusted still end the engine.
+    // So does any kind not known to stay within the request.
+    for kind in ["projectionInvalid", "databaseFailure", "agentRuntimeFailure", "storageMaintenancePoisoned", "integrityFailed", "injectedFailure", "jsonFailure", "somethingNew"] {
+        assert_eq!(answer_failed_request(&request, Err(SidecarError::new(kind, "x"))).err().map(|error| error.kind().to_owned()), Some(kind.to_owned()));
+    }
 }

@@ -26,6 +26,19 @@ pub enum Observed {
     Approval(Box<PendingApproval>),
     /// No public content; not an authorization to ignore a tool/request/policy event.
     RequiresHandling,
+    /// A provider request this client cannot take part in (an approval shape
+    /// it does not understand, a question, an elicitation). The run goes on:
+    /// the owner sends this refusal as the answer, so nothing waits forever
+    /// and nothing is granted.
+    Refused(RefusalReply),
+}
+
+/// One prepared refusal for a request the client does not support: a
+/// decline for an approval request, an error for anything else.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefusalReply(String);
+impl RefusalReply {
+    pub fn as_str(&self) -> &str { &self.0 }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,10 +56,164 @@ pub enum ToolPhase {
     Declined,
 }
 
+
+const SERVER_REQUESTS: &[&str] = &[
+    "turn stream request item/commandExecution/requestApproval",
+    "turn stream request item/fileChange/requestApproval",
+    "turn stream request item/tool/requestUserInput",
+    "turn stream request mcpServer/elicitation/request",
+    "turn stream request item/permissions/requestApproval",
+    "turn stream request item/tool/call",
+    "turn stream request account/chatgptAuthTokens/refresh",
+    "turn stream request attestation/generate",
+    "turn stream request currentTime/read",
+    "turn stream request applyPatchApproval",
+    "turn stream request execCommandApproval",
+];
+
+const UNHANDLED_NOTIFICATIONS: &[&str] = &[
+    "turn stream unhandled thread/started",
+    "turn stream unhandled thread/readState/changed",
+    "turn stream unhandled thread/archived",
+    "turn stream unhandled thread/deleted",
+    "turn stream unhandled thread/unarchived",
+    "turn stream unhandled thread/closed",
+    "turn stream unhandled thread/reverted",
+    "turn stream unhandled skills/changed",
+    "turn stream unhandled thread/section/changed",
+    "turn stream unhandled thread/attachment/updated",
+    "turn stream unhandled thread/goal/updated",
+    "turn stream unhandled thread/prediction/updated",
+    "turn stream unhandled thread/goal/cleared",
+    "turn stream unhandled thread/queue/changed",
+    "turn stream unhandled project/changed",
+    "turn stream unhandled thread/project/updated",
+    "turn stream unhandled thread/environment/connected",
+    "turn stream unhandled thread/environment/disconnected",
+    "turn stream unhandled item/autoApprovalReview/started",
+    "turn stream unhandled item/autoApprovalReview/completed",
+    "turn stream unhandled autoApprovalReview/strictReviewRequired",
+    "turn stream unhandled rawResponseItem/completed",
+    "turn stream unhandled rawResponse/completed",
+    "turn stream unhandled command/exec/outputDelta",
+    "turn stream unhandled process/outputDelta",
+    "turn stream unhandled process/exited",
+    "turn stream unhandled item/commandExecution/terminalInteraction",
+    "turn stream unhandled item/fileChange/patchUpdated",
+    "turn stream unhandled item/mcpToolCall/progress",
+    "turn stream unhandled mcpServer/oauthLogin/completed",
+    "turn stream unhandled account/gatewayOAuth/changed",
+    "turn stream unhandled remoteControl/status/changed",
+    "turn stream unhandled externalAgentConfig/import/progress",
+    "turn stream unhandled externalAgentConfig/import/completed",
+    "turn stream unhandled fs/changed",
+    "turn stream unhandled modelProvider/authRecoveryStarted",
+    "turn stream unhandled modelProvider/authRecoveryCompleted",
+    "turn stream unhandled fuzzyFileSearch/sessionUpdated",
+    "turn stream unhandled fuzzyFileSearch/sessionCompleted",
+    "turn stream unhandled thread/realtime/started",
+    "turn stream unhandled thread/realtime/closed",
+    "turn stream unhandled thread/realtime/error",
+    "turn stream unhandled windows/worldWritableWarning",
+    "turn stream unhandled windowsSandbox/setupCompleted",
+    "turn stream unhandled account/login/completed",
+];
+
 pub struct ToolEvent {
     pub item_id: String,
     pub kind: ToolKind,
     pub phase: ToolPhase,
+    /// The command line Codex reported when a command started (validated:
+    /// bounded, no NUL). Shown in the work history; never authority.
+    pub command: Option<String>,
+    /// What the work history shows about the tool use (where it ran, how it
+    /// ended, which files changed). Read leniently and bounded: a missing or
+    /// odd field only leaves the detail out, never fails the turn.
+    pub detail: ToolDetail,
+}
+
+/// Display-only facts about one command or file change; never authority.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ToolDetail {
+    pub cwd: Option<String>,
+    /// Codex's own reading of the command: (kind, path, query) for read,
+    /// listFiles and search. Empty when it is unknown or several things.
+    pub actions: Vec<CommandAction>,
+    pub exit_code: Option<i64>,
+    pub duration_ms: Option<u64>,
+    pub changes: Vec<FileChange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandAction {
+    pub kind: String,
+    pub path: Option<String>,
+    pub query: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileChange {
+    pub path: String,
+    /// add, delete or update.
+    pub kind: String,
+    /// Added and removed lines; None when the notification did not carry the
+    /// diff (an oversized one may drop it rather than give a wrong count).
+    pub lines: Option<(u64, u64)>,
+}
+
+const DETAIL_TEXT_MAX: usize = 4 * 1024;
+const DETAIL_ITEMS_MAX: usize = 64;
+
+fn detail_text(value: Option<&serde_json::Value>) -> Option<String> {
+    let text = value?.as_str()?;
+    (!text.is_empty() && text.len() <= DETAIL_TEXT_MAX && !text.contains('\0')).then(|| text.to_string())
+}
+
+
+/// Added and removed lines of one patch. An added file's diff is its
+/// content, a deleted file's is what it held, an update is a unified diff.
+pub(crate) fn diff_counts(kind: &str, diff: &str) -> (u64, u64) {
+    let unified = diff.starts_with("@@") || diff.starts_with("---") || diff.starts_with("diff ");
+    let lines = diff.lines().count() as u64;
+    match kind {
+        "add" if !unified => (lines, 0),
+        "delete" if !unified => (0, lines),
+        // Inside a hunk every `+`/`-` line counts, `+++`/`---` content too;
+        // only the file headers before a hunk are skipped (review PR #11 M2).
+        _ => {
+            let (mut added, mut removed, mut in_hunk) = (0, 0, !unified);
+            for line in diff.lines() {
+                if line.starts_with("diff ") { in_hunk = false; continue; }
+                if line.starts_with("@@") { in_hunk = true; continue; }
+                if !in_hunk { continue; }
+                if line.starts_with('+') { added += 1; } else if line.starts_with('-') { removed += 1; }
+            }
+            (added, removed)
+        }
+    }
+}
+
+fn tool_detail(raw: &str) -> ToolDetail {
+    let Ok(item) = serde_json::from_str::<serde_json::Value>(raw) else { return ToolDetail::default() };
+    let actions = item.get("commandActions").and_then(|v| v.as_array()).map(|actions| actions.iter().take(DETAIL_ITEMS_MAX)
+        .filter_map(|action| Some(CommandAction {
+            kind: detail_text(action.get("type"))?,
+            path: detail_text(action.get("path")),
+            query: detail_text(action.get("query")),
+        })).collect()).unwrap_or_default();
+    let changes = item.get("changes").and_then(|v| v.as_array()).map(|changes| changes.iter().take(DETAIL_ITEMS_MAX)
+        .filter_map(|change| {
+            let kind = detail_text(change.get("kind").and_then(|kind| kind.get("type")))?;
+            let lines = change.get("diff").and_then(|v| v.as_str()).map(|diff| diff_counts(&kind, diff));
+            Some(FileChange { path: detail_text(change.get("path"))?, kind, lines })
+        }).collect()).unwrap_or_default();
+    ToolDetail {
+        cwd: detail_text(item.get("cwd")),
+        actions,
+        exit_code: item.get("exitCode").and_then(|v| v.as_i64()),
+        duration_ms: item.get("durationMs").and_then(|v| v.as_u64()),
+        changes,
+    }
 }
 
 fn tool_kind(kind: &str) -> Option<ToolKind> {
@@ -86,9 +253,13 @@ pub struct TurnStream {
     failed: bool,
     approvals: BTreeMap<RequestId, Option<String>>,
     prepared_replies: BTreeSet<RequestId>,
+    /// Requests answered with a refusal; the provider may still report them resolved.
+    refused: BTreeSet<RequestId>,
     diagnostic_stage: &'static str,
     retained_item_bytes: usize,
     budget: crate::provider::ProviderEventBudget,
+    /// The thread started with `untrusted` (see `PendingApproval::parse_in_thread`).
+    untrusted: bool,
 }
 
 #[derive(Deserialize)]
@@ -127,10 +298,18 @@ impl TurnStream {
             failed: false,
             approvals: BTreeMap::new(),
             prepared_replies: BTreeSet::new(),
+            refused: BTreeSet::new(),
             diagnostic_stage: "turn stream state",
             retained_item_bytes: 0,
             budget,
+            untrusted: false,
         })
+    }
+
+    /// The thread started with Codex's `untrusted` policy. Set before observing.
+    pub fn with_untrusted_thread(mut self, untrusted: bool) -> Self {
+        self.untrusted = untrusted;
+        self
     }
 
     pub fn observe(&mut self, input: &BoundedObservation) -> Result<Observed, ProviderError> {
@@ -161,7 +340,13 @@ impl TurnStream {
             Some("account/updated" | "account/rateLimits/updated") => "turn stream account metadata",
             Some("mcpServer/startupStatus/updated" | "mcpServer/event/stream/notification") => "turn stream mcp metadata",
             Some("turn/moderationMetadata") => "turn stream moderation metadata",
-            _ => "turn stream other frame",
+            // Provider requests, and notifications the provider defines but
+            // this stream does not accept: the record names which one, from
+            // these fixed lists only.
+            Some(method) => SERVER_REQUESTS.iter().chain(UNHANDLED_NOTIFICATIONS).copied()
+                .find(|stage| stage.rsplit(' ').next() == Some(method))
+                .unwrap_or("turn stream other frame"),
+            None => "turn stream other frame",
         };
         let result = self.observe_inner(input);
         if result.is_err() {
@@ -171,6 +356,15 @@ impl TurnStream {
     }
 
     pub fn diagnostic_stage(&self) -> &'static str { self.diagnostic_stage }
+
+    /// Every diagnostic stage naming a provider notification this stream does
+    /// not accept (Codex 0.169 app-server vocabulary). Mirrored in
+    /// `src/m5/contracts/session-diagnostics-v1.ts`.
+    pub fn unhandled_notification_stages() -> &'static [&'static str] { UNHANDLED_NOTIFICATIONS }
+
+    /// Every diagnostic stage naming a request the provider can send (Codex
+    /// 0.169 app-server vocabulary), supported or not.
+    pub fn server_request_stages() -> &'static [&'static str] { SERVER_REQUESTS }
 
     /// EOF without a terminal event is never success. Even successful return says
     /// only what the vendor reported; process-tree cleanup remains mandatory.
@@ -187,17 +381,73 @@ impl TurnStream {
         &mut self,
         input: &BoundedObservation,
     ) -> Result<PendingApproval, ProviderError> {
+        let result = self.charge_request(input).and_then(|()| self.pending_approval_inner(input));
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+
+    /// Refuses a well-formed request this client does not support. A broken
+    /// envelope, a duplicate id or a request outside a started turn still fails.
+    fn refuse_request(&mut self, input: &BoundedObservation) -> Result<Observed, ProviderError> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Request {
+            id: RequestId,
+            method: String,
+            #[allow(dead_code)]
+            params: Option<Box<RawValue>>,
+        }
+        let request: Request = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
+        let valid_id = match &request.id {
+            RequestId::Number(value) => *value <= 9_007_199_254_740_991,
+            RequestId::Text(value) => identifier(value),
+        };
+        if !self.started
+            || self.outcome.is_some()
+            || !valid_id
+            || request.method.len() > 256
+            || self.approvals.contains_key(&request.id)
+            || !self.refused.insert(request.id.clone())
+        {
+            return Err(invalid());
+        }
+        let id = match &request.id {
+            RequestId::Number(value) => serde_json::json!(value),
+            RequestId::Text(value) => serde_json::json!(value),
+        };
+        let body = if matches!(request.method.as_str(),
+            "item/commandExecution/requestApproval" | "item/fileChange/requestApproval") {
+            serde_json::json!({"id":id,"result":{"decision":"decline"}})
+        } else {
+            serde_json::json!({"id":id,"error":{"code":-32601,"message":"not supported by this client"}})
+        };
+        Ok(Observed::Refused(RefusalReply(format!("{body}\n"))))
+    }
+
+    /// A request is charged once to the turn budget before it is read; an
+    /// exhausted budget fails the stream whether or not the request is supported.
+    fn charge_request(&mut self, input: &BoundedObservation) -> Result<(), ProviderError> {
+        if self.failed || self.outcome.is_some() || !self.started {
+            return Err(invalid());
+        }
+        self.projection.charge(input)
+    }
+
+    fn pending_approval_inner(
+        &mut self,
+        input: &BoundedObservation,
+    ) -> Result<PendingApproval, ProviderError> {
         let result = (|| {
-            if self.failed || self.outcome.is_some() || !self.started {
-                return Err(invalid());
-            }
-            self.projection.charge(input)?;
-            let mut request = PendingApproval::parse(
+            let mut request = PendingApproval::parse_in_thread(
                 input,
                 &self.projection.thread_id,
                 &self.projection.turn_id,
+                self.untrusted,
             )?;
-            if self.approvals.contains_key(&request.request_id) {
+            // One answer per request id: a refused id never comes back as an approval.
+            if self.approvals.contains_key(&request.request_id) || self.refused.contains(&request.request_id) {
                 return Err(invalid());
             }
             let item = self.items.get(&request.item_id).ok_or_else(invalid)?;
@@ -223,9 +473,6 @@ impl TurnStream {
                 .insert(request.request_id.clone(), Some(request.item_id.clone()));
             Ok(request)
         })();
-        if result.is_err() {
-            self.failed = true;
-        }
         result
     }
 
@@ -298,10 +545,13 @@ impl TurnStream {
         let envelope: Envelope = decode(std::str::from_utf8(&input.bytes).map_err(|_| invalid())?)?;
         if envelope.id.is_some() {
             // Server requests use their own parser and charge the same turn budget.
-            return self
-                .pending_approval(input)
-                .map(Box::new)
-                .map(Observed::Approval);
+            // A request this client cannot take part in is refused, not fatal
+            // (user decision 2026-11-18: unknown provider activity must not stop work).
+            self.charge_request(input)?;
+            return match self.pending_approval_inner(input) {
+                Ok(request) => Ok(Observed::Approval(Box::new(request))),
+                Err(_) => self.refuse_request(input),
+            };
         }
         // Charge all notifications, including non-public ones, exactly once.
         if item_start { self.diagnostic_stage = "turn item start projection"; }
@@ -326,6 +576,9 @@ impl TurnStream {
             let resolved: Resolved = decode(frame.params.get())?;
             if !self.started || resolved.thread_id != self.projection.thread_id {
                 return Err(invalid());
+            }
+            if self.refused.contains(&resolved.request_id) {
+                return Ok(Observed::Private);
             }
             let pending = self
                 .approvals
@@ -422,6 +675,8 @@ impl TurnStream {
                         item_id: item.id.clone(),
                         kind,
                         phase: tool_phase(wire.item.get(), frame.method == "item/started")?,
+                        command: None,
+                        detail: tool_detail(wire.item.get()),
                     })
                 })
                 .transpose()?;
@@ -476,9 +731,11 @@ impl TurnStream {
                     "mcpToolCall" => "turn item start unsupported mcp tool",
                     "collabAgentToolCall" | "collabToolCall" | "subAgentActivity" => "turn item start unsupported collaboration",
                     "hookPrompt" => "turn item start unsupported hook",
+                    "webSearch" => "turn item start unsupported web search",
                     _ if !public && !private && tool.is_none() => "turn item start unsupported other",
                     _ => "turn stream item started",
                 };
+                let tool = tool.map(|tool| ToolEvent { command: command.as_ref().map(|(command, _)| command.clone()), ..tool });
                 self.items.insert(
                     item.id,
                     ItemState {
@@ -487,14 +744,15 @@ impl TurnStream {
                         command,
                     },
                 );
+                // Item kinds this client does not show (web search, image view,
+                // compaction, ...) are tracked to completion and otherwise ignored
+                // (user decision 2026-11-18); the diagnostic stage still names them.
                 return Ok(if public {
                     Observed::ItemStarted
-                } else if private {
-                    Observed::Private
                 } else if let Some(tool) = tool {
                     Observed::Tool(tool)
                 } else {
-                    Observed::RequiresHandling
+                    Observed::Private
                 });
             }
             if self
@@ -520,11 +778,12 @@ impl TurnStream {
                 }
             }
             existing.completed = true;
+            // The work history's closing row names the command again.
+            let command = existing.command.as_ref().map(|(command, _)| command.clone());
             return Ok(match projected {
                 Projection::Completed { .. } => Observed::Public(projected),
-                _ if private => Observed::Private,
-                _ if tool.is_some() => Observed::Tool(tool.unwrap()),
-                _ => Observed::RequiresHandling,
+                _ if tool.is_some() => Observed::Tool(ToolEvent { command, ..tool.unwrap() }),
+                _ => Observed::Private,
             });
         }
         let expected_kind = match frame.method.as_str() {
@@ -535,7 +794,11 @@ impl TurnStream {
             | "item/reasoning/summaryPartAdded" => "reasoning",
             "item/commandExecution/outputDelta" => "commandExecution",
             "item/fileChange/outputDelta" => "fileChange",
-            _ => return Ok(Observed::RequiresHandling),
+            // A turn lifecycle notification this client does not know could be
+            // how the turn ends; ignoring it could wait forever, so it fails.
+            method if method.starts_with("turn/") => return Err(invalid()),
+            // Other notifications this client does not use are ignored, never fatal.
+            _ => return Ok(Observed::Private),
         };
         self.check_scope(frame.params.get())?;
         let reference: ItemReference = decode(frame.params.get())?;
@@ -554,6 +817,8 @@ impl TurnStream {
                 item_id: reference.item_id,
                 kind,
                 phase: ToolPhase::Output,
+                command: None,
+                detail: ToolDetail::default(),
             }));
         }
         Ok(match projected {
@@ -593,6 +858,42 @@ mod tests {
             method,
             json!({"threadId":"t","turnId":"r","item":{"id":"i","type":kind,"text":"public","command":"echo test","cwd":"/snapshot","status":if method == "item/started" {"inProgress"} else {"completed"}}}),
         )
+    }
+    #[test]
+    fn tool_details_are_read_leniently_and_bounded() {
+        let detail = tool_detail(&json!({"id":"i","type":"commandExecution","command":"x","cwd":"/w","status":"completed",
+            "commandActions":[{"type":"read","command":"cat a","name":"a","path":"/w/a"}],"exitCode":2,"durationMs":40,
+            "aggregatedOutput":(0..100).map(|n| n.to_string()).collect::<Vec<_>>().join("\n")}).to_string());
+        assert_eq!(detail.cwd.as_deref(), Some("/w"));
+        assert_eq!(detail.actions, vec![CommandAction { kind: "read".into(), path: Some("/w/a".into()), query: None }]);
+        assert_eq!((detail.exit_code, detail.duration_ms), (Some(2), Some(40)));
+        // What a command printed is never kept (review PR #11 B3).
+        assert!(!format!("{detail:?}").contains("99"));
+        let change = tool_detail(&json!({"id":"i","type":"fileChange","status":"completed","changes":[
+            {"path":"/w/a.ts","kind":{"type":"update","move_path":null},"diff":"@@ -1,2 +1,3 @@\n a\n-b\n+c\n+d"},
+            {"path":"/w/new.md","kind":{"type":"add"},"diff":"one\ntwo"},
+            {"path":"/w/old.md","kind":{"type":"delete"},"diff":"x"},
+            {"path":42,"kind":{"type":"add"},"diff":""}
+        ]}).to_string());
+        assert_eq!(change.changes.iter().map(|c| (c.path.as_str(), c.kind.as_str(), c.lines)).collect::<Vec<_>>(),
+            vec![("/w/a.ts", "update", Some((2, 1))), ("/w/new.md", "add", Some((2, 0))), ("/w/old.md", "delete", Some((0, 1)))]);
+        // A change without its diff has no count, not a zero one (PR #17 review M1).
+        let unknown = tool_detail(&json!({"id":"i","type":"fileChange","changes":[{"path":"/w/a.ts","kind":{"type":"update"}}]}).to_string());
+        assert_eq!(unknown.changes[0].lines, None);
+        // Content lines that start with `++`/`--` inside a hunk still count (M2).
+        assert_eq!(diff_counts("update", "--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n---removed\n+++added\n ctx"), (1, 1));
+        assert_eq!(diff_counts("update", "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\ndiff --git a/y b/y\n--- a/y\n+++ b/y\n@@ -0,0 +1 @@\n+c"), (2, 1));
+        assert_eq!(tool_detail("not json"), ToolDetail::default());
+        assert_eq!(tool_detail(&json!({"cwd":42,"exitCode":"0","changes":"x"}).to_string()), ToolDetail::default());
+    }
+    #[test]
+    fn completed_commands_name_the_command_again() {
+        let mut stream = started();
+        stream.observe(&item("item/started", "commandExecution")).unwrap();
+        match stream.observe(&item("item/completed", "commandExecution")).unwrap() {
+            Observed::Tool(tool) => assert_eq!(tool.command.as_deref(), Some("echo test")),
+            _ => panic!("expected a tool event"),
+        }
     }
     fn delta() -> BoundedObservation {
         frame(
@@ -646,7 +947,7 @@ mod tests {
         assert!(stream.finish().is_err());
         let mut stream = started();
         assert!(matches!(stream.observe(&frame("account/rateLimits/updated", body.clone())).unwrap(), Observed::Private));
-        assert!(matches!(stream.observe(&frame("account/updated", json!({"authMode":null}))).unwrap(), Observed::RequiresHandling));
+        assert!(matches!(stream.observe(&frame("account/updated", json!({"authMode":null}))).unwrap(), Observed::Private));
         for update in [json!({}), json!({"rateLimits":null}), json!({"rateLimits":[]}),
             json!({"rateLimits":{"primary":{}}}),
             json!({"rateLimits":{"primary":{"usedPercent":"31"}}}),
@@ -787,8 +1088,14 @@ mod tests {
     #[test]
     fn diagnostic_labels_do_not_echo_unknown_frames_or_reopen_failures() {
         let mut stream = started();
-        assert!(matches!(stream.observe(&frame("PRIVATE_TOKEN", json!({}))).unwrap(), Observed::RequiresHandling));
+        assert!(matches!(stream.observe(&frame("PRIVATE_TOKEN", json!({}))).unwrap(), Observed::Private));
         assert_eq!(stream.diagnostic_stage(), "turn stream other frame");
+        // A notification the provider defines but this stream refuses is named.
+        let mut stream = started();
+        assert!(matches!(stream.observe(&frame("item/fileChange/patchUpdated", json!({}))).unwrap(), Observed::Private));
+        assert_eq!(stream.diagnostic_stage(), "turn stream unhandled item/fileChange/patchUpdated");
+        assert!(TurnStream::unhandled_notification_stages().iter().all(|stage| stage.starts_with("turn stream unhandled ")));
+        assert!(TurnStream::server_request_stages().iter().all(|stage| stage.starts_with("turn stream request ")));
         assert!(stream.observe(&frame("item/started", json!({"private":"SECRET"}))).is_err());
         assert_eq!(stream.diagnostic_stage(), "turn item start scope");
         assert!(stream.observe(&turn("turn/completed", "completed")).is_err());
@@ -828,10 +1135,11 @@ mod tests {
             ("mcpToolCall", "turn item start unsupported mcp tool"),
             ("collabAgentToolCall", "turn item start unsupported collaboration"),
             ("hookPrompt", "turn item start unsupported hook"),
+            ("webSearch", "turn item start unsupported web search"),
             ("SECRET_UNKNOWN_TYPE", "turn item start unsupported other"),
         ] {
             let mut stream = started();
-            assert!(matches!(stream.observe(&item("item/started", kind)).unwrap(), Observed::RequiresHandling));
+            assert!(matches!(stream.observe(&item("item/started", kind)).unwrap(), Observed::Private));
             assert_eq!(stream.diagnostic_stage(), expected);
         }
     }
@@ -947,7 +1255,7 @@ mod tests {
     }
 
     #[test]
-    fn tools_are_typed_and_unknown_items_still_require_owner_handling() {
+    fn tools_are_typed_and_unknown_items_are_tracked_then_ignored() {
         for kind in ["commandExecution", "fileChange", "futureItem"] {
             let mut stream = started();
             for (method, phase) in [
@@ -960,7 +1268,7 @@ mod tests {
                         assert_eq!(tool.phase, phase);
                         assert_eq!(tool.item_id, "i");
                     }
-                    Observed::RequiresHandling => assert_eq!(kind, "futureItem"),
+                    Observed::Private => assert_eq!(kind, "futureItem"),
                     _ => panic!("unexpected public tool projection"),
                 }
             }
@@ -1166,7 +1474,9 @@ mod tests {
             }
             let mut event = json!({"method":"item/reasoning/textDelta","params":body});
             if case == "request" {
+                // A request carrying a response field is malformed, not refusable.
                 event["id"] = json!(9);
+                event["result"] = json!({});
             }
             let error = stream
                 .observe(&BoundedObservation::new(event.to_string().into_bytes()).unwrap())
@@ -1216,6 +1526,25 @@ mod tests {
         assert_eq!(stream.finish().unwrap(), TurnOutcome::Completed);
     }
 
+    /// PR #19 re-review 2: a command request carrying a proposed trust rule
+    /// is declined at once in an on-request thread (as before), and read as an
+    /// approval only in a thread that started `untrusted`.
+    #[test]
+    fn a_trust_rule_proposal_is_an_approval_only_in_an_untrusted_thread() {
+        let proposal = || BoundedObservation::new(json!({"id":12,"method":"item/commandExecution/requestApproval","params":{"threadId":"t","turnId":"r",
+            "itemId":"i","startedAtMs":1,"kind":"command","environmentId":null,"proposedExecpolicyAmendment":["echo","test"]}}).to_string().into_bytes()).unwrap();
+        let mut on_request = started();
+        on_request.observe(&item("item/started", "commandExecution")).unwrap();
+        assert!(matches!(on_request.observe(&proposal()).unwrap(), Observed::Refused(_)), "on-request: declined as before");
+        let mut untrusted = TurnStream::new("t", "r").unwrap().with_untrusted_thread(true);
+        untrusted.observe(&turn("turn/started", "inProgress")).unwrap();
+        untrusted.observe(&item("item/started", "commandExecution")).unwrap();
+        match untrusted.observe(&proposal()).unwrap() {
+            Observed::Approval(request) => assert!(request.thread_untrusted),
+            _ => panic!("untrusted: the person is asked"),
+        }
+    }
+
     #[test]
     fn unified_dispatch_preserves_approval_identity_and_single_use() {
         let mut stream = started();
@@ -1250,7 +1579,7 @@ mod tests {
             .unwrap();
         assert_eq!(stream.finish().unwrap(), TurnOutcome::Completed);
 
-        for case in ["duplicate", "unknown", "response", "missing-tool"] {
+        for case in ["duplicate", "response"] {
             let mut stream = started();
             if case != "missing-tool" {
                 stream
@@ -1272,6 +1601,42 @@ mod tests {
                 .is_err());
             assert!(stream.finish().is_err());
         }
+    }
+
+    #[test]
+    fn unsupported_requests_are_refused_once_and_the_turn_goes_on() {
+        // An approval for an item this stream never saw, and a request method it
+        // does not know: both are answered with a refusal instead of failing.
+        let mut stream = started();
+        let mut unknown: Value = serde_json::from_slice(&approval(10).bytes).unwrap();
+        unknown["method"] = json!("future/requestApproval");
+        let refused = |observed: Observed| match observed {
+            Observed::Refused(reply) => serde_json::from_str::<Value>(reply.as_str()).unwrap(),
+            _ => panic!("expected a refusal"),
+        };
+        let reply = refused(stream.observe(&BoundedObservation::new(unknown.to_string().into_bytes()).unwrap()).unwrap());
+        assert_eq!(reply, json!({"id":10,"error":{"code":-32601,"message":"not supported by this client"}}));
+        let reply = refused(stream.observe(&approval(11)).unwrap());
+        assert_eq!(reply, json!({"id":11,"result":{"decision":"decline"}}));
+        // The provider may report a refused request resolved; it is never granted.
+        stream.observe(&frame("serverRequest/resolved", json!({"threadId":"t","requestId":11}))).unwrap();
+        assert!(!stream.awaits_approval_decision(&RequestId::Number(11)));
+        // The same id again is a protocol error, even in a supported shape.
+        assert!(stream.observe(&approval(11)).is_err());
+        let mut stream = started();
+        stream.observe(&item("item/started", "commandExecution")).unwrap();
+        refused(stream.observe(&BoundedObservation::new(unknown.to_string().into_bytes()).unwrap()).unwrap());
+        assert!(stream.observe(&approval(10)).is_err());
+        // An unknown turn lifecycle notification could end the turn: it fails.
+        let mut stream = started();
+        assert!(stream.observe(&frame("turn/future", json!({"threadId":"t","turnId":"r"}))).is_err());
+        let mut stream = started();
+        refused(stream.observe(&approval(12)).unwrap());
+        stream.observe(&turn("turn/completed", "completed")).unwrap();
+        assert_eq!(stream.finish().unwrap(), TurnOutcome::Completed);
+        // Before the turn starts, a request is still a protocol error.
+        let mut stream = TurnStream::new("t", "r").unwrap();
+        assert!(stream.observe(&approval(13)).is_err());
     }
 
     #[test]

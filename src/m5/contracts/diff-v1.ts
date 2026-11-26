@@ -9,6 +9,9 @@ export interface DiffEntryV1 {
   path: string;
   oldPath?: string;
   binary: boolean;
+  /** Changed lines, when the engine could count them (never for binary). */
+  added?: number;
+  removed?: number;
 }
 
 export interface DiffSummaryV1 {
@@ -71,8 +74,16 @@ export function validateDiffFileDescriptorV1(value: unknown): DiffFileDescriptor
 }
 
 function validateDiffEntry(value: unknown): void {
-  const object = requireObject(value, "diff entry");
-  const kind = requireKind(object.kind);
+  const entry = requireObject(value, "diff entry");
+  const kind = requireKind(entry.kind);
+  const { added, removed, ...object } = entry;
+  if ((added === undefined) !== (removed === undefined)) fail("diff line counts must come as a pair");
+  if (added !== undefined) {
+    if (kind === "binary") fail("binary diff cannot have line counts");
+    for (const count of [added, removed]) {
+      if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) fail("diff line count must be a non-negative safe integer");
+    }
+  }
   if (kind === "renamed") {
     exactKeys(object, ["kind", "path", "oldPath", "binary"]);
     requireRelativePath(object.oldPath, "rename oldPath", false);

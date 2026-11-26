@@ -14,11 +14,11 @@ import {
   validateProjectCloseResultV1,
   validateTreePageV1,
   validateWatchEventV1,
-  validateWorktreeManifestV1,
+  validateWorktreeManifest,
   type G4SafetyErrorV1,
   type ProjectWatchResultV1,
   type TreeEntryV1,
-  type WorktreeManifestV1,
+  type WorktreeManifest,
 } from "./project-v1.ts";
 import {
   validateFileReadDescriptorV1,
@@ -126,12 +126,12 @@ export interface WorkspaceBlobChunkEventV1 {
 export type WorkspaceEventV1 = WorkspaceChangedEventV1 | WorkspaceBlobChunkEventV1;
 export interface WorkspaceChatBindingTranscriptV1 {
   chat: ChatRecordV1;
-  verifiedSnapshot: WorktreeManifestV1;
+  verifiedSnapshot: WorktreeManifest;
   workspace: ChatWorkspaceRefV1;
 }
 export interface WorkspaceResolvedBindingV1 {
   storedChat: ChatRecordV1;
-  verifiedSnapshot: WorktreeManifestV1;
+  verifiedSnapshot: WorktreeManifest;
 }
 export interface WorkspaceEventRouteTranscriptV1 {
   binding: WorkspaceResolvedBindingV1;
@@ -333,7 +333,7 @@ export function validateWorkspaceChatBindingTranscriptV1(value: unknown): Worksp
   const object = requireObject(value, "workspace chat binding transcript");
   exactKeys(object, ["chat", "verifiedSnapshot", "workspace"]);
   const chat = validateChatRecordV1(object.chat);
-  const snapshot = validateWorktreeManifestV1(object.verifiedSnapshot);
+  const snapshot = validateWorktreeManifest(object.verifiedSnapshot);
   const workspace = validateChatWorkspaceRefV1(object.workspace);
   if (snapshot.lifecycle !== "active") fail("chat workspace addressing requires an active snapshot");
   assertWorkspaceEcho(chat, snapshot, "chat verified snapshot");
@@ -345,7 +345,7 @@ export function validateWorkspaceResolvedBindingV1(value: unknown): WorkspaceRes
   const object = requireObject(value, "resolved chat workspace binding");
   exactKeys(object, ["storedChat", "verifiedSnapshot"]);
   const storedChat = validateChatRecordV1(object.storedChat);
-  const verifiedSnapshot = validateWorktreeManifestV1(object.verifiedSnapshot);
+  const verifiedSnapshot = validateWorktreeManifest(object.verifiedSnapshot);
   if (verifiedSnapshot.lifecycle !== "active") fail("workspace operation requires an active snapshot");
   assertWorkspaceEcho(storedChat, verifiedSnapshot, "stored chat active snapshot");
   return { storedChat, verifiedSnapshot };

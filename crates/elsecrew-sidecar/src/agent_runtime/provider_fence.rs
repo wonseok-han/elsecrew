@@ -1,4 +1,6 @@
-//! Read-only completion evidence for explicit provider-fence recovery.
+//! Read-only completion evidence for releasing a provider fence bound to a run.
+//! The proof is always the run's durable ending in the ledger; the release may
+//! be asked for by the user or retried by the app (start, after settlement).
 use super::*;
 use crate::provider_run_binding::RunFenceBinding;
 
@@ -32,8 +34,9 @@ fn verify(
     binding
         .validate(
             binding.run_id(),
-            projection["record"]["selectedProfile"]["runtime"]
-                .as_str()
+            projection
+                .get("record")
+                .and_then(|record| record["selectedProfile"]["runtime"].as_str())
                 .ok_or_else(failure)?,
         )
         .map_err(|_| failure())?;
@@ -104,15 +107,22 @@ fn verify_completion(
     recorded: &BTreeSet<ProcIdentity>,
 ) -> Result<(), ProjectFailure> {
     let failure = || ProjectFailure::recovery("provider fence completion differs");
-    let run = &projection["record"];
-    let recovery = &projection["recovery"];
-    let termination = &projection["termination"];
-    for (kind, value) in [
-        ("runRecord", run),
-        ("recoveryRecord", recovery),
-        ("terminationTranscript", termination),
-    ] {
+    // A run that never got as far as a termination record has none of these
+    // keys; a missing key must be a refusal, never a panic.
+    let part = |key: &str| projection.get(key).unwrap_or(&Value::Null);
+    let run = part("record");
+    let recovery = part("recovery");
+    let termination = part("termination");
+    // Two durable endings prove the bound run is over. Either its unclean stop
+    // was settled afterwards (recovery resolved, workspace abandoned), or it
+    // ended on its own and its owner proved every process gone, but the app
+    // stopped before that owner could remove the hold itself.
+    let settled = !recovery.is_null();
+    for (kind, value) in [("runRecord", run), ("terminationTranscript", termination)] {
         validate_agent_adapter_payload_v1(kind, value).map_err(|_| failure())?;
+    }
+    if settled {
+        validate_agent_adapter_payload_v1("recoveryRecord", recovery).map_err(|_| failure())?;
     }
     let writer_state = match run["selectedProfile"]["permission"].as_str() {
         Some("workspaceWrite") => "released",
@@ -120,28 +130,40 @@ fn verify_completion(
         _ => return Err(failure()),
     };
     if run["runId"] != run_id
-        || run["state"] != "canceled"
         || run["terminationOutcome"] != "cleanExit"
-        || recovery["runId"] != run["runId"]
-        || recovery["state"] != "resolvedAbandoned"
-        || recovery["poisoned"] != false
         || termination["runId"] != run["runId"]
         || termination["outcome"] != "cleanExit"
         || termination["poisoned"] != false
         || termination["processesProvenGone"] != true
         || termination["writerLockState"] != writer_state
-        || termination["chatState"] != "canceled"
-        || termination["trackedProcesses"] != recovery["trackedProcesses"]
     {
         return Err(failure());
     }
-    let internal = projection["process_identity_internal"]
+    let ended = if settled {
+        run["state"] == "canceled"
+            && recovery["runId"] == run["runId"]
+            && recovery["state"] == "resolvedAbandoned"
+            && recovery["poisoned"] == false
+            && termination["chatState"] == "canceled"
+            && termination["trackedProcesses"] == recovery["trackedProcesses"]
+    } else {
+        matches!(run["state"].as_str(), Some("succeeded" | "failed" | "canceled"))
+            && matches!(termination["chatState"].as_str(), Some("succeeded" | "failed" | "canceled"))
+    };
+    if !ended {
+        return Err(failure());
+    }
+    let internal = part("process_identity_internal")
         .as_array()
         .ok_or_else(failure)?;
-    let public = recovery["trackedProcesses"]
+    let public = termination["trackedProcesses"]
         .as_array()
         .ok_or_else(failure)?;
-    if internal.is_empty() || internal.len() != recorded.len() || public.len() != internal.len() {
+    // The hold may list more than the ledger: an engine that is going down
+    // records the last descendants it finds in the hold alone, its ledger
+    // already closed. Every identity in the hold is still probed gone before
+    // the hold is released; the ledger's must all be among them.
+    if internal.is_empty() || internal.len() > recorded.len() || public.len() != internal.len() {
         return Err(failure());
     }
     let mut expected = BTreeSet::new();
@@ -160,7 +182,7 @@ fn verify_completion(
             return Err(failure());
         }
     }
-    if &expected != recorded {
+    if !expected.is_subset(recorded) {
         return Err(failure());
     }
     let address = address_from_chat(run)?;
@@ -173,11 +195,15 @@ fn verify_completion(
         "workspaceIdentity",
     ] {
         if run[field].is_null()
-            || run[field] != recovery[field]
+            || (settled && run[field] != recovery[field])
             || run[field] != chat["record"][field]
         {
             return Err(failure());
         }
+    }
+    if !settled {
+        // The workspace stays in use by its task; only the hold is stale.
+        return Ok(());
     }
     if chat["record"]["state"] != "discarded" {
         return Err(failure());
@@ -194,11 +220,14 @@ fn verify_completion(
     {
         return Err(failure());
     }
-    let mut manifest = projection["workspace_manifest"].clone();
+    let mut manifest = part("workspace_manifest").clone();
     manifest["lifecycle"] = json!("recoveryRequired");
-    projects.workspace_verify_recovery_abandoned(
-        &address,
-        &manifest,
-        &recovery_manifest_digest(&manifest)?,
-    )
+    let digest = recovery_manifest_digest(&manifest)?;
+    // The task or its project may have been deleted since: the app then
+    // removed the abandoned workspace and its manifest itself, which the
+    // ledger records. Everything above still proves the run ended.
+    if projects.workspace_removed_by_deletion(storage, &address)? {
+        return Ok(());
+    }
+    projects.workspace_verify_recovery_abandoned(&address, &manifest, &digest)
 }

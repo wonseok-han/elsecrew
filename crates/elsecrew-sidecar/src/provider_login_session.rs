@@ -59,7 +59,10 @@ impl<'a> LoginSession<'a> {
             LoginConnection::begin(home.to_str().ok_or_else(failure)?).map_err(|_| failure())?;
         flow.require_startup_isolation().map_err(|_| failure())?;
         let mut session = Self {
-            process: LoginProcess::reserve(profile)?,
+            // Reading the account beside runs takes a run hold of its own, as
+            // the Claude check does; signing in holds the profile alone
+            // (PR #20 review I3).
+            process: if check_only { LoginProcess::reserve_shared(profile)? } else { LoginProcess::reserve(profile)? },
             flow,
             deadline: Instant::now() + RPC_TIMEOUT,
             closed: false,
@@ -313,6 +316,51 @@ exec /bin/sleep 30
             }
             assert!(!temp.path().join("codex-login.pending").exists());
         }
+    }
+
+    /// PR #20 review I3: an account check reads beside runs both ways. A
+    /// running Codex run does not make the check busy, a run can start while
+    /// a check reads, and only signing in waits for the check.
+    #[test]
+    fn an_account_check_and_runs_go_side_by_side_and_signing_in_waits() {
+        let temp = tempfile::tempdir().unwrap();
+        let binding = profile(&temp);
+        let home = binding.revalidate().unwrap();
+        let directory = cap_std::fs::Dir::open_ambient_dir(temp.path(), cap_std::ambient_authority()).unwrap();
+        let holds = || crate::provider_login_process::run_hold_names(&directory, "codex").unwrap().len();
+        let init = serde_json::json!({"id":1,"result":{"userAgent":"test","codexHome":home,"platformFamily":"unix","platformOs":"macos"}}).to_string();
+        let reply = serde_json::json!({"id":3,"result":{"account":{"type":"chatgpt","email":"synthetic"},"requiresOpenaiAuth":true}}).to_string();
+        let script = "IFS= read -r line; printf '%s\\n' \"$1\"; IFS= read -r line; IFS= read -r line; printf '%s\\n' \"$3\"; IFS= read -r line; printf '%s\\n' \"$2\"; IFS= read -r hold; exec /bin/sleep 30";
+        // A run works.
+        let mut run = LoginProcess::reserve_codex_owned(profile(&temp)).unwrap();
+        let mut session = LoginSession::begin_with_barrier(
+            &binding,
+            || Command::new("/bin/sh").args(["-c", script, "peer", &init, &reply, &configuration(home.to_str().unwrap())])
+                .env_clear().stdin(Stdio::piped()).stdout(Stdio::piped()).spawn(),
+            |_| Ok(()),
+            &AtomicBool::new(false),
+            true,
+        ).expect("a check is not busy beside a run");
+        assert_eq!(holds(), 2);
+        // A second run starts while the check reads; signing in waits.
+        let mut second = LoginProcess::reserve_codex_owned(profile(&temp)).expect("a run starts beside a check");
+        assert_eq!(LoginProcess::reserve(&binding).err().unwrap().kind(), "providerBusy");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            assert!(Instant::now() < deadline);
+            match session.advance(&AtomicBool::new(false)).unwrap() {
+                LoginProgress::Pending => std::thread::sleep(Duration::from_millis(10)),
+                LoginProgress::CredentialsObserved => break,
+                _ => panic!("a check never opens a browser"),
+            }
+        }
+        drop(session);
+        assert_eq!(holds(), 2, "the check's own hold is gone; the runs' stay");
+        run.finish().unwrap();
+        second.finish().unwrap();
+        assert_eq!(holds(), 0);
+        assert!(!temp.path().join("codex-login.pending").exists());
+        LoginProcess::reserve(&binding).unwrap().finish().unwrap();
     }
 
     #[test]

@@ -9,7 +9,7 @@ import { en } from "../src/locales/en.ts";
 
 // Execute the actual component's effects, without exporting a product test API
 // or loading browser-only Monaco in Node. Chromium mounting is tested separately.
-const source = ts.createSourceFile("workbench.tsx", readFileSync(new URL("../src/m5/workbench.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const source = ts.createSourceFile("workbench.tsx", readFileSync(new URL("../src/m5/editor-surface.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const component = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "MonacoEditor")!;
 const compiled = ts.transpileModule(`${component.getText(source)}\nglobalThis.Component = MonacoEditor;`, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },
@@ -77,12 +77,12 @@ for (const delayedGate of [null, "admission", "saving"]) test(`Monaco keeps curr
       dependencies[index] = deps;
     },
     React: { createElement: (_type: unknown, props: { ref?: { current: unknown } } | null) => { if (props?.ref) props.ref.current = {}; return null; } },
-    languageFor: () => "plaintext",
+    languageFor: () => "plaintext", defineElsecrewTheme: () => undefined,
     requestEditorSave,
     loadMonaco: () => loader,
   };
   context.useLayoutEffect = context.useEffect;
-  const resolveMonaco = () => resolveLoader({ KeyMod: { CtrlCmd: 2048 }, KeyCode: { KeyS: 49 }, editor: { createModel: (value: string) => { text = value; return model; }, create: (_host: unknown, options: { readOnly: boolean }) => { editorCreates++; readOnly = options.readOnly; return editor; } } });
+  const resolveMonaco = () => resolveLoader({ KeyMod: { CtrlCmd: 2048 }, KeyCode: { KeyS: 49 }, editor: { defineTheme() {}, createModel: (value: string) => { text = value; return model; }, create: (_host: unknown, options: { readOnly: boolean }) => { editorCreates++; readOnly = options.readOnly; return editor; } } });
   runInNewContext(compiled, context);
   const render = async (locked: boolean, saveState: string, value = "original") => {
     cursor = 0; pending = [];
@@ -128,7 +128,7 @@ for (const delayedGate of [null, "admission", "saving"]) test(`Monaco keeps curr
   await render(false, "dirty", "latest editable draft");
   assert.equal(editorCreates, 1);
   assert.equal(actionDisposals, 1);
-  assert.equal(saveAction.label, "Save to working copy");
+  assert.equal(saveAction.label, "Save to workspace");
   assert.equal(accessibleName, "test.txt code editor");
   assert.equal(text, "latest editable draft");
   saveAction.run();
@@ -182,11 +182,12 @@ for (const failure of ["load", "editor", "action"]) test(`Monaco preserves draft
       if (type === "textarea") drafts.push(props);
       return null;
     } },
-    languageFor: () => "plaintext", requestEditorSave,
+    languageFor: () => "plaintext", defineElsecrewTheme: () => undefined, requestEditorSave,
     loadMonaco: async () => {
       loads++;
       if (fail && failure === "load") throw new Error("chunk unavailable");
       return { KeyMod: { CtrlCmd: 2048 }, KeyCode: { KeyS: 49 }, editor: {
+        defineTheme() {},
         createModel: (value: string) => {
           text = value;
           return { getValue: () => text, setValue: (next: string) => { text = next; },

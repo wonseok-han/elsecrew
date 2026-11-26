@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 pub mod vendor_observation;
+pub mod oversized_line;
 mod unique_json;
 
 pub const PROVIDER_OBSERVATION_LINE_MAX_BYTES: usize = 128 * 1024;
@@ -156,6 +157,23 @@ impl BoundedObservation {
             return fail("provider observation contains an oversized line");
         }
         Ok(Self { bytes })
+    }
+
+    /// One session permission request over the line bound, kept whole
+    /// (2026-11-26 big Write). Only `oversized_line` builds one, after it has
+    /// checked the frame is a Claude permission request; the permission parser
+    /// then bounds what it keeps (`claude_approval`).
+    pub(crate) fn new_session_control(bytes: Vec<u8>) -> Result<Self, ProviderError> {
+        let body = bytes.strip_suffix(b"\n").unwrap_or(&bytes);
+        if body.is_empty() || body.len() > oversized_line::PROVIDER_SESSION_LINE_RAW_MAX_BYTES || body.contains(&b'\n') {
+            return fail("session permission request is empty or over the session line bound");
+        }
+        Ok(Self { bytes })
+    }
+
+    /// Size only, as `Debug` already shows; the bytes themselves stay private.
+    pub fn byte_len(&self) -> usize {
+        self.bytes.len()
     }
 
     fn text(&self) -> Result<&str, ProviderError> {

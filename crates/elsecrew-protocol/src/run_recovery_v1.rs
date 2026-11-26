@@ -6,6 +6,108 @@ use std::fmt::{self, Display};
 pub const G5_SCHEMA_VERSION_V1: u64 = 1;
 pub const G5_ROLE_IDS_V1: &[&str] = &["planning", "coding", "review"];
 pub const G5_ROLE_IDS_V2: &[&str] = &["coordinator", "planning", "design", "coding", "review"];
+/// V3 role sets are user-defined: a fixed read-only coordinator plus 1..=7 workers.
+pub const G5_ROLE_SCHEMA_VERSION_V3: u64 = 3;
+pub const G5_COORDINATOR_ROLE_ID: &str = "coordinator";
+pub const G5_ROLES_MAX_V3: usize = 8;
+pub const G5_ROLE_ID_MAX_BYTES_V3: usize = 32;
+pub const G5_ROLE_NAME_MAX_BYTES_V3: usize = 64;
+pub const G5_ROLE_RESPONSIBILITY_MAX_BYTES_V3: usize = 2000;
+/// Locale-independent seed for the default V3 team (roleId, name, responsibility).
+/// The UI localizes the legacy IDs only while the stored name equals this name.
+pub const G5_DEFAULT_ROLE_DEFINITIONS_V3: &[(&str, &str, &str)] = &[
+    ("coordinator", "총괄", "사용자는 개발을 잘 모른다고 가정하고 쉬운 말로 대화합니다. 요청이 모호하면 먼저 1~3개의 짧은 질문으로 목표와 범위를 분명히 하고, 처음에는 가장 작게 동작하는 버전을 제안합니다. 팀원에게 맡길 때는 기대 결과물과 확인 가능한 완료 기준을 함께 적고, 검증이 완료 기준을 통과할 때까지 필요한 수정을 다시 맡깁니다. 마지막에는 한 일, 직접 실행해 보는 방법, 남은 한계, 다음에 하면 좋은 일을 전문용어 없이 정리합니다."),
+    ("planning", "기획", "사용자의 목표를 기능 목록과 사용 흐름으로 정리하고, 이번에 만들 범위와 만들지 않을 범위를 나눕니다. 기능마다 사람이 직접 확인할 수 있는 완료 기준을 적습니다(예: '할 일을 추가하면 목록에 바로 보인다'). 기존 프로젝트라면 먼저 구조와 사용 중인 기술을 읽고 그에 맞춥니다. 사용자가 결정해야 할 점은 추측하지 말고 질문으로 남깁니다. 정리한 내용은 다음 담당이 볼 수 있게 docs/plan.md 문서로 남깁니다."),
+    ("design", "디자인", "필요한 화면 목록과 각 화면의 구성, 화면 사이의 이동 흐름을 정합니다. 빈 화면, 불러오는 중, 오류, 성공 상태와 버튼·안내 문구를 사용자의 언어로 구체적으로 씁니다. 좁은 화면(모바일), 키보드만으로 조작, 읽기 쉬운 글자 대비를 챙깁니다. 기존 스타일이 있으면 따르고, 개발이 바로 구현할 수 있을 만큼 구체적으로 적습니다. 설계한 내용은 docs/design.md 문서로 남깁니다."),
+    ("coding", "개발", "기획과 디자인의 완료 기준에 맞춰 작은 단위로 구현합니다. 기존 구조·스타일·라이브러리를 따르고, 새 라이브러리는 꼭 필요할 때만 이유와 함께 추가합니다. 빌드·테스트·실행을 직접 해 보고 결과를 확인합니다. 새로 만드는 프로젝트라면 실행 방법을 README에 적습니다. 비밀번호나 키 같은 비밀 값은 코드에 넣지 않습니다. 보고에는 바꾼 파일, 실행한 명령과 결과, 남은 문제를 적습니다."),
+    ("review", "검증", "완료 기준을 하나씩 직접 실행해 보고 통과·실패로 판정합니다. 실패는 재현 순서, 기대한 결과, 실제 결과를 적습니다. 빈 입력, 데이터 유실, 오류 처리, 보안 문제도 찾습니다. 테스트를 추가하거나 실행할 수는 있지만 제품 코드는 고치지 않고 개발에게 맡길 수정 사항으로 보고합니다. 직접 확인하지 못한 항목은 '확인 못 함'으로 분명히 표시합니다. 판정 결과는 docs/review.md 문서로 남깁니다."),
+];
+/// Unicode format characters (general category Cf). Saved role names cannot
+/// contain them so a name cannot pose as another (custom roles R4). Must equal
+/// TS `G5_FORMAT_CHAR_RANGES_V3`; both read tests/fixtures/m5/role-names-v3.json.
+pub const G5_FORMAT_CHAR_RANGES_V3: &[(u32, u32)] = &[
+    (0xad, 0xad), (0x600, 0x605), (0x61c, 0x61c), (0x6dd, 0x6dd), (0x70f, 0x70f), (0x890, 0x891), (0x8e2, 0x8e2),
+    (0x180e, 0x180e), (0x200b, 0x200f), (0x202a, 0x202e), (0x2060, 0x2064), (0x2066, 0x206f), (0xfeff, 0xfeff),
+    (0xfff9, 0xfffb), (0x110bd, 0x110bd), (0x110cd, 0x110cd), (0x13430, 0x1343f), (0x1bca0, 0x1bca3),
+    (0x1d173, 0x1d17a), (0xe0001, 0xe0001), (0xe0020, 0xe007f),
+];
+/// Names a member may never take, whatever the coordinator is called now.
+pub const G5_COORDINATOR_NAME_KEYS_V3: &[&str] = &["총괄", "coordinator"];
+
+pub fn has_format_character(text: &str) -> bool {
+    text.chars().any(|c| {
+        let code = c as u32;
+        G5_FORMAT_CHAR_RANGES_V3.iter().any(|(low, high)| code >= *low && code <= *high)
+    })
+}
+
+/// What the screen shows for a starting role while its stored name is still
+/// the seed name (ko, en labels). Names are compared as shown (review PR #8
+/// I1). Must equal TS `G5_LEGACY_ROLE_LABELS_V3` and the locales.
+pub const G5_LEGACY_ROLE_LABELS_V3: &[(&str, &[&str])] = &[
+    ("coordinator", &["총괄", "Coordinator"]),
+    ("planning", &["기획", "Planning"]),
+    ("design", &["디자인", "Design"]),
+    ("coding", &["개발", "Development"]),
+    ("review", &["검증", "Verification"]),
+];
+
+/// Comparison key: NFC, whitespace removed, then lowercased (TS `roleNameKey`).
+pub fn role_name_key(name: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    name.nfc().filter(|c| !c.is_whitespace()).collect::<String>().to_lowercase()
+}
+
+/// Every key a role can be shown as: its stored name, plus the translated
+/// labels of an untouched starting role (TS `roleShownNameKeysV3`).
+pub fn role_shown_name_keys_v3(role_id: &str, name: &str) -> Vec<String> {
+    let mut keys = vec![role_name_key(name)];
+    let untouched = G5_DEFAULT_ROLE_DEFINITIONS_V3.iter().any(|(id, seed, _)| *id == role_id && *seed == name);
+    if untouched {
+        for (_, labels) in G5_LEGACY_ROLE_LABELS_V3.iter().filter(|(id, _)| *id == role_id) {
+            for label in labels.iter() {
+                let key = role_name_key(label);
+                if !keys.contains(&key) {
+                    keys.push(key);
+                }
+            }
+        }
+    }
+    keys
+}
+
+/// Problems a saved name would have, one per role (None = fine): "format",
+/// "coordinatorName" or "duplicate", comparing names as shown. Applied when
+/// settings are saved, never when a stored record is read, so an older name
+/// still opens. `roles` is (roleId, name) in order.
+pub fn role_name_problems_v3(roles: &[(&str, &str)]) -> Vec<Option<&'static str>> {
+    let keys: Vec<Vec<String>> = roles.iter().map(|(id, name)| role_shown_name_keys_v3(id, name)).collect();
+    let mut coordinator: Vec<String> = keys.first().cloned().unwrap_or_default();
+    coordinator.extend(G5_COORDINATOR_NAME_KEYS_V3.iter().map(|key| key.to_string()));
+    roles
+        .iter()
+        .enumerate()
+        .map(|(index, (_, name))| {
+            if has_format_character(name) {
+                return Some("format");
+            }
+            if index == 0 {
+                return None;
+            }
+            if keys[index].iter().any(|key| coordinator.contains(key)) {
+                return Some("coordinatorName");
+            }
+            let duplicate = keys.iter().enumerate().any(|(other, other_keys)| {
+                other != index
+                    && other != 0
+                    && !has_format_character(roles[other].1)
+                    && other_keys.iter().any(|key| keys[index].contains(key))
+            });
+            duplicate.then_some("duplicate")
+        })
+        .collect()
+}
+
 pub const G5_RUNTIMES_V1: &[&str] = &["codex", "claude-code"];
 pub const G5_PERMISSIONS_V1: &[&str] = &["readOnly", "workspaceWrite"];
 pub const G5_CHAT_STATES_V1: &[&str] = &[
@@ -291,7 +393,46 @@ fn validate_g5_ready(value: &Value) -> Result<(), G5ContractError> {
     validate_g5_ready_payload_v1(value)
 }
 
+/// Role IDs are opaque bounded identifiers: `^[a-z][a-z0-9-]{1,31}$`.
+pub fn is_g5_role_id_v3(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    (2..=G5_ROLE_ID_MAX_BYTES_V3).contains(&bytes.len())
+        && bytes[0].is_ascii_lowercase()
+        && bytes[1..]
+            .iter()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'-')
+}
+
+/// Display stage of a run. Write permission, not the role name, selects implementation;
+/// the legacy template ID `review` keeps its historical verification label.
+pub fn g5_stage_for_profile_v3(role_id: &str, permission: &str) -> &'static str {
+    if permission == "workspaceWrite" {
+        "implementing"
+    } else if role_id == "review" {
+        "verifying"
+    } else {
+        "planning"
+    }
+}
+
+fn role_id<'a>(value: Option<&'a Value>, name: &str) -> Result<&'a str, G5ContractError> {
+    let value = string(value, name)?;
+    if !is_g5_role_id_v3(value) {
+        return fail(format!("invalid {name}"));
+    }
+    Ok(value)
+}
+
 fn validate_role_profile(value: &Value) -> Result<&Map<String, Value>, G5ContractError> {
+    validate_role_profile_with(value, false)
+}
+
+/// Saved V3 role settings may leave a model unselected (`""`, no reasoning
+/// effort) until the user picks one; chats and runs never accept that.
+fn validate_role_profile_with(
+    value: &Value,
+    allow_unselected: bool,
+) -> Result<&Map<String, Value>, G5ContractError> {
     let object = object(value, "role profile")?;
     exact_keys(
         object,
@@ -303,13 +444,20 @@ fn validate_role_profile(value: &Value) -> Result<&Map<String, Value>, G5Contrac
             "permission",
         ],
     )?;
-    let role = one_of(object.get("roleId"), G5_ROLE_IDS_V2, "roleId")?;
+    let role = role_id(object.get("roleId"), "roleId")?;
     one_of(object.get("runtime"), G5_RUNTIMES_V1, "runtime")?;
-    bounded_text(
-        object.get("modelSelector"),
-        "modelSelector",
-        G5_MODEL_SELECTOR_MAX_BYTES_V1,
-    )?;
+    let unselected = allow_unselected && object.get("modelSelector").and_then(Value::as_str) == Some("");
+    if unselected {
+        if !object.get("reasoningEffort").is_some_and(Value::is_null) {
+            return fail("an unselected model cannot carry a reasoning effort");
+        }
+    } else {
+        bounded_text(
+            object.get("modelSelector"),
+            "modelSelector",
+            G5_MODEL_SELECTOR_MAX_BYTES_V1,
+        )?;
+    }
     if !object.get("reasoningEffort").is_some_and(Value::is_null) {
         bounded_text(
             object.get("reasoningEffort"),
@@ -318,44 +466,55 @@ fn validate_role_profile(value: &Value) -> Result<&Map<String, Value>, G5Contrac
         )?;
     }
     let permission = one_of(object.get("permission"), G5_PERMISSIONS_V1, "permission")?;
-    let expected = if role == "coding" {
-        "workspaceWrite"
-    } else {
-        "readOnly"
-    };
-    if permission != expected {
-        return fail(format!("{role} permission must be {expected}"));
+    if role == G5_COORDINATOR_ROLE_ID && permission != "readOnly" {
+        return fail("coordinator permission must be readOnly");
     }
     Ok(object)
 }
 
 fn validate_project_role_settings(value: &Value) -> Result<&Map<String, Value>, G5ContractError> {
     let object = object(value, "project role settings")?;
-    exact_keys(
-        object,
-        &[
-            "schemaVersion",
-            "projectId",
-            "revision",
-            "roles",
-            "updatedAt",
-        ],
-    )?;
+    let mut keys = vec!["schemaVersion", "projectId", "revision", "roles", "updatedAt"];
+    if object.get("schemaVersion").and_then(Value::as_u64) == Some(G5_ROLE_SCHEMA_VERSION_V3) {
+        keys.push("roleDefinitions");
+    }
+    exact_keys(object, &keys)?;
     let version = object.get("schemaVersion").and_then(Value::as_u64);
-    if !matches!(version, Some(1 | 2)) { return fail("unsupported role schema version"); }
+    if !matches!(version, Some(1 | 2 | 3)) { return fail("unsupported role schema version"); }
     id(object.get("projectId"), "projectId")?;
     positive(object.get("revision"), "settings revision")?;
-    validate_role_set_version(object.get("roles"), "roles", version)?;
+    if version == Some(G5_ROLE_SCHEMA_VERSION_V3) {
+        validate_role_set_v3(object, "roles", true)?;
+    } else {
+        validate_role_set_version(object.get("roles"), "roles", version)?;
+    }
     timestamp(object.get("updatedAt"), "updatedAt")?;
     Ok(object)
 }
 
 fn validate_project_role_settings_update(value: &Value) -> Result<(), G5ContractError> {
     let object = object(value, "project role settings update")?;
-    exact_keys(object, &["projectId", "expectedRevision", "roles"])?;
+    if object.contains_key("roleDefinitions") {
+        exact_keys(object, &["projectId", "expectedRevision", "roles", "roleDefinitions"])?;
+    } else {
+        exact_keys(object, &["projectId", "expectedRevision", "roles"])?;
+    }
     id(object.get("projectId"), "projectId")?;
     positive(object.get("expectedRevision"), "expectedRevision")?;
-    validate_role_set(object.get("roles"), "roles")
+    if object.contains_key("roleDefinitions") {
+        validate_role_set_v3(object, "roles", true)?;
+        // Saving only: stored records keep opening (see role_name_problems_v3).
+        let named: Vec<(&str, &str)> = array(object.get("roleDefinitions"), "roleDefinitions", G5_ROLES_MAX_V3)?
+            .iter()
+            .map(|definition| (definition["roleId"].as_str().unwrap_or_default(), definition["name"].as_str().unwrap_or_default()))
+            .collect();
+        if role_name_problems_v3(&named).iter().any(Option::is_some) {
+            return fail("role names must be plain, unique and distinct from the coordinator");
+        }
+        Ok(())
+    } else {
+        validate_role_set(object.get("roles"), "roles")
+    }
 }
 
 fn validate_prepare_chat_workspace_request(
@@ -681,25 +840,26 @@ fn validate_chat_create_request(value: &Value) -> Result<&Map<String, Value>, G5
 
 fn validate_chat_record(value: &Value) -> Result<&Map<String, Value>, G5ContractError> {
     let object = object(value, "chat record")?;
-    exact_keys(
-        object,
-        &[
-            "schemaVersion",
-            "chatId",
-            "taskId",
-            "projectId",
-            "worktreeId",
-            "workspaceIdentity",
-            "goal",
-            "settingsRevision",
-            "roleSnapshots",
-            "state",
-            "createdAt",
-            "updatedAt",
-        ],
-    )?;
+    let mut keys = vec![
+        "schemaVersion",
+        "chatId",
+        "taskId",
+        "projectId",
+        "worktreeId",
+        "workspaceIdentity",
+        "goal",
+        "settingsRevision",
+        "roleSnapshots",
+        "state",
+        "createdAt",
+        "updatedAt",
+    ];
     let version = object.get("schemaVersion").and_then(Value::as_u64);
-    if !matches!(version, Some(1 | 2)) { return fail("unsupported role schema version"); }
+    if version == Some(G5_ROLE_SCHEMA_VERSION_V3) {
+        keys.push("roleDefinitions");
+    }
+    exact_keys(object, &keys)?;
+    if !matches!(version, Some(1 | 2 | 3)) { return fail("unsupported role schema version"); }
     for field in [
         "chatId",
         "taskId",
@@ -711,7 +871,11 @@ fn validate_chat_record(value: &Value) -> Result<&Map<String, Value>, G5Contract
     }
     bounded_text(object.get("goal"), "goal", G5_GOAL_MAX_BYTES_V1)?;
     positive(object.get("settingsRevision"), "settingsRevision")?;
-    validate_role_set_version(object.get("roleSnapshots"), "roleSnapshots", version)?;
+    if version == Some(G5_ROLE_SCHEMA_VERSION_V3) {
+        validate_role_set_v3(object, "roleSnapshots", false)?;
+    } else {
+        validate_role_set_version(object.get("roleSnapshots"), "roleSnapshots", version)?;
+    }
     one_of(object.get("state"), G5_CHAT_STATES_V1, "chat state")?;
     timestamp(object.get("createdAt"), "createdAt")?;
     timestamp(object.get("updatedAt"), "updatedAt")?;
@@ -738,7 +902,9 @@ fn validate_chat_transition(value: &Value) -> Result<(), G5ContractError> {
             return fail(format!("chat transition changed {field}"));
         }
     }
-    if before.get("roleSnapshots") != after.get("roleSnapshots") {
+    if before.get("roleSnapshots") != after.get("roleSnapshots")
+        || before.get("roleDefinitions") != after.get("roleDefinitions")
+    {
         return fail("chat transition changed roleSnapshots");
     }
     let before_state = string(before.get("state"), "before chat state")?;
@@ -920,7 +1086,7 @@ fn validate_team_message(value: &Value) -> Result<&Map<String, Value>, G5Contrac
     )?;
     timestamp(object.get("createdAt"), "createdAt")?;
     if kind == "role" {
-        one_of(object.get("roleId"), G5_ROLE_IDS_V2, "roleId")?;
+        role_id(object.get("roleId"), "roleId")?;
         id(object.get("runId"), "runId")?;
     } else {
         if !object.get("roleId").is_some_and(Value::is_null) {
@@ -1079,7 +1245,10 @@ fn validate_chat_creation(value: &Value) -> Result<(), G5ContractError> {
         if chat.get("settingsRevision") != settings.get("revision") {
             return fail("created chat settings revision drift");
         }
-        if chat.get("roleSnapshots") != settings.get("roles") {
+        if chat.get("roleSnapshots") != settings.get("roles")
+            || chat.get("schemaVersion") != settings.get("schemaVersion")
+            || chat.get("roleDefinitions") != settings.get("roleDefinitions")
+        {
             return fail("created chat did not snapshot exact roles");
         }
     }
@@ -1864,6 +2033,7 @@ fn validate_cancel_termination_recovery(value: &Value) -> Result<(), G5ContractE
         }
     }
     if before_chat.get("roleSnapshots") != after_chat.get("roleSnapshots")
+        || before_chat.get("roleDefinitions") != after_chat.get("roleDefinitions")
         || before_chat.get("goal") != after_chat.get("goal")
         || before_run.get("runId") != after_run.get("runId")
         || before_run.get("fixtureScenario") != after_run.get("fixtureScenario")
@@ -2219,12 +2389,58 @@ fn validate_role_set(value: Option<&Value>, name: &str) -> Result<(), G5Contract
     validate_role_set_version(value, name, None)
 }
 fn validate_role_set_version(value: Option<&Value>, name: &str, version: Option<u64>) -> Result<(), G5ContractError> {
+    if version == Some(G5_ROLE_SCHEMA_VERSION_V3) { return fail("V3 roles require roleDefinitions"); }
     let roles = array(value, name, G5_ROLE_IDS_V2.len())?;
     let canonical = if version == Some(1) || (version.is_none() && roles.len() == 3) { G5_ROLE_IDS_V1 } else { G5_ROLE_IDS_V2 };
     if roles.len() != canonical.len() { return fail("invalid versioned role count"); }
     for (index, role) in roles.iter().enumerate() {
         let role = validate_role_profile(role)?;
         if role.get("roleId").and_then(Value::as_str) != Some(canonical[index]) { return fail("invalid versioned role order"); }
+        // Legacy V1/V2 sets keep their exact fixed permission mapping.
+        let expected = if canonical[index] == "coding" { "workspaceWrite" } else { "readOnly" };
+        if role.get("permission").and_then(Value::as_str) != Some(expected) {
+            return fail(format!("{} permission must be {expected}", canonical[index]));
+        }
+    }
+    Ok(())
+}
+
+/// V3: `roles` (or `roleSnapshots`) plus a parallel `roleDefinitions` array.
+fn validate_role_set_v3(
+    object: &Map<String, Value>,
+    name: &str,
+    allow_unselected: bool,
+) -> Result<(), G5ContractError> {
+    let roles = array(object.get(name), name, G5_ROLES_MAX_V3)?;
+    let definitions = array(object.get("roleDefinitions"), "roleDefinitions", G5_ROLES_MAX_V3)?;
+    if roles.len() < 2 || definitions.len() != roles.len() {
+        return fail("V3 roles need a coordinator, 1 to 7 workers and one definition per role");
+    }
+    let mut seen = HashSet::new();
+    for (index, (role, definition)) in roles.iter().zip(definitions).enumerate() {
+        let role = validate_role_profile_with(role, allow_unselected)?;
+        let id = string(role.get("roleId"), "roleId")?;
+        if (index == 0) != (id == G5_COORDINATOR_ROLE_ID) {
+            return fail("the first V3 role must be the only coordinator");
+        }
+        if !seen.insert(id) {
+            return fail("V3 roleIds must be unique");
+        }
+        let definition = self::object(definition, "role definition")?;
+        exact_keys(definition, &["roleId", "name", "responsibility"])?;
+        if definition.get("roleId").and_then(Value::as_str) != Some(id) {
+            return fail("role definition order must match roles");
+        }
+        let name = bounded_text(definition.get("name"), "role name", G5_ROLE_NAME_MAX_BYTES_V3)?;
+        if name.chars().any(char::is_control) {
+            return fail("role name cannot contain control characters");
+        }
+        let responsibility = string(definition.get("responsibility"), "role responsibility")?;
+        if responsibility.len() > G5_ROLE_RESPONSIBILITY_MAX_BYTES_V3
+            || responsibility.chars().any(|c| c.is_control() && c != '\n' && c != '\t')
+        {
+            return fail("role responsibility must be bounded text");
+        }
     }
     Ok(())
 }

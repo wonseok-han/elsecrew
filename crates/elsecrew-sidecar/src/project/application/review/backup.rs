@@ -292,7 +292,7 @@ fn create_inner(
             };
             let (parent, leaf) = parent(&source._root, path)?;
             let meta = parent.symlink_metadata(&leaf).map_err(|_| invalid())?;
-            if (meta.dev(), meta.ino(), meta.nlink()) != entry.identity || meta.mode() != entry.mode
+            if crate::project::application::recorded_identity(&meta) != entry.identity || meta.mode() != entry.mode
             {
                 return Err(invalid());
             }

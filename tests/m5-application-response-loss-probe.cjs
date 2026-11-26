@@ -46,8 +46,8 @@ async function probeApplicationResponseLoss() {
     return original(input);
   };
   try {
-    await wait(() => button('이 채팅의 반영 전 변경 목록 보기') && !button('이 채팅의 반영 전 변경 목록 보기').disabled);
-    button('이 채팅의 반영 전 변경 목록 보기').click();
+    await wait(() => button('이 작업의 반영 전 변경 목록 보기') && !button('이 작업의 반영 전 변경 목록 보기').disabled);
+    button('이 작업의 반영 전 변경 목록 보기').click();
     await wait(() => button('이 변경 묶음으로 확인 준비'));
     button('이 변경 묶음으로 확인 준비').click();
     await wait(() => panel.querySelector('input[type=checkbox]'));
@@ -56,9 +56,9 @@ async function probeApplicationResponseLoss() {
     button('백업 후 원본에 반영').click();
     await wait(() => rejectPendingStart && button('준비·반영 중단 요청'));
     button('준비·반영 중단 요청').click();
-    await wait(() => preparationCancels === 1 && !panel.querySelector('input[type=checkbox]') && !button('이 채팅의 반영 전 변경 목록 보기').disabled);
+    await wait(() => preparationCancels === 1 && !panel.querySelector('input[type=checkbox]') && !button('이 작업의 반영 전 변경 목록 보기').disabled);
     if (applicationId !== oldId || starts !== 0) throw new Error('cancel-first created or hid an application');
-    button('이 채팅의 반영 전 변경 목록 보기').click();
+    button('이 작업의 반영 전 변경 목록 보기').click();
     await wait(() => button('이 변경 묶음으로 확인 준비'));
     button('이 변경 묶음으로 확인 준비').click();
     await wait(() => panel.querySelector('input[type=checkbox]'));

@@ -1,13 +1,13 @@
 import { validateAgentCapabilitiesRequestV1, type AgentCapabilitiesRequestV1 } from "./agent-adapter-v1.ts";
 
 export const MODEL_CHOICES_CHANNEL = "m5:models:v1";
-export type ModelChoicesRequest = AgentCapabilitiesRequestV1 & { runtime: "codex" | "claude-code"; chatId?: string; roleId?: "coordinator" | "design" | "planning" | "coding" | "review" };
+export type ModelChoicesRequest = AgentCapabilitiesRequestV1 & { runtime: "codex" | "claude-code"; chatId?: string; roleId?: string };
 export interface ModelChoicesResult {
   schemaVersion: 1;
   runtime: "codex" | "claude-code";
   scope: { chatId: string; roleId: string; worktreeId: string; workspaceIdentity: string } | null;
   usage?: { windows: { id: "primary" | "secondary"; usedPercent: number; windowMinutes: number | null; resetsAt: number | null }[] } | null;
-  models: { modelSelector: string; reasoningEfforts: string[]; isDefault?: boolean }[];
+  models: { modelSelector: string; reasoningEfforts: string[]; isDefault?: boolean; resolvedModel?: string }[];
 }
 function fail(): never { throw new Error("invalid model choices"); }
 function object(value: unknown, keys: string[]): Record<string, unknown> {
@@ -51,8 +51,11 @@ export function validateModelChoicesResult(value: unknown, request: ModelChoices
   if (!Array.isArray(result.models) || result.models.length > 256) return fail();
   const names = new Set<string>();
   for (const item of result.models) {
-    const model = object(item, ["modelSelector", "reasoningEfforts", ...(item && typeof item === "object" && "isDefault" in item ? ["isDefault"] : [])]);
+    const has = (key: string) => Boolean(item && typeof item === "object" && key in item);
+    const model = object(item, ["modelSelector", "reasoningEfforts", ...(has("isDefault") ? ["isDefault"] : []), ...(has("resolvedModel") ? ["resolvedModel"] : [])]);
     if (model.isDefault !== undefined && typeof model.isDefault !== "boolean") return fail();
+    // Display only: the concrete model an alias such as "opus" maps to.
+    if (model.resolvedModel !== undefined && !/^[A-Za-z0-9._\[\]-]{1,128}$/.test(String(text(model.resolvedModel, 128)))) return fail();
     const name = text(model.modelSelector, 128);
     if (names.has(name)) return fail();
     names.add(name);

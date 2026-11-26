@@ -18,6 +18,9 @@ pub(crate) struct InstallManager {
     view: Arc<Mutex<Value>>,
     accepted: Option<(String, String)>,
     closing: bool,
+    /// Tests: an installation in progress, without running one.
+    #[cfg(test)]
+    pub(crate) busy_for_test: bool,
 }
 
 impl Default for InstallManager {
@@ -29,6 +32,8 @@ impl Default for InstallManager {
             view: Arc::new(Mutex::new(view("idle", None, None, None, None))),
             accepted: None,
             closing: false,
+            #[cfg(test)]
+            busy_for_test: false,
         }
     }
 }
@@ -251,6 +256,8 @@ impl InstallManager {
     pub(crate) fn blocks_provider_launch(&mut self, storage: &Storage) -> bool {
         self.reap();
         let _ = self.detect_pending(storage);
+        #[cfg(test)]
+        if self.busy_for_test { return true; }
         self.worker.is_some()
             || matches!(
                 self.snapshot()["state"].as_str(),

@@ -184,6 +184,25 @@ fn materialized_snapshot_refreshes_index_stat_without_hiding_edits() {
 }
 
 #[test]
+fn changed_entries_carry_line_counts_for_text_only() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    // "hello" (one line) becomes three lines; a new file has two; a binary file has none.
+    fs::write(active.worktree_path.join("src/edit.txt"), b"one\ntwo\nthree\n").unwrap();
+    fs::write(active.worktree_path.join("new.txt"), b"a\nb").unwrap();
+    fs::write(active.worktree_path.join("blob.bin"), [0u8, 159, 146, 150]).unwrap();
+    let summary = fixture.manager.diff_summary(&fixture.storage, &fixture.project_id).unwrap();
+    let entries = summary.result["entries"].as_array().unwrap();
+    let find = |path: &str| entries.iter().find(|entry| entry["path"] == path).unwrap().clone();
+    let edit = find("src/edit.txt");
+    assert_eq!((edit["added"].as_u64(), edit["removed"].as_u64()), (Some(3), Some(1)));
+    let new = find("new.txt");
+    assert_eq!((new["added"].as_u64(), new["removed"].as_u64()), (Some(2), Some(0)));
+    let blob = find("blob.bin");
+    assert!(blob.get("added").is_none() && blob.get("removed").is_none(), "{blob}");
+}
+
+#[test]
 fn materialized_sync_batch_drains_full_and_trailing_files() {
     let temporary = TempDir::new().unwrap();
     let root = Dir::open_ambient_dir(temporary.path(), ambient_authority()).unwrap();
@@ -2896,6 +2915,18 @@ fn application_review_binds_all_changes_and_rejects_stale_snapshot() {
         "{:?}",
         clean.changed_paths()
     );
+    // Claude Code's private bookkeeping folder (0700, with whatever it keeps
+    // there) is neither a change nor a reason to refuse the review.
+    fs::create_dir_all(active.worktree_path.join(".claude/.cc-writes/inner")).unwrap();
+    fs::write(active.worktree_path.join(".claude/.cc-writes/inner/mark"), b"x").unwrap();
+    fs::set_permissions(active.worktree_path.join(".claude/.cc-writes"), fs::Permissions::from_mode(0o700)).unwrap();
+    let scratch = review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).unwrap();
+    assert!(scratch.changed_paths().is_empty(), "{:?}", scratch.changed_paths());
+    // Anything else in `.claude` is still the project's own content.
+    fs::write(active.worktree_path.join(".claude/settings.json"), b"{}").unwrap();
+    let settings = review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(settings.changed_paths(), vec![".claude", ".claude/settings.json"]);
+    fs::remove_dir_all(active.worktree_path.join(".claude")).unwrap();
     fs::write(active.worktree_path.join("src/edit.txt"), [0, 255, 7]).unwrap();
     fs::set_permissions(
         active.worktree_path.join("src/edit.txt"),
@@ -2960,6 +2991,21 @@ fn application_review_binds_all_changes_and_rejects_stale_snapshot() {
         fs::read(fixture.source.join("src/edit.txt")).unwrap(),
         b"hello"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn application_review_never_reads_a_tracked_agent_bookkeeping_file_as_deleted() {
+    use application::review;
+    let mut fixture = source_index_fixture();
+    fs::create_dir_all(fixture.source.join(".claude/.cc-writes")).unwrap();
+    fs::write(fixture.source.join(".claude/.cc-writes/kept"), b"tracked").unwrap();
+    git_raw(&fixture.source, ["add", "-f", ".claude/.cc-writes/kept"]);
+    git_raw(&fixture.source, ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "tracked bookkeeping"]);
+    fixture.manager.open_project(&mut fixture.storage, fixture.source.to_str().unwrap(), "req_scratch_open").unwrap();
+    fixture.manager.create_worktree_inner(&mut fixture.storage, &fixture.project_id, "req_scratch_snapshot", None, None, SnapshotCreation::ApplicationCandidate).unwrap();
+    assert!(review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).is_err());
+    assert_eq!(fs::read(fixture.source.join(".claude/.cc-writes/kept")).unwrap(), b"tracked");
 }
 
 #[cfg(unix)]
@@ -3125,8 +3171,20 @@ fn application_snapshot_creation_keeps_failures_fenced_without_downgrade() {
             )
             .is_err());
         let project = required_project(&fixture.storage, &fixture.project_id).unwrap();
-        assert_eq!(project["lifecycle"], "recoveryRequired");
-        assert!(!fixture.storage.blocker_ids().unwrap().is_empty());
+        if scenario == "dirty" {
+            // Refused before anything was unpacked and with no helper left
+            // running: the preparation is undone, never downgraded to a copy
+            // without a baseline, and nothing is left to recover.
+            assert_eq!(project["lifecycle"], "opened");
+            assert!(!project.contains_key("worktree_id"));
+            assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+            assert_eq!(fs::read_dir(&fixture.manager.worktrees_root).unwrap().count(), 0);
+            assert_eq!(fs::read_dir(&fixture.manager.manifests_root).unwrap().count(), 0);
+        } else {
+            // Later failures stay fenced exactly as before.
+            assert_eq!(project["lifecycle"], "recoveryRequired");
+            assert!(!fixture.storage.blocker_ids().unwrap().is_empty());
+        }
         assert!(fixture
             .manager
             .inspect_unstarted_snapshot(&fixture.storage, &fixture.project_id)
@@ -4293,7 +4351,15 @@ fn case_colliding_committed_paths_fail_closed_before_activation() {
         .unwrap_err();
     assert_eq!(failure.kind, "manifestMismatch");
     assert!(failure.detail.contains("case-colliding"));
-    assert!(!storage.blocker_ids().unwrap().is_empty());
+    // Refused before activation and undone: the project is not left stuck and
+    // other projects are not blocked. Trying again is refused the same way.
+    assert!(storage.blocker_ids().unwrap().is_empty());
+    assert_eq!(required_project(&storage, project_id).unwrap()["lifecycle"], "opened");
+    let again = manager
+        .create_worktree(&mut storage, project_id, "req_case_create_again")
+        .unwrap_err();
+    assert!(again.detail.contains("case-colliding"));
+    assert!(storage.blocker_ids().unwrap().is_empty());
     assert!(fs::read_dir(data.join(WORKTREE_DIRECTORY))
         .unwrap()
         .all(|entry| entry
@@ -4619,11 +4685,26 @@ fn sparse_base_over_diff_limit_is_classified_without_loading_blob() {
     assert_eq!(file.result["byteLength"], DIFF_MAX_BYTES as u64 + 1);
 }
 
+/// The index check takes no `.git/index.lock` (a provider's own `git status`
+/// may hold it) and, like `write-tree`, ignores intent-to-add entries.
+#[test]
+fn snapshot_index_check_tolerates_index_lock_and_intent_to_add() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    let workspace = fixture.manager.worktree_capability(&active).unwrap();
+    fs::write(active.worktree_path.join(".git/index.lock"), b"").unwrap();
+    fixture.manager.verify_snapshot_repository(&workspace, &active).unwrap();
+    fs::remove_file(active.worktree_path.join(".git/index.lock")).unwrap();
+    fs::write(active.worktree_path.join("planned.txt"), b"later").unwrap();
+    git_raw(&active.worktree_path, ["add", "-N", "planned.txt"]);
+    fixture.manager.verify_snapshot_repository(&workspace, &active).unwrap();
+}
+
 #[cfg(unix)]
 #[test]
 fn concurrent_snapshot_checks_reject_each_repository_invariant_drift() {
     use std::os::unix::fs::PermissionsExt as _;
-    for case in ["head", "symbolic", "object", "index", "remote", "oversized-remote"] {
+    for case in ["head", "symbolic", "object", "index", "ignored-gitlink", "remote", "oversized-remote"] {
         let mut fixture = Fixture::open();
         let active = fixture.create();
         let workspace = fixture.manager.worktree_capability(&active).unwrap();
@@ -4657,6 +4738,13 @@ fn concurrent_snapshot_checks_reject_each_repository_invariant_drift() {
             "index" => {
                 fs::write(active.worktree_path.join("drift.txt"), b"drift").unwrap();
                 git_raw(&active.worktree_path, ["add", "drift.txt"]);
+            }
+            "ignored-gitlink" => {
+                // `.gitmodules` `ignore = all` must not hide a staged gitlink.
+                fs::write(active.worktree_path.join(".gitmodules"),
+                    b"[submodule \"sub\"]\n\tpath = sub\n\turl = ./sub\n\tignore = all\n").unwrap();
+                let gitlink = format!("160000,{},sub", active.base_commit);
+                git_raw(&active.worktree_path, ["update-index", "--add", "--cacheinfo", gitlink.as_str()]);
             }
             "remote" => git_raw(&active.worktree_path, ["remote", "add", "forbidden", "/nonexistent-fixture-remote"]),
             "oversized-remote" => {
@@ -5232,13 +5320,18 @@ fn managed_root_swap_before_bound_git_never_touches_external_or_registers_worktr
         },
     );
     let error = result.unwrap_err();
+    // The refused preparation is undone instead of being left behind as
+    // recovery work; the error itself still says what went wrong.
     assert_eq!(error.kind, "recoveryRequired");
+    assert!(error.detail.contains("nothing needs recovery"), "{}", error.detail);
     assert_eq!(fs::read(external.join("sentinel")).unwrap(), b"external");
     assert_eq!(fs::read_dir(&external).unwrap().count(), 1);
     assert_eq!(
         git_bytes_raw(&fixture.source, ["worktree", "list", "--porcelain"]),
         before_registration
     );
+    assert_eq!(required_project(&fixture.storage, &fixture.project_id).unwrap()["lifecycle"], "opened");
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
     fs::remove_file(&managed).unwrap();
     fs::rename(&moved, &managed).unwrap();
 }
@@ -6071,42 +6164,80 @@ fn tree_lists_directories_before_files_across_pages() {
 }
 
 #[test]
-fn catalog_removal_preserves_source_and_restores_after_selection() {
+fn deleting_a_project_keeps_the_source_and_readding_starts_fresh() {
     let mut f = Fixture::open();
     let source = fs::read(f.source.join("src/edit.txt")).unwrap();
-    f.manager.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", "req_hide").unwrap();
+    let mut project = required_project(&f.storage, &f.project_id).unwrap();
+    project.insert("role_settings".into(), json!({"marker":"old"}));
+    append_object(&mut f.storage, "project", &f.project_id, "op_test_old_roles", "req_test_old_roles", Value::Object(project)).unwrap();
+    f.manager.delete_project(&mut f.storage, &f.project_id, "req_delete").unwrap();
     assert!(f.manager.list_saved_projects(&f.storage, None).unwrap().result["projects"].as_array().unwrap().is_empty());
-    assert!(f.storage.projection_record("project", &f.project_id).unwrap().is_some());
+    let deleted = registered_project(&f.storage, &f.project_id).unwrap();
+    assert_eq!(deleted["canonical_path"], format!("deleted:{}", f.project_id));
     assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), source);
-    f.manager.open_project(&mut f.storage, f.source.to_str().unwrap(), "req_show").unwrap();
-    assert_eq!(f.manager.list_saved_projects(&f.storage, None).unwrap().result["projects"].as_array().unwrap().len(), 1);
+    // Deleting twice is a no-op.
+    f.manager.delete_project(&mut f.storage, &f.project_id, "req_delete_again").unwrap();
+    let opened = f.manager.open_project(&mut f.storage, f.source.to_str().unwrap(), "req_readd").unwrap();
+    let fresh = opened.result["projectId"].as_str().unwrap().to_owned();
+    assert_ne!(fresh, f.project_id, "a re-added folder starts under a new identity");
+    assert!(required_project(&f.storage, &fresh).unwrap().get("role_settings").is_none());
+    let listed = f.manager.list_saved_projects(&f.storage, None).unwrap().result;
+    assert_eq!(listed["projects"].as_array().unwrap().len(), 1);
+    assert_eq!(listed["projects"][0]["projectId"], fresh);
+    // The deleted identity can never be reopened from the catalog.
+    assert!(f.manager.reopen_project(&mut f.storage, &f.project_id, "req_reopen_deleted").is_err());
 }
 
 #[test]
-fn catalog_removal_rejects_recovery_and_keeps_visibility() {
+fn readding_a_project_hidden_by_the_old_list_removal_starts_fresh() {
+    let mut f = Fixture::open();
+    let mut project = required_project(&f.storage, &f.project_id).unwrap();
+    project.insert("catalog_hidden".into(), json!(true));
+    append_object(&mut f.storage, "project", &f.project_id, "op_test_legacy_hide", "req_test_legacy_hide", Value::Object(project)).unwrap();
+    let opened = f.manager.open_project(&mut f.storage, f.source.to_str().unwrap(), "req_readd_legacy").unwrap();
+    assert_ne!(opened.result["projectId"], f.project_id);
+    assert!(registered_project(&f.storage, &f.project_id).unwrap().contains_key(project_deletion::PROJECT_FIELD));
+}
+
+#[test]
+fn deleting_a_project_that_still_needs_recovery_is_allowed() {
+    // Deleting is the user's call; the recovery record itself is untouched.
     let mut f = Fixture::open();
     let mut project = required_project(&f.storage, &f.project_id).unwrap();
     project.insert("lifecycle".into(), json!("recoveryRequired"));
     append_object(&mut f.storage, "project", &f.project_id, "op_test_recovery", "req_test_recovery", Value::Object(project)).unwrap();
-    assert!(f.manager.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", "req_hide").is_err());
-    assert_eq!(f.manager.list_saved_projects(&f.storage, None).unwrap().result["projects"].as_array().unwrap().len(), 1);
+    f.manager.delete_project(&mut f.storage, &f.project_id, "req_delete").unwrap();
+    assert!(f.manager.list_saved_projects(&f.storage, None).unwrap().result["projects"].as_array().unwrap().is_empty());
+    assert_eq!(registered_project(&f.storage, &f.project_id).unwrap()["lifecycle"], "recoveryRequired");
+}
+
+#[test]
+fn deleting_waits_only_for_a_half_written_original() {
+    for (state, allowed) in [("applying", false), ("prepared", true), ("applied", true)] {
+        let mut f = Fixture::open();
+        let mut project = required_project(&f.storage, &f.project_id).unwrap();
+        project.insert("application_intent".into(), json!({"state": state}));
+        append_object(&mut f.storage, "project", &f.project_id, &format!("op_intent_{state}"), &format!("req_intent_{state}"), Value::Object(project)).unwrap();
+        let result = f.manager.delete_project(&mut f.storage, &f.project_id, &format!("req_delete_{state}"));
+        assert_eq!(result.is_ok(), allowed, "{state}");
+    }
 }
 
 #[cfg(unix)]
 #[test]
-fn catalog_removal_refuses_open_application_confirmation() {
+fn deleting_refuses_open_application_confirmation() {
     use application::review::{confirmation::Confirmations, ReviewTarget};
     let (mut f, review_id) = prepared_backup_fixture();
     let mut owner = Confirmations::default();
     let (token, _) = owner.open(&f.manager, &f.storage, ReviewTarget::Project(&f.project_id), &review_id).unwrap();
     f.manager.application_confirmations = owner;
-    for (action, chat) in [("removeProject", None), ("removeChat", Some("chat_pending")), ("restoreChats", None)] {
-        let error = f.manager.change_catalog_visibility(&mut f.storage, &f.project_id, chat, action, "req_confirmation_hide").err().unwrap();
-        assert!(error.detail.contains("close the application confirmation"));
-    }
+    let error = f.manager.delete_project(&mut f.storage, &f.project_id, "req_confirmation_delete").err().unwrap();
+    assert!(error.detail.contains("close the application confirmation"));
+    let error = f.manager.delete_chat(&mut f.storage, &f.project_id, "chat_pending", "req_confirmation_delete_chat").err().unwrap();
+    assert!(error.detail.contains("close the application confirmation"));
     assert_eq!(f.manager.list_saved_projects(&f.storage, None).unwrap().result["projects"].as_array().unwrap().len(), 1);
     f.manager.cancel_application_confirmation(&token).unwrap();
-    f.manager.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", "req_after_confirmation").unwrap();
+    f.manager.delete_project(&mut f.storage, &f.project_id, "req_after_confirmation").unwrap();
 }
 
 #[cfg(target_os = "macos")]
@@ -6166,4 +6297,1281 @@ fn selected_directory_uses_search_only_ancestors_and_rejects_links() {
     assert!(open_absolute_directory_capability(&root_path.join("linked-parent/selected")).is_err());
     symlink(&selected, root_path.join("linked-leaf")).unwrap();
     assert!(open_absolute_directory_capability(&root_path.join("linked-leaf")).is_err());
+}
+
+#[test]
+fn a_copy_whose_original_changed_meanwhile_is_dropped_and_can_simply_be_retried() {
+    // First open of a project: no copy exists yet.
+    let mut fixture = Fixture::open();
+    let opened = required_project(&fixture.storage, &fixture.project_id).unwrap();
+    let marker = fixture.source.join(".git/another-tool-was-here");
+    let error = fixture
+        .manager
+        .create_worktree_with_pre_export_hook(&mut fixture.storage, &fixture.project_id, "req_changed_first", || {
+            fs::write(&marker, b"x").unwrap();
+        })
+        .unwrap_err();
+    assert!(error.detail.contains("changed during snapshot export"), "{}", error.detail);
+    assert!(error.detail.contains("nothing needs recovery"), "{}", error.detail);
+    let mut restored = required_project(&fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(restored["lifecycle"], "opened");
+    restored.remove("last_event_sequence");
+    let mut expected = opened.clone();
+    expected.remove("last_event_sequence");
+    assert_eq!(restored, expected);
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+    let leftovers = |fixture: &Fixture| fs::read_dir(&fixture.manager.worktrees_root).unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.ends_with(".creating"))
+        .count();
+    assert_eq!(leftovers(&fixture), 0);
+    // Nothing needs recovery: the same request simply works now.
+    let view = fixture.manager.create_worktree(&mut fixture.storage, &fixture.project_id, "req_changed_first_retry").unwrap().result;
+
+    // A task copy: the project keeps pointing at its own copy throughout.
+    fs::remove_file(&marker).unwrap();
+    let error = fixture
+        .manager
+        .prepare_chat_workspace_with_pre_export_hook(&mut fixture.storage, &fixture.project_id, "req_changed_task", || {
+            fs::write(&marker, b"x").unwrap();
+        })
+        .unwrap_err();
+    assert!(error.detail.contains("nothing needs recovery"), "{}", error.detail);
+    let project = required_project(&fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(project["lifecycle"], "active");
+    assert_eq!(project["worktree_id"], view["worktreeId"]);
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+    assert_eq!(leftovers(&fixture), 0);
+    assert_eq!(fixture.manager.create_worktree(&mut fixture.storage, &fixture.project_id, "req_changed_view").unwrap().result, view);
+    let task = fixture.manager.prepare_chat_workspace(&mut fixture.storage, &fixture.project_id, "req_changed_task_retry").unwrap().result;
+    assert_ne!(task["worktreeId"], view["worktreeId"]);
+    assert_eq!(required_project(&fixture.storage, &fixture.project_id).unwrap()["worktree_id"], view["worktreeId"]);
+
+    // Another Git command busy in the original right before the copy starts.
+    let busy = fixture.source.join(".git/index.lock");
+    fs::write(&busy, b"").unwrap();
+    let error = fixture.manager.prepare_chat_workspace(&mut fixture.storage, &fixture.project_id, "req_busy_task").unwrap_err();
+    assert_eq!(error.kind, "dirtyConflict", "{}", error.detail);
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+    assert_eq!(leftovers(&fixture), 0);
+    fs::remove_file(&busy).unwrap();
+    fixture.manager.prepare_chat_workspace(&mut fixture.storage, &fixture.project_id, "req_busy_task_retry").unwrap();
+
+    // The whole history replays cleanly when the app starts again.
+    let database = fixture.storage.path().to_path_buf();
+    drop(fixture.manager);
+    drop(fixture.storage);
+    let storage = Storage::open(&database).unwrap();
+    assert!(storage.blocker_ids().unwrap().is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn saving_a_file_in_the_original_while_a_task_copy_is_made_is_undone_and_retried() {
+    let mut fixture = source_index_fixture();
+    // v1 task copies (still available with ELSECREW_GIT_WORKTREES=0).
+    fixture.manager.git_worktrees_enabled = false;
+    fixture.manager.open_project(&mut fixture.storage, fixture.source.to_str().unwrap(), "req_saved_open").unwrap();
+    let view = fixture.manager.create_worktree(&mut fixture.storage, &fixture.project_id, "req_saved_view").unwrap().result;
+    let edited = fixture.source.join("src/edit.txt");
+    let clean = fs::read(&edited).unwrap();
+    // The user (or an editor) saves a tracked file right when the copy starts.
+    let error = fixture
+        .manager
+        .prepare_chat_application_workspace_with_pre_export_hook(&mut fixture.storage, &fixture.project_id, "req_saved_task", || {
+            fs::write(&edited, b"being edited").unwrap();
+        })
+        .unwrap_err();
+    assert_eq!(error.kind, "dirtyConflict", "{}", error.detail);
+    assert!(error.detail.contains("nothing needs recovery"), "{}", error.detail);
+    let project = required_project(&fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(project["lifecycle"], "active");
+    assert_eq!(project["worktree_id"], view["worktreeId"]);
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+    assert!(fs::read_dir(&fixture.manager.worktrees_root).unwrap().all(|entry| {
+        !entry.unwrap().file_name().to_string_lossy().ends_with(".creating")
+    }));
+    assert_eq!(fs::read(&edited).unwrap(), b"being edited", "the original is never touched");
+    // Once the original is clean again the same request simply works.
+    fs::write(&edited, &clean).unwrap();
+    let task = fixture
+        .manager
+        .prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_saved_task_retry")
+        .unwrap()
+        .result;
+    assert_ne!(task["worktreeId"], view["worktreeId"]);
+    let project = required_project(&fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(project["worktree_id"], view["worktreeId"]);
+    assert!(project["source_baselines"].get(task["worktreeId"].as_str().unwrap()).is_some());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_new_commit_in_the_original_does_not_stop_new_tasks() {
+    let mut fixture = source_index_fixture();
+    // v1 task copies (still available with ELSECREW_GIT_WORKTREES=0).
+    fixture.manager.git_worktrees_enabled = false;
+    fixture.manager.open_project(&mut fixture.storage, fixture.source.to_str().unwrap(), "req_commit_open").unwrap();
+    let view = fixture.manager.create_worktree(&mut fixture.storage, &fixture.project_id, "req_commit_view").unwrap().result;
+    let first = git_text(&fixture.source, ["rev-parse", "HEAD"]);
+    // The usual loop: changes land in the original and get committed there.
+    fs::write(fixture.source.join("src/edit.txt"), b"applied and committed").unwrap();
+    git_raw(&fixture.source, ["add", "."]);
+    git_raw(&fixture.source, ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "-m", "next"]);
+    let second = git_text(&fixture.source, ["rev-parse", "HEAD"]);
+    assert_ne!(first, second);
+    // New tasks start from the original as it is now, with or without a baseline.
+    let plain = fixture.manager.prepare_chat_workspace(&mut fixture.storage, &fixture.project_id, "req_commit_task").unwrap().result;
+    let baseline = fixture.manager.prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_commit_baseline_task").unwrap().result;
+    for task in [&plain, &baseline] {
+        assert_eq!(task["baseCommit"], second.as_str());
+        assert_eq!(
+            fs::read(PathBuf::from(task["worktreePath"].as_str().unwrap()).join("src/edit.txt")).unwrap(),
+            b"applied and committed"
+        );
+    }
+    // The project keeps its own (older) copy and stays openable.
+    let project = required_project(&fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(project["worktree_id"], view["worktreeId"]);
+    assert_eq!(project["base_commit"], first.as_str());
+    assert!(project["source_baselines"].get(baseline["worktreeId"].as_str().unwrap()).is_some());
+    // Opened again, its untouched view copy follows the original as it is
+    // now; the tasks' baselines stay.
+    fixture.manager.reopen_project(&mut fixture.storage, &fixture.project_id, "req_commit_reopen").unwrap();
+    let again = fixture.manager.create_worktree(&mut fixture.storage, &fixture.project_id, "req_commit_view_again").unwrap().result;
+    assert_ne!(again["worktreeId"], view["worktreeId"]);
+    assert_eq!(again["baseCommit"], second.as_str());
+    let project = required_project(&fixture.storage, &fixture.project_id).unwrap();
+    assert!(project["source_baselines"].get(baseline["worktreeId"].as_str().unwrap()).is_some());
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+}
+
+#[test]
+fn a_project_folder_that_lost_its_repository_never_lets_a_parent_repository_stand_in() {
+    let mut fixture = Fixture::open();
+    let view = fixture.manager.create_worktree(&mut fixture.storage, &fixture.project_id, "req_parent_view").unwrap().result;
+    let before = required_project(&fixture.storage, &fixture.project_id).unwrap();
+    // The folder's own `.git` is gone and the folder above is a repository.
+    let parent = fixture.source.parent().unwrap().to_path_buf();
+    fs::rename(fixture.source.join(".git"), parent.join(".git")).unwrap();
+    for (request, baseline) in [("req_parent_task", false), ("req_parent_baseline_task", true)] {
+        let refused = if baseline {
+            fixture.manager.prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, request)
+        } else {
+            fixture.manager.prepare_chat_workspace(&mut fixture.storage, &fixture.project_id, request)
+        }
+        .unwrap_err();
+        assert!(refused.detail.contains("no longer the root"), "{}", refused.detail);
+        // Refused before anything was recorded or copied.
+        assert_eq!(required_project(&fixture.storage, &fixture.project_id).unwrap(), before);
+        assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+    }
+    assert_eq!(
+        fs::read_dir(&fixture.manager.worktrees_root).unwrap().count(),
+        1,
+        "only the project's own copy exists"
+    );
+    assert!(PathBuf::from(view["worktreePath"].as_str().unwrap()).is_dir());
+    fs::rename(parent.join(".git"), fixture.source.join(".git")).unwrap();
+}
+
+#[test]
+fn recorded_identities_compare_without_device_numbers() {
+    let image = json!({"kind":1,"mode":0o100644,"size":3,"digest":[1,2],"identity":[16777230,42,1]});
+    assert_eq!(without_device(&image)["identity"], json!([0, 42, 1]));
+    assert_eq!(without_device(&image)["digest"], image["digest"]);
+    assert_eq!(without_device(&json!([16777230, 7])), json!([0, 7]));
+    assert_eq!(without_device(&json!([5, 6, 7, 8, 9, 10, 11, 12, 13]))[0], json!(0));
+    assert_eq!(without_device(&Value::Null), Value::Null);
+    // Values without a device slot are left alone.
+    let windows = json!({"fileId":"abc","observation":{"x":1}});
+    assert_eq!(without_device(&windows), windows);
+    // Only identity shapes are touched.
+    assert_eq!(without_device(&json!([5, 6, 7, 8])), json!([5, 6, 7, 8]));
+}
+
+#[cfg(unix)]
+#[test]
+fn source_receipts_record_no_device_numbers_and_older_ones_still_match_after_a_restart() {
+    use application::git_baseline::raw_baseline::{
+        capture_clean_baseline,
+        receipt::{self, BaselineReceipt},
+    };
+    use std::os::unix::fs::MetadataExt;
+    let mut fixture = source_index_fixture();
+    fixture.manager.open_project(&mut fixture.storage, fixture.source.to_str().unwrap(), "req_device_receipt").unwrap();
+    let source = fixture.manager.open_source_repository(&fixture.source).unwrap();
+    let baseline = capture_clean_baseline(&fixture.manager, &source).unwrap();
+    let active = fixture.create();
+    let store = receipt::ReceiptStore::open(&fixture.manager).unwrap();
+    let recorded = receipt::persist(&store, &active, &baseline).unwrap();
+    let path = fixture.manager.data_root.join("source-baselines-v1").join(format!("{}.source-baseline-v1.json", active.worktree_id));
+    let written: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    let entries = written["rawEntries"].as_array().unwrap();
+    assert!(!entries.is_empty());
+    for entry in entries {
+        assert_eq!(entry[4][0], "0", "a device number was recorded: {entry}");
+    }
+    assert_eq!(written["rootStamp"][0], "0");
+    receipt::verify(&store, &active, &capture_clean_baseline(&fixture.manager, &source).unwrap(), Some(&recorded)).unwrap();
+
+    // A receipt written by the previous version (with this boot's device number).
+    let device = fs::metadata(&fixture.source).unwrap().dev();
+    assert_ne!(device, 0);
+    let as_bound = |bytes: &[u8]| BaselineReceipt::from_value(&json!({
+        "schemaVersion":1,"digest":format!("sha256:{:x}", Sha256::digest(bytes)),"length":bytes.len(),
+    })).unwrap();
+    let current = capture_clean_baseline(&fixture.manager, &source).unwrap();
+    // Written this boot, or before a restart gave the volume another number:
+    // both still match, because the number written in the receipt is used.
+    for device in [device, device + 1] {
+        let legacy = receipt::legacy_bytes_for_test(&active, &current, device);
+        assert_ne!(legacy, fs::read(&path).unwrap());
+        // Rewritten in place: the receipt file keeps its identity.
+        fs::OpenOptions::new().write(true).truncate(true).open(&path).unwrap().write_all(&legacy).unwrap();
+        receipt::verify(&store, &active, &current, Some(&as_bound(&legacy))).unwrap();
+        // Any other difference is still refused.
+        fs::write(fixture.source.join("untracked-after-restart.txt"), b"x").unwrap();
+        let changed = capture_clean_baseline(&fixture.manager, &source).unwrap();
+        assert!(receipt::verify(&store, &active, &changed, Some(&as_bound(&legacy))).is_err(), "device {device}");
+        fs::remove_file(fixture.source.join("untracked-after-restart.txt")).unwrap();
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn an_update_of_the_original_can_be_restored_after_a_restart_renumbered_the_volume() {
+    use application::review::{confirmation::Confirmations, intent, ReviewTarget};
+    let (mut f, review) = prepared_edit_fixture();
+    let mut owner = Confirmations::default();
+    let (token, _) = owner.open(&f.manager, &f.storage, ReviewTarget::Project(&f.project_id), &review).unwrap();
+    let grant = owner.prepare_backup(&f.manager, &mut f.storage, &token, "req_renumber_backup").unwrap();
+    let prepared = intent::begin(&f.manager, &mut f.storage, &mut owner, grant, "req_renumber_begin").unwrap();
+    let applying = intent::mark_write_started(&f.manager, &mut f.storage, &f.project_id, &prepared, "req_renumber_start").unwrap();
+    let pending = intent::record_first_item(&f.manager, &mut f.storage, &f.project_id, &applying, "req_renumber_pending").unwrap();
+    let applied = intent::writer::write_first_regular_item(&f.manager, &mut f.storage, &f.project_id, &pending, "req_renumber_apply").unwrap();
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"updated");
+    // Nothing recorded carries a device number.
+    let journal = &applied["pendingItem"]["writeJournal"];
+    assert_eq!(journal["rootIdentity"][0], 0);
+    assert_eq!(journal["parentIdentity"][0], 0);
+    assert_eq!(journal["stagedImage"]["identity"][0], 0);
+    assert_eq!(applied["pendingItem"]["item"]["before"]["identity"][0], 0);
+    // The record as an older version wrote it before a restart gave the
+    // volume another device number.
+    let mut renumbered = applied.clone();
+    for key in ["rootIdentity", "parentIdentity"] {
+        renumbered["pendingItem"]["writeJournal"][key][0] = json!(7_777_777);
+    }
+    renumbered["pendingItem"]["writeJournal"]["stagedImage"]["identity"][0] = json!(7_777_777);
+    let mut project = required_project(&f.storage, &f.project_id).unwrap();
+    project.insert("application_intent".into(), renumbered.clone());
+    f.storage.upsert_projection_record("project", &f.project_id, "op_test_renumbered_intent", None, project).unwrap();
+    assert_eq!(
+        intent::writer::inspect_regular_outcome(&f.manager, &f.storage, &f.project_id).unwrap()["comparison"],
+        "matchesAppliedPair"
+    );
+    let restored = intent::writer::restore_first_regular_item(&f.manager, &mut f.storage, &f.project_id, &renumbered, "req_renumber_restore").unwrap();
+    assert_eq!(restored["pendingItem"]["writeJournal"]["phase"], "restored");
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
+}
+
+#[cfg(unix)]
+#[test]
+fn fixed_git_commands_never_run_repository_hooks() {
+    // A user repository may configure hooks; commands the app runs in it
+    // (real worktrees, 2026-11-18 design) must not trigger them.
+    let fixture = Fixture::open();
+    let repo = TempDir::new().unwrap();
+    let marker = repo.path().join("hook-ran");
+    for args in [vec!["init", "-q"], vec!["config", "core.hooksPath", ".hooks"]] {
+        assert!(Command::new("/usr/bin/git").args(&args).current_dir(repo.path()).status().unwrap().success());
+    }
+    fs::create_dir(repo.path().join(".hooks")).unwrap();
+    let hook = repo.path().join(".hooks/pre-commit");
+    fs::write(&hook, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
+    use std::os::unix::fs::PermissionsExt as _;
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    let dir = Dir::open_ambient_dir(repo.path(), ambient_authority()).unwrap();
+    fixture.manager.git_limited_bytes_at(
+        &dir,
+        ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"],
+        &[0],
+        4096,
+    ).unwrap();
+    assert!(!marker.exists(), "a repository hook ran through the app's Git command");
+}
+
+/// Real worktrees (docs/proposals/m5-real-worktrees.md §3.2): a task gets a
+/// worktree of the user's repository on its own branch; the user's folder,
+/// its branch and its status stay as they were.
+#[cfg(target_os = "macos")]
+#[test]
+fn task_workspaces_become_real_worktrees_on_their_own_branch() {
+    let mut fixture = Fixture::open();
+    fixture.manager.git_worktrees_enabled = true;
+    // An uncommitted edit in the user's folder stays there and is no obstacle.
+    fs::write(fixture.source.join("src/delete.txt"), b"user is editing\n").unwrap();
+    let head = git_text(&fixture.source, ["rev-parse", "HEAD"]);
+    let current = git_text(&fixture.source, ["symbolic-ref", "--short", "HEAD"]);
+    let status = git_text(&fixture.source, ["status", "--porcelain"]);
+    let manifest = fixture
+        .manager
+        .prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_real_worktree")
+        .unwrap()
+        .result;
+    validate_project_payload_v1("worktreeManifest", &manifest).unwrap();
+    assert_eq!((manifest["schemaVersion"].as_u64(), manifest["workspaceKind"].as_str()), (Some(2), Some("gitWorktree")));
+    assert_eq!(manifest["baseRef"], current.trim());
+    assert_eq!(manifest["baseCommit"], head.trim());
+    let branch = manifest["branchName"].as_str().unwrap().to_owned();
+    assert!(branch.starts_with("elsecrew/task-"), "{branch}");
+    let path = PathBuf::from(manifest["worktreePath"].as_str().unwrap());
+    // Visible like Orca: `<작업 공간 폴더>/<project>/task-<8 hex>`, outside the app's data.
+    let home = fixture.manager.workspaces_home().unwrap();
+    assert!(path.starts_with(home.canonicalize().unwrap().join("source")), "{}", path.display());
+    assert!(path.file_name().unwrap().to_str().unwrap().starts_with("task-"));
+    assert!(!path.starts_with(&fixture.manager.data_root));
+    assert_eq!(fs::read(path.join("src/edit.txt")).unwrap(), b"hello");
+    assert_eq!(fs::read(path.join("src/delete.txt")).unwrap(), b"delete me\n");
+    assert_eq!(git_text(&fixture.source, ["rev-parse", "HEAD"]), head);
+    assert_eq!(git_text(&fixture.source, ["symbolic-ref", "--short", "HEAD"]), current);
+    assert_eq!(git_text(&fixture.source, ["status", "--porcelain"]), status);
+    assert_eq!(git_text(&fixture.source, ["rev-parse", &format!("refs/heads/{branch}")]), head);
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+
+    // Edits show against the base, before and after the app commits them.
+    fs::write(path.join("src/edit.txt"), b"one\ntwo\n").unwrap();
+    let changed = |fixture: &mut Fixture| {
+        let summary = fixture.manager.diff_summary(&fixture.storage, &fixture.project_id).unwrap();
+        summary.result["entries"].as_array().unwrap().iter().any(|entry| entry["path"] == "src/edit.txt")
+    };
+    assert!(changed(&mut fixture));
+    git_raw(&path, ["add", "-A"]);
+    git_raw(&path, ["-c", "user.name=Elsecrew", "-c", "user.email=elsecrew@local", "commit", "-q", "-m", "step"]);
+    assert!(changed(&mut fixture));
+    assert_eq!(git_text(&fixture.source, ["rev-parse", "HEAD"]), head);
+
+    // Leaving the task branch is not the task's workspace any more.
+    git_raw(&path, ["checkout", "-q", "--detach"]);
+    assert!(fixture.manager.diff_summary(&fixture.storage, &fixture.project_id).is_err());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn repositories_with_content_filters_are_refused_before_anything_is_made() {
+    let mut fixture = Fixture::open();
+    fixture.manager.git_worktrees_enabled = true;
+    git_raw(&fixture.source, ["config", "filter.lfs.smudge", "git-lfs smudge -- %f"]);
+    let refs = git_text(&fixture.source, ["for-each-ref"]);
+    // A v1 copy cannot serve it either (raw bytes vs. LFS pointers): a
+    // clear "not supported yet", and no task branch or worktree appears.
+    let error = fixture.manager.prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_filtered").unwrap_err();
+    assert!(error.detail.contains("not supported yet"), "{}", error.detail);
+    assert_eq!(git_text(&fixture.source, ["for-each-ref"]), refs);
+    assert_eq!(git_text(&fixture.source, ["worktree", "list"]).lines().count(), 1);
+}
+
+/// LFS is usually set up in the user's global config, which the app never
+/// reads; the tracked `.gitattributes` still says which files need it.
+#[cfg(target_os = "macos")]
+#[test]
+fn repositories_asking_for_lfs_in_gitattributes_are_refused() {
+    let mut fixture = Fixture::open();
+    fixture.manager.git_worktrees_enabled = true;
+    fs::write(fixture.source.join(".gitattributes"), b"*.psd filter=lfs diff=lfs merge=lfs -text\n").unwrap();
+    git_raw(&fixture.source, ["add", ".gitattributes"]);
+    git_raw(&fixture.source, ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "-m", "lfs"]);
+    // The worktree path refuses it outright; tasks fall back to a v1 copy.
+    git_worktree::STOP_AFTER_WORKTREE_ADD.with(|stop| stop.set(false));
+    assert!(fixture.manager.task_worktrees_supported(&fixture.storage, &fixture.project_id).is_err());
+    let error = fixture.manager.create_git_worktree(&mut fixture.storage, &fixture.project_id, "req_lfs_attributes").unwrap_err();
+    assert!(error.detail.contains("content filters"), "{}", error.detail);
+    assert_eq!(git_text(&fixture.source, ["branch", "--list", "elsecrew/*"]), "");
+}
+
+/// The watcher kept dropping a real worktree with "rescan required" (its
+/// dispatcher check was the v1 copy's `.git` folder and index), so the
+/// changes list stayed at 0 in the app.
+#[cfg(target_os = "macos")]
+#[test]
+fn watcher_follows_a_real_worktree_across_app_commits() {
+    let mut fixture = Fixture::open();
+    fixture.manager.git_worktrees_enabled = true;
+    let manifest = fixture
+        .manager
+        .prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_watch_worktree")
+        .unwrap()
+        .result;
+    let path = PathBuf::from(manifest["worktreePath"].as_str().unwrap());
+    fixture.manager.watch_project(&fixture.storage, &fixture.project_id).unwrap();
+    fs::write(path.join("src/edit.txt"), b"changed").unwrap();
+    let events = poll_until_watch_event(&mut fixture);
+    assert!(!events[0].payload["rescanRequired"].as_bool().unwrap(), "{}", events[0].payload);
+    git_raw(&path, ["add", "-A"]);
+    git_raw(&path, ["-c", "user.name=Elsecrew", "-c", "user.email=elsecrew@local", "commit", "-q", "-m", "step"]);
+    fs::write(path.join("new.txt"), b"after commit").unwrap();
+    let events = poll_until_watch_event(&mut fixture);
+    assert!(!events[0].payload["rescanRequired"].as_bool().unwrap(), "{}", events[0].payload);
+    assert!(events[0].payload["paths"].as_array().unwrap().iter().any(|path| path == "new.txt"));
+}
+
+/// A task worktree bound to a chat, ready for merge tests.
+#[cfg(target_os = "macos")]
+fn worktree_chat(fixture: &mut Fixture, name: &str) -> (WorkspaceAddress, PathBuf) {
+    fixture.manager.git_worktrees_enabled = true;
+    let manifest = fixture
+        .manager
+        .prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, &format!("req_merge_{name}"))
+        .unwrap()
+        .result;
+    let address = WorkspaceAddress {
+        chat_id: format!("chat_{name}"),
+        project_id: fixture.project_id.clone(),
+        worktree_id: manifest["worktreeId"].as_str().unwrap().into(),
+        workspace_identity: manifest["workspaceIdentity"].as_str().unwrap().into(),
+    };
+    let payload = json!({"chat_id":address.chat_id,"project_id":address.project_id,"worktree_id":address.worktree_id,"workspace_identity":address.workspace_identity,"state":"draft","durable_event_sequence":0,"last_message":null,"record":{"chatId":address.chat_id,"projectId":address.project_id,"worktreeId":address.worktree_id,"workspaceIdentity":address.workspace_identity,"taskId":format!("task_{name}"),"state":"draft"}});
+    fixture.storage.upsert_projection_record("chat", &address.chat_id, &format!("op_merge_chat_{name}"), None, payload.as_object().unwrap().clone()).unwrap();
+    (address, PathBuf::from(manifest["worktreePath"].as_str().unwrap()))
+}
+
+#[cfg(target_os = "macos")]
+fn merge_now(fixture: &Fixture, address: &WorkspaceAddress) -> Value {
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, address).unwrap();
+    fixture.manager.workspace_merge(&fixture.storage, address, state["head"].as_str().unwrap(), state["baseTip"].as_str().unwrap(), false).unwrap()
+}
+
+#[cfg(target_os = "macos")]
+fn commit_in(dir: &Path, message: &str) {
+    // Not the fixture's nested `vendor/sub` repository.
+    git_raw(dir, ["add", "-A", "--", ".", ":!vendor"]);
+    git_raw(dir, ["-c", "user.name=User", "-c", "user.email=user@example.invalid", "commit", "-q", "-m", message]);
+}
+
+/// Task = PR: merging moves the user's checked-out branch forward to the
+/// task's work; the user's own unrelated edit stays.
+#[cfg(target_os = "macos")]
+#[test]
+fn merging_a_task_moves_the_checked_out_base_forward_and_keeps_user_edits() {
+    let mut fixture = Fixture::open();
+    let (address, path) = worktree_chat(&mut fixture, "ff");
+    fs::write(path.join("src/edit.txt"), b"from the task\n").unwrap();
+    fs::write(fixture.source.join("src/delete.txt"), b"user is still editing\n").unwrap();
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
+    assert_eq!((state["kind"].as_str(), state["uncommitted"].as_bool(), state["blocked"].is_null()), (Some("gitWorktree"), Some(true), true), "{state}");
+    assert_eq!(state["mergedBefore"], false, "no task commit yet: {state}");
+    let outcome = merge_now(&fixture, &address);
+    assert_eq!(outcome["outcome"], "merged", "{outcome}");
+    assert_eq!(fs::read(fixture.source.join("src/edit.txt")).unwrap(), b"from the task\n");
+    assert_eq!(fs::read(fixture.source.join("src/delete.txt")).unwrap(), b"user is still editing\n");
+    assert_eq!(git_text(&fixture.source, ["rev-parse", "HEAD"]), git_text(&path, ["rev-parse", "HEAD"]));
+    assert_eq!(outcome["merge"]["ahead"], 0);
+    assert_eq!(outcome["merge"]["blocked"], "nothingToMerge");
+    // The changes panel's "merged" (user decision 2026-11-20), and "new since"
+    // once the task commits again.
+    assert_eq!(outcome["merge"]["mergedBefore"], true, "{outcome}");
+    fs::write(path.join("src/later.txt"), b"later\n").unwrap();
+    commit_in(&path, "later step");
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
+    assert_eq!((state["mergedBefore"].as_bool(), state["ahead"].as_u64()), (Some(true), Some(1)), "{state}");
+}
+
+/// The base moved on meanwhile: its commits come into the task branch first
+/// (in the worktree), then the base fast-forwards. Both changes survive.
+#[cfg(target_os = "macos")]
+#[test]
+fn merging_brings_newer_base_commits_into_the_task_first() {
+    let mut fixture = Fixture::open();
+    let (address, path) = worktree_chat(&mut fixture, "behind");
+    fs::write(path.join("task.txt"), b"task\n").unwrap();
+    fs::write(fixture.source.join("user.txt"), b"user\n").unwrap();
+    commit_in(&fixture.source, "user work");
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
+    assert_eq!(state["behind"], 1, "{state}");
+    let outcome = merge_now(&fixture, &address);
+    assert_eq!(outcome["outcome"], "merged", "{outcome}");
+    assert_eq!(fs::read(fixture.source.join("task.txt")).unwrap(), b"task\n");
+    assert_eq!(fs::read(fixture.source.join("user.txt")).unwrap(), b"user\n");
+    let status = git_text(&fixture.source, ["status", "--porcelain"]);
+    assert!(!status.contains("task.txt") && !status.contains("user.txt"), "{status}");
+    // The fixture's submodule (no folder in either checkout) is never deleted.
+    assert!(git_text(&fixture.source, ["ls-tree", "HEAD", "vendor/sub"]).contains("160000"));
+}
+
+/// A conflict is undone in the worktree and reported; the user's branch and
+/// folder do not move.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_conflict_is_reported_and_nothing_moves() {
+    let mut fixture = Fixture::open();
+    let (address, path) = worktree_chat(&mut fixture, "conflict");
+    fs::write(path.join("src/edit.txt"), b"task version\n").unwrap();
+    fs::write(fixture.source.join("src/edit.txt"), b"user version\n").unwrap();
+    commit_in(&fixture.source, "user edit");
+    let base = git_text(&fixture.source, ["rev-parse", "HEAD"]);
+    let outcome = merge_now(&fixture, &address);
+    assert_eq!(outcome["outcome"], "conflict", "{outcome}");
+    assert_eq!(outcome["conflicts"], json!(["src/edit.txt"]));
+    assert_eq!(git_text(&fixture.source, ["rev-parse", "HEAD"]), base);
+    assert_eq!(fs::read(fixture.source.join("src/edit.txt")).unwrap(), b"user version\n");
+    assert_eq!(git_text(&path, ["status", "--porcelain"]), "");
+    assert!(fixture.manager.workspace_merge_inspect(&fixture.storage, &address).is_ok());
+}
+
+/// The user is on another branch: the base moves by one compare-and-swap and
+/// the user's folder is untouched.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_base_not_checked_out_moves_without_touching_the_users_folder() {
+    let mut fixture = Fixture::open();
+    let (address, path) = worktree_chat(&mut fixture, "other");
+    let base = git_text(&fixture.source, ["symbolic-ref", "--short", "HEAD"]).trim().to_owned();
+    git_raw(&fixture.source, ["switch", "-q", "-c", "user-branch"]);
+    fs::write(path.join("task.txt"), b"task\n").unwrap();
+    let outcome = merge_now(&fixture, &address);
+    assert_eq!(outcome["outcome"], "merged", "{outcome}");
+    assert!(!fixture.source.join("task.txt").exists());
+    assert_eq!(git_text(&fixture.source, ["rev-parse", &base]), git_text(&path, ["rev-parse", "HEAD"]));
+}
+
+/// What the user confirmed is what merges: a newer task head is refused.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_merge_newer_than_the_review_is_refused() {
+    let mut fixture = Fixture::open();
+    let (address, path) = worktree_chat(&mut fixture, "stale");
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
+    fs::write(path.join("late.txt"), b"late\n").unwrap();
+    commit_in(&path, "late step");
+    let before = git_text(&fixture.source, ["rev-parse", "HEAD"]);
+    let outcome = fixture.manager.workspace_merge(&fixture.storage, &address, state["head"].as_str().unwrap(), state["baseTip"].as_str().unwrap(), false).unwrap();
+    assert_eq!((outcome["outcome"].as_str(), outcome["reason"].as_str()), (Some("blocked"), Some("changedSinceReview")));
+    assert_eq!(git_text(&fixture.source, ["rev-parse", "HEAD"]), before);
+}
+
+/// Review I1/I2: a merge driver program or the base branch open in another
+/// worktree refuse before anything moves.
+#[cfg(target_os = "macos")]
+#[test]
+fn merging_refuses_drivers_and_other_worktrees() {
+    let mut fixture = Fixture::open();
+    let (address, path) = worktree_chat(&mut fixture, "guards");
+    fs::write(path.join("task.txt"), b"task\n").unwrap();
+    let head = git_text(&fixture.source, ["rev-parse", "HEAD"]);
+
+    git_raw(&fixture.source, ["config", "merge.custom.driver", "touch /tmp/should-not-run %A"]);
+    let outcome = merge_now(&fixture, &address);
+    assert_eq!((outcome["outcome"].as_str(), outcome["reason"].as_str()), (Some("blocked"), Some("unsupportedRepository")), "{outcome}");
+    git_raw(&fixture.source, ["config", "--unset", "merge.custom.driver"]);
+
+    let base = git_text(&fixture.source, ["symbolic-ref", "--short", "HEAD"]).trim().to_owned();
+    git_raw(&fixture.source, ["switch", "-q", "-c", "user-side"]);
+    let other = fixture.source.parent().unwrap().join("user-other-worktree");
+    git_raw(&fixture.source, ["worktree", "add", "-q", other.to_str().unwrap(), &base]);
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
+    assert_eq!(state["blocked"], "baseInOtherWorktree", "{state}");
+    let outcome = merge_now(&fixture, &address);
+    assert_eq!(outcome["reason"], "baseInOtherWorktree", "{outcome}");
+    git_raw(&fixture.source, ["worktree", "remove", other.to_str().unwrap()]);
+    git_raw(&fixture.source, ["switch", "-q", &base]);
+
+    assert_eq!(git_text(&fixture.source, ["rev-parse", "HEAD"]), head);
+}
+
+/// A conflict handed to the team: the marks stay in the worktree, nothing is
+/// recorded or merged while any remain, and once they are gone the next
+/// merge records the resolution and moves the base forward.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_conflict_left_to_the_team_merges_only_after_the_marks_are_gone() {
+    let mut fixture = Fixture::open();
+    let (address, path) = worktree_chat(&mut fixture, "resolve");
+    fs::write(path.join("src/edit.txt"), b"task version\n").unwrap();
+    fs::write(fixture.source.join("src/edit.txt"), b"user version\n").unwrap();
+    commit_in(&fixture.source, "user edit");
+    let base = git_text(&fixture.source, ["rev-parse", "HEAD"]);
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
+    let outcome = fixture.manager.workspace_merge(&fixture.storage, &address, state["head"].as_str().unwrap(), state["baseTip"].as_str().unwrap(), true).unwrap();
+    assert_eq!(outcome["outcome"], "resolving", "{outcome}");
+    assert_eq!(outcome["merge"]["blocked"], "conflictsUnresolved");
+    assert!(fs::read_to_string(path.join("src/edit.txt")).unwrap().contains("<<<<<<< "));
+    // The team can still be started on the workspace while it resolves.
+    fixture.manager.verify_workspace_for_run(&fixture.storage, &address).unwrap();
+    // The fixture's tracked `src/edit-link -> edit.txt` stays inside.
+    #[cfg(unix)]
+    fixture.manager.verify_runtime_file_isolation(&fixture.storage, &address).unwrap();
+    // The changes list keeps working while the team resolves.
+    let summary = fixture.manager.workspace_diff_summary(&fixture.storage, &address).unwrap();
+    assert!(summary.result["entries"].as_array().unwrap().iter().any(|entry| entry["path"] == "src/edit.txt"), "{}", summary.result);
+    // Marks left: no step commit, no merge, the user's branch stays.
+    assert!(!fixture.manager.workspace_commit_step(&fixture.storage, &address, "step").unwrap());
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
+    assert_eq!((state["resolving"].as_bool(), state["unresolved"].as_u64()), (Some(true), Some(1)), "{state}");
+    let blocked = merge_now(&fixture, &address);
+    assert_eq!(blocked["reason"], "conflictsUnresolved", "{blocked}");
+    assert_eq!(git_text(&fixture.source, ["rev-parse", "HEAD"]), base);
+    // The team resolves it (keeping both intents); the merge then completes.
+    fs::write(path.join("src/edit.txt"), b"user version\ntask version\n").unwrap();
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
+    assert!(state["blocked"].is_null(), "{state}");
+    let merged = merge_now(&fixture, &address);
+    assert_eq!(merged["outcome"], "merged", "{merged}");
+    assert_eq!(fs::read(fixture.source.join("src/edit.txt")).unwrap(), b"user version\ntask version\n");
+    assert_eq!(git_text(&fixture.source, ["rev-list", "--count", "--merges", "HEAD"]).trim(), "1");
+}
+
+/// A submodule (gitlink) among the changes is listed, not an error.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_submodule_change_in_a_worktree_is_listed_without_content() {
+    let mut fixture = Fixture::open();
+    let (address, path) = worktree_chat(&mut fixture, "gitlink");
+    git_raw(&fixture.source, ["add", "vendor"]);
+    commit_in(&fixture.source, "user adds a submodule");
+    fs::write(path.join("task.txt"), b"task\n").unwrap();
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
+    fixture.manager.workspace_merge(&fixture.storage, &address, state["head"].as_str().unwrap(), state["baseTip"].as_str().unwrap(), false).unwrap();
+    assert!(fixture.manager.workspace_diff_summary(&fixture.storage, &address).is_ok());
+}
+
+/// Cleanup after a task worktree's folder is gone: only its own record in
+/// the user's repository goes; an unmerged task branch stays, a merged one
+/// is deleted; the user's other worktrees are untouched.
+#[cfg(target_os = "macos")]
+#[test]
+fn forgetting_a_task_worktree_drops_only_its_record_and_merged_branch() {
+    let mut fixture = Fixture::open();
+    let (kept, kept_path) = worktree_chat(&mut fixture, "unmerged");
+    let (gone, gone_path) = worktree_chat(&mut fixture, "merged");
+    fs::write(kept_path.join("task.txt"), b"task\n").unwrap();
+    commit_in(&kept_path, "unmerged work");
+    let user_other = fixture.source.parent().unwrap().join("user-own-worktree");
+    git_raw(&fixture.source, ["worktree", "add", "-q", "-b", "user-own", user_other.to_str().unwrap()]);
+    let manifest = |address: &WorkspaceAddress| {
+        read_bounded_json(&fixture.manager.manifests_dir, &format!("{}.json", address.worktree_id)).unwrap()
+    };
+    let (kept_manifest, gone_manifest) = (manifest(&kept), manifest(&gone));
+    // Still there: nothing happens.
+    fixture.manager.forget_task_worktree(&kept_manifest);
+    assert!(git_text(&fixture.source, ["worktree", "list"]).contains(kept_path.to_str().unwrap()));
+    fs::remove_dir_all(&kept_path).unwrap();
+    fs::remove_dir_all(&gone_path).unwrap();
+    fixture.manager.forget_task_worktree(&kept_manifest);
+    fixture.manager.forget_task_worktree(&gone_manifest);
+    let list = git_text(&fixture.source, ["worktree", "list", "--porcelain"]);
+    assert!(!list.contains(kept_path.to_str().unwrap()) && !list.contains(gone_path.to_str().unwrap()), "{list}");
+    assert!(list.contains(user_other.to_str().unwrap()), "{list}");
+    let branches = git_text(&fixture.source, ["branch", "--list", "elsecrew/*"]);
+    assert!(branches.contains(kept_manifest["branchName"].as_str().unwrap()), "{branches}");
+    assert!(!branches.contains(gone_manifest["branchName"].as_str().unwrap()), "{branches}");
+}
+
+/// The team may resolve by keeping exactly the task's side: the index then
+/// equals HEAD, and the merge commit must still be recorded and merged.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_conflict_resolved_to_the_tasks_side_still_merges() {
+    let mut fixture = Fixture::open();
+    let (address, path) = worktree_chat(&mut fixture, "keep_task");
+    fs::write(path.join("src/edit.txt"), b"task version\n").unwrap();
+    fs::write(fixture.source.join("src/edit.txt"), b"user version\n").unwrap();
+    commit_in(&fixture.source, "user edit");
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
+    let outcome = fixture.manager.workspace_merge(&fixture.storage, &address, state["head"].as_str().unwrap(), state["baseTip"].as_str().unwrap(), true).unwrap();
+    assert_eq!(outcome["outcome"], "resolving", "{outcome}");
+    fs::write(path.join("src/edit.txt"), b"task version\n").unwrap();
+    // The member's step commit records the merge even with no content change.
+    assert!(fixture.manager.workspace_commit_step(&fixture.storage, &address, "개발: 정리").unwrap());
+    assert!(!fixture.manager.merge_in_progress(&fixture.manager.worktree_capability(&fixture.manager.validate_workspace_address(&fixture.storage, &address).unwrap()).unwrap()).unwrap());
+    let merged = merge_now(&fixture, &address);
+    assert_eq!(merged["outcome"], "merged", "{merged}");
+    assert_eq!(fs::read(fixture.source.join("src/edit.txt")).unwrap(), b"task version\n");
+}
+
+/// The new-task note: how many uncommitted changes the task will not see.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_new_task_reports_the_users_uncommitted_changes() {
+    let mut fixture = Fixture::open();
+    fixture.manager.git_worktrees_enabled = false;
+    assert_eq!(fixture.manager.source_uncommitted(&fixture.storage, &fixture.project_id).unwrap(), json!({"applies":false,"uncommitted":0}));
+    fixture.manager.git_worktrees_enabled = true;
+    let before = fixture.manager.source_uncommitted(&fixture.storage, &fixture.project_id).unwrap()["uncommitted"].as_u64().unwrap();
+    fs::write(fixture.source.join("src/edit.txt"), b"editing").unwrap();
+    fs::write(fixture.source.join("new-note.txt"), b"new").unwrap();
+    let after = fixture.manager.source_uncommitted(&fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!((after["applies"].as_bool(), after["uncommitted"].as_u64()), (Some(true), Some(before + 2)), "{after}");
+}
+
+/// Review I1/I2: a binary conflict carries no marks, so it is never handed
+/// to the team (it is undone and reported); a different marker size still
+/// counts as marks.
+#[cfg(target_os = "macos")]
+#[test]
+fn only_text_conflicts_with_marks_go_to_the_team() {
+    let mut fixture = Fixture::open();
+    let (address, path) = worktree_chat(&mut fixture, "binary");
+    fs::write(path.join("assets/data.bin"), [0u8, 1, 2, 3]).unwrap();
+    fs::write(fixture.source.join("assets/data.bin"), [0u8, 9, 9, 9]).unwrap();
+    commit_in(&fixture.source, "user binary");
+    let base = git_text(&fixture.source, ["rev-parse", "HEAD"]);
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
+    let outcome = fixture.manager.workspace_merge(&fixture.storage, &address, state["head"].as_str().unwrap(), state["baseTip"].as_str().unwrap(), true).unwrap();
+    assert_eq!((outcome["outcome"].as_str(), outcome["teamResolvable"].as_bool()), (Some("conflict"), Some(false)), "{outcome}");
+    assert!(git_text(&path, ["status", "--porcelain"]).is_empty());
+    assert_eq!(git_text(&fixture.source, ["rev-parse", "HEAD"]), base);
+
+    let (address, path) = worktree_chat(&mut fixture, "marker_size");
+    fs::write(path.join(".gitattributes"), b"*.txt conflict-marker-size=10\n").unwrap();
+    fs::write(path.join("src/edit.txt"), b"task\n").unwrap();
+    fs::write(fixture.source.join("src/edit.txt"), b"user\n").unwrap();
+    commit_in(&fixture.source, "user text");
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
+    let outcome = fixture.manager.workspace_merge(&fixture.storage, &address, state["head"].as_str().unwrap(), state["baseTip"].as_str().unwrap(), true).unwrap();
+    assert_eq!(outcome["outcome"], "resolving", "{outcome}");
+    assert!(fs::read_to_string(path.join("src/edit.txt")).unwrap().contains("<<<<<<<<<< "));
+    assert!(!fixture.manager.workspace_commit_step(&fixture.storage, &address, "step").unwrap());
+    assert_eq!(fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap()["unresolved"], 1);
+}
+
+/// The app quit right after `git worktree add`, before anything recorded the
+/// task: the preparation can be abandoned, which removes the worktree, its
+/// record and the untouched task branch, and a new task can be made.
+#[cfg(target_os = "macos")]
+#[test]
+fn an_interrupted_worktree_creation_is_undone_on_abandon() {
+    let mut fixture = Fixture::open();
+    fixture.manager.git_worktrees_enabled = true;
+    git_worktree::STOP_AFTER_WORKTREE_ADD.with(|stop| stop.set(true));
+    let error = fixture.manager.prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_interrupted").unwrap_err();
+    git_worktree::STOP_AFTER_WORKTREE_ADD.with(|stop| stop.set(false));
+    assert!(error.detail.contains("injected"), "{}", error.detail);
+    assert!(git_text(&fixture.source, ["branch", "--list", "elsecrew/*"]).contains("elsecrew/task-"));
+    assert_eq!(git_text(&fixture.source, ["worktree", "list"]).lines().count(), 2);
+    let inspection = fixture.manager.inspect_unstarted_snapshot(&fixture.storage, &fixture.project_id).unwrap();
+    fixture.manager.abandon_unstarted_snapshot(&mut fixture.storage, &inspection, "req_abandon_interrupted").unwrap();
+    assert_eq!(git_text(&fixture.source, ["worktree", "list"]).lines().count(), 1);
+    assert_eq!(git_text(&fixture.source, ["branch", "--list", "elsecrew/*"]), "");
+    let manifest = fixture.manager.prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_after_abandon").unwrap().result;
+    assert_eq!(manifest["workspaceKind"], "gitWorktree");
+}
+
+/// A task worktree outside the app's data: the editor's save lands in it
+/// (renamed inside its own folder), and removing it deletes the folder and
+/// its record in the user's repository.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_visible_task_worktree_saves_and_is_removed() {
+    let mut fixture = Fixture::open();
+    let (address, path) = worktree_chat(&mut fixture, "visible");
+    let expected = sha256_file_version_v1(&fs::read(path.join("src/edit.txt")).unwrap());
+    let begin = fixture.manager.workspace_begin_save(&mut fixture.storage, &address, "src/edit.txt", &expected, 5, "utf8").unwrap();
+    let save_id = begin.result["saveId"].as_str().unwrap().to_owned();
+    fixture.manager.append_save_chunk(&save_id, 1, "saved").unwrap();
+    let committed = fixture.manager.commit_save(&mut fixture.storage, &save_id, &expected, 1, 5, "req_visible_save").unwrap();
+    assert_eq!(committed.result["outcome"], "committed", "{}", committed.result);
+    assert_eq!(fs::read(path.join("src/edit.txt")).unwrap(), b"saved");
+    assert!(fs::read_dir(&path).unwrap().all(|entry| !entry.unwrap().file_name().to_string_lossy().starts_with(".elsecrew-save-")));
+    let manifest = read_bounded_json(&fixture.manager.manifests_dir, &format!("{}.json", address.worktree_id)).unwrap();
+    // A damaged record pointing at another folder is refused, never erased.
+    let mut forged = manifest.clone();
+    forged["worktreePath"] = json!(fixture.source.join("src").to_str().unwrap());
+    assert!(fixture.manager.remove_task_worktree_folder(&address.worktree_id, &forged, None).is_err());
+    let short = &address.worktree_id["worktree_".len().."worktree_".len() + 8];
+    let elsewhere = fixture._root.path().canonicalize().unwrap().join("user-docs").join(format!("task-{short}"));
+    fs::create_dir_all(&elsewhere).unwrap();
+    fs::write(elsewhere.join("notes.txt"), b"mine").unwrap();
+    forged["worktreePath"] = json!(elsewhere.to_str().unwrap());
+    assert!(fixture.manager.remove_task_worktree_folder(&address.worktree_id, &forged, None).is_err());
+    assert!(elsewhere.join("notes.txt").exists());
+    fixture.manager.remove_task_worktree_folder(&address.worktree_id, &manifest, None).unwrap();
+    assert!(!path.exists());
+    assert_eq!(git_text(&fixture.source, ["worktree", "list"]).lines().count(), 1);
+}
+
+/// "작업 공간 폴더": only a real folder outside projects and app data is
+/// accepted; new tasks go there; the default comes back on reset.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_workspace_folder_setting_places_new_tasks() {
+    let mut fixture = Fixture::open();
+    fixture.manager.git_worktrees_enabled = true;
+    let default = fixture.manager.workspace_folder().unwrap();
+    assert_eq!(default["custom"], false);
+    let chosen = fixture._root.path().canonicalize().unwrap().join("my-workspaces");
+    fs::create_dir(&chosen).unwrap();
+    let link = fixture._root.path().canonicalize().unwrap().join("linked");
+    std::os::unix::fs::symlink(&chosen, &link).unwrap();
+    for bad in [link.clone(), fixture.source.join("src"), fixture.manager.data_root.clone()] {
+        assert!(fixture.manager.set_workspace_folder(&fixture.storage, Some(bad.to_str().unwrap())).is_err(), "{}", bad.display());
+    }
+    let saved = fixture.manager.set_workspace_folder(&fixture.storage, Some(chosen.to_str().unwrap())).unwrap();
+    assert_eq!((saved["custom"].as_bool(), saved["path"].as_str()), (Some(true), chosen.to_str()));
+    let manifest = fixture.manager.prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_custom_folder").unwrap().result;
+    assert!(Path::new(manifest["worktreePath"].as_str().unwrap()).starts_with(chosen.join("source")), "{manifest}");
+    let reset = fixture.manager.set_workspace_folder(&fixture.storage, None).unwrap();
+    assert_eq!((reset["custom"].as_bool(), reset["path"].clone()), (Some(false), default["path"].clone()));
+}
+
+/// The first task proposes full access only where no choice was ever saved:
+/// an explicit "both off" is recorded and stays as chosen.
+#[test]
+fn permissions_tell_never_asked_from_an_explicit_choice() {
+    let mut fixture = Fixture::open();
+    let id = fixture.project_id.clone();
+    let first = fixture.manager.automation_settings(&mut fixture.storage, &id, None, "req_perm_get").unwrap().result;
+    assert_eq!((first["recorded"].clone(), first["permissions"].clone()), (json!(false), json!({"files":false,"commands":false})));
+    let off = super::automation_permissions::AutomationPermissions { files: false, commands: false };
+    let saved = fixture.manager.automation_settings(&mut fixture.storage, &id, Some(off), "req_perm_set").unwrap().result;
+    assert_eq!(saved["recorded"], json!(true));
+    let again = fixture.manager.automation_settings(&mut fixture.storage, &id, None, "req_perm_get2").unwrap().result;
+    assert_eq!((again["recorded"].clone(), again["permissions"].clone()), (json!(true), json!({"files":false,"commands":false})));
+}
+
+/// "링크 파일 방식": a plain folder with files gets its history in app data
+/// and only a `.git` link file; tasks, step commits and merging then work
+/// exactly as for a Git project, and the merge lands in the folder.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_plain_folder_gets_a_shadow_history_and_merges_back() {
+    use std::os::unix::fs::MetadataExt as _;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let folder = root.join("notes");
+    fs::create_dir_all(folder.join("node_modules/pkg")).unwrap();
+    fs::write(folder.join("index.html"), b"<h1>hi</h1>\n").unwrap();
+    fs::write(folder.join("node_modules/pkg/big.js"), b"x").unwrap();
+    fs::write(folder.join(".DS_Store"), b"x").unwrap();
+    let data = root.join("app-data");
+    fs::create_dir_all(&data).unwrap();
+    let database = data.join("elsecrew.sqlite3");
+    let mut storage = Storage::open(&database).unwrap();
+    let mut manager = ProjectManager::new(&database).unwrap();
+    let identity = |path: &Path| { let meta = fs::metadata(path).unwrap(); format!("{}:{}", meta.dev(), meta.ino()) };
+    let text = folder.to_str().unwrap();
+    // The folder's identity must match; app data and Git repositories refuse.
+    assert!(manager.initialize_folder_project(text, "1:1").is_err());
+    assert!(manager.initialize_folder_project(data.to_str().unwrap(), &identity(&data)).is_err());
+    manager.initialize_folder_project(text, &identity(&folder)).unwrap();
+    let link = fs::read_to_string(folder.join(".git")).unwrap();
+    let shadows = data.join("shadow-git-v1");
+    assert!(link.starts_with(&format!("gitdir: {}/", shadows.display())) && link.ends_with(".git\n"), "{link}");
+    let mut names: Vec<_> = fs::read_dir(&folder).unwrap().map(|entry| entry.unwrap().file_name().into_string().unwrap()).collect();
+    names.sort();
+    assert_eq!(names, [".DS_Store", ".git", "index.html", "node_modules"]);
+    assert_eq!(git_text(&folder, ["ls-files"]).trim(), "index.html");
+    assert!(manager.initialize_folder_project(text, &identity(&folder)).is_err(), "never twice");
+    let inner = folder.join("sub");
+    fs::create_dir(&inner).unwrap();
+    fs::write(inner.join("a.txt"), b"a").unwrap();
+    assert!(manager.initialize_folder_project(inner.to_str().unwrap(), &identity(&inner)).is_err(), "inside a repository");
+    fs::remove_dir_all(&inner).unwrap();
+
+    let action = manager.open_project(&mut storage, text, "req_open_plain").unwrap();
+    let project_id = action.result["projectId"].as_str().unwrap().to_string();
+    let mut fixture = Fixture { _root: temp, source: folder.clone(), storage, manager, project_id };
+    let (address, path) = worktree_chat(&mut fixture, "plain");
+    fs::write(path.join("app.js"), b"console.log(1)\n").unwrap();
+    assert!(fixture.manager.workspace_commit_step(&fixture.storage, &address, "개발: 앱").unwrap());
+    let outcome = merge_now(&fixture, &address);
+    assert_eq!(outcome["outcome"], "merged", "{outcome}");
+    assert_eq!(fs::read(folder.join("app.js")).unwrap(), b"console.log(1)\n");
+    assert_eq!(git_text(&folder, ["status", "--porcelain", "--untracked-files=no"]).trim(), "");
+    // Agents of that task may read exactly the shadow history.
+    let git = elsecrew_core::provider::vendor_observation::codex_preflight::named_config::linked_source_git(&path).unwrap();
+    assert!(git.starts_with(&shadows));
+    assert_eq!(elsecrew_core::provider::vendor_observation::codex_preflight::named_config::source_git_dir(&folder), Some(git));
+}
+
+/// Review fixes for plain folders: the limits count the whole folder, other
+/// repositories inside are refused, a copied folder (same link) is told
+/// apart and recorded anew, a link whose history is gone can be recorded
+/// again, and a leftover preparation folder is cleaned.
+#[cfg(target_os = "macos")]
+#[test]
+fn plain_folder_records_are_bounded_owned_and_recoverable() {
+    use std::os::unix::fs::MetadataExt as _;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let data = root.join("app-data");
+    fs::create_dir_all(&data).unwrap();
+    let database = data.join("elsecrew.sqlite3");
+    let mut storage = Storage::open(&database).unwrap();
+    let mut manager = ProjectManager::new(&database).unwrap();
+    let identity = |path: &Path| { let meta = fs::metadata(path).unwrap(); format!("{}:{}", meta.dev(), meta.ino()) };
+    let make = |name: &str| { let folder = root.join(name); fs::create_dir_all(folder.join("sub")).unwrap(); fs::write(folder.join("a.txt"), b"a").unwrap(); fs::write(folder.join("sub/b.txt"), b"b").unwrap(); folder };
+
+    // Limits count every file of the folder (not the preparation folder).
+    let many = make("many");
+    super::empty_project::FOLDER_RECORD_LIMITS.with(|limits| limits.set((1, 1 << 30)));
+    let refused = manager.initialize_folder_project(many.to_str().unwrap(), &identity(&many));
+    super::empty_project::FOLDER_RECORD_LIMITS.with(|limits| limits.set((20_000, 1 << 30)));
+    assert!(refused.unwrap_err().detail.contains("too many files"));
+    assert!(fs::symlink_metadata(many.join(".git")).is_err());
+    assert_eq!(fs::read_dir(&many).unwrap().count(), 2, "nothing left behind");
+    super::empty_project::FOLDER_RECORD_LIMITS.with(|limits| limits.set((20_000, 1)));
+    assert!(manager.initialize_folder_project(many.to_str().unwrap(), &identity(&many)).unwrap_err().detail.contains("too large"));
+    super::empty_project::FOLDER_RECORD_LIMITS.with(|limits| limits.set((20_000, 1 << 30)));
+
+    // Another repository inside is refused.
+    let nested = make("nested");
+    git_raw(&nested.join("sub"), ["init", "-q"]);
+    assert!(manager.initialize_folder_project(nested.to_str().unwrap(), &identity(&nested)).unwrap_err().detail.contains("another Git repository"));
+
+    // A leftover preparation folder (only our link) is cleaned first.
+    let folder = make("todo");
+    fs::create_dir(folder.join(".elsecrew-prepare-old")).unwrap();
+    fs::write(folder.join(".elsecrew-prepare-old/.git"), b"gitdir: /nowhere\n").unwrap();
+    manager.initialize_folder_project(folder.to_str().unwrap(), &identity(&folder)).unwrap();
+    assert!(fs::symlink_metadata(folder.join(".elsecrew-prepare-old")).is_err());
+    assert_eq!(git_text(&folder, ["ls-files"]).split_whitespace().collect::<Vec<_>>(), ["a.txt", "sub/b.txt"]);
+    let original_link = fs::read_to_string(folder.join(".git")).unwrap();
+    assert!(manager.open_project(&mut storage, folder.to_str().unwrap(), "req_open_owned").is_ok());
+
+    // A copy keeps the link but is another folder: told apart, recorded anew.
+    let copy = root.join("todo copy");
+    assert!(Command::new("/bin/cp").args(["-R", folder.to_str().unwrap(), copy.to_str().unwrap()]).status().unwrap().success());
+    let error = manager.open_project(&mut storage, copy.to_str().unwrap(), "req_open_copy").unwrap_err();
+    assert!(error.detail.contains("not inside a supported Git repository"), "{}", error.detail);
+    manager.initialize_folder_project(copy.to_str().unwrap(), &identity(&copy)).unwrap();
+    assert_ne!(fs::read_to_string(copy.join(".git")).unwrap(), original_link);
+    assert!(manager.open_project(&mut storage, copy.to_str().unwrap(), "req_open_copy2").is_ok());
+    assert_eq!(fs::read_to_string(folder.join(".git")).unwrap(), original_link, "the original keeps its history");
+
+    // A link whose history is gone can be recorded again.
+    let target = PathBuf::from(original_link.trim_start_matches("gitdir: ").trim_end());
+    fs::remove_dir_all(&target).unwrap();
+    assert!(manager.open_project(&mut storage, folder.to_str().unwrap(), "req_open_gone").unwrap_err().detail.contains("not inside a supported Git repository"));
+    manager.initialize_folder_project(folder.to_str().unwrap(), &identity(&folder)).unwrap();
+    assert!(manager.open_project(&mut storage, folder.to_str().unwrap(), "req_open_again").is_ok());
+
+    // The same folder re-created in place (new file number, same path:
+    // sync or restore) or moved on the same disk (same number, new path)
+    // keeps its record (review I4).
+    let aside = root.join("todo-aside");
+    fs::rename(&folder, &aside).unwrap();
+    assert!(Command::new("/bin/cp").args(["-R", aside.to_str().unwrap(), folder.to_str().unwrap()]).status().unwrap().success());
+    fs::remove_dir_all(&aside).unwrap();
+    assert!(manager.open_project(&mut storage, folder.to_str().unwrap(), "req_open_recreated").is_ok());
+    let moved = root.join("todo-moved");
+    fs::rename(&folder, &moved).unwrap();
+    assert!(manager.open_project(&mut storage, moved.to_str().unwrap(), "req_open_moved").is_ok());
+    // The mark names the folder's disk: the same file number on another disk
+    // is not this folder; an older mark without a disk keeps the number alone
+    // (review M11).
+    let disk = super::empty_project::volume_uuid(&moved).expect("the test disk has a UUID");
+    let owner = super::empty_project::owner_text(&moved).unwrap();
+    assert!(owner.contains(&format!("vol:{disk}\n")), "{owner}");
+    let away = owner.replace(&format!("path:{}", moved.display()), "path:/nowhere");
+    assert!(super::empty_project::owns(&away, &moved));
+    assert!(!super::empty_project::owns(&away.replace(&disk, "00000000000000000000000000000001"), &moved));
+    assert!(super::empty_project::owns(&away.replace(&format!("vol:{disk}\n"), ""), &moved));
+
+    // A folder holding only a link whose history is gone is recorded again.
+    let lone = root.join("lone");
+    fs::create_dir(&lone).unwrap();
+    fs::write(lone.join(".git"), format!("gitdir: {}/shadow-git-v1/gone.git\n", data.display())).unwrap();
+    manager.initialize_folder_project(lone.to_str().unwrap(), &identity(&lone)).unwrap();
+    assert!(manager.open_project(&mut storage, lone.to_str().unwrap(), "req_open_lone").is_ok());
+
+    // A real repository's `.git` is never replaced.
+    let real = make("real");
+    git_raw(&real, ["init", "-q"]);
+    assert!(manager.initialize_folder_project(real.to_str().unwrap(), &identity(&real)).is_err());
+    assert!(fs::symlink_metadata(real.join(".git")).unwrap().is_dir());
+}
+
+/// A plain folder's user cannot commit: their own edits are recorded by the
+/// app before a merge. Unrelated edits merge straight through and stay; an
+/// edit of the same file is a conflict the team can resolve (the folder is
+/// not changed), never "commit your edits first".
+#[cfg(target_os = "macos")]
+#[test]
+fn a_plain_folder_merge_records_the_users_own_edits_first() {
+    use std::os::unix::fs::MetadataExt as _;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let data = root.join("app-data");
+    fs::create_dir_all(&data).unwrap();
+    let database = data.join("elsecrew.sqlite3");
+    let mut storage = Storage::open(&database).unwrap();
+    let mut manager = ProjectManager::new(&database).unwrap();
+    let folder = root.join("todo");
+    fs::create_dir(&folder).unwrap();
+    fs::write(folder.join("index.html"), b"<h1>one</h1>\n").unwrap();
+    let meta = fs::metadata(&folder).unwrap();
+    manager.initialize_folder_project(folder.to_str().unwrap(), &format!("{}:{}", meta.dev(), meta.ino())).unwrap();
+    let project_id = manager.open_project(&mut storage, folder.to_str().unwrap(), "req_open_edits").unwrap().result["projectId"].as_str().unwrap().to_owned();
+    let mut fixture = Fixture { _root: temp, source: folder.clone(), storage, manager, project_id };
+
+    let (address, path) = worktree_chat(&mut fixture, "apart");
+    fs::write(path.join("app.js"), b"1\n").unwrap();
+    assert!(fixture.manager.workspace_commit_step(&fixture.storage, &address, "개발").unwrap());
+    fs::write(folder.join("memo.txt"), b"mine\n").unwrap();
+    let outcome = merge_now(&fixture, &address);
+    assert_eq!(outcome["outcome"], "merged", "{outcome}");
+    assert_eq!(fs::read(folder.join("memo.txt")).unwrap(), b"mine\n");
+    assert_eq!(fs::read(folder.join("app.js")).unwrap(), b"1\n");
+    assert_eq!(git_text(&folder, ["status", "--porcelain"]), "");
+    assert!(git_text(&folder, ["log", "--format=%s"]).contains("내 폴더에서 바꾼 내용"));
+
+    let (address, path) = worktree_chat(&mut fixture, "same");
+    fs::write(path.join("index.html"), b"<h1>from the task</h1>\n").unwrap();
+    assert!(fixture.manager.workspace_commit_step(&fixture.storage, &address, "개발").unwrap());
+    fs::write(folder.join("index.html"), b"<h1>from me</h1>\n").unwrap();
+    let outcome = merge_now(&fixture, &address);
+    assert_eq!((outcome["outcome"].as_str(), outcome["teamResolvable"].as_bool()), (Some("conflict"), Some(true)), "{outcome}");
+    assert_eq!(fs::read(folder.join("index.html")).unwrap(), b"<h1>from me</h1>\n", "the folder is not changed");
+    assert_eq!(git_text(&folder, ["status", "--porcelain"]), "", "the user's edit is recorded");
+
+    // Another repository appearing inside is named, not a puzzling error
+    // (review M17).
+    let (address, path) = worktree_chat(&mut fixture, "nested");
+    fs::write(path.join("more.js"), b"2\n").unwrap();
+    assert!(fixture.manager.workspace_commit_step(&fixture.storage, &address, "개발").unwrap());
+    fs::create_dir(folder.join("sub")).unwrap();
+    git_raw(&folder.join("sub"), ["init", "-q"]);
+    let outcome = merge_now(&fixture, &address);
+    assert_eq!((outcome["outcome"].as_str(), outcome["reason"].as_str()), (Some("blocked"), Some("folderHasRepository")), "{outcome}");
+    assert!(!folder.join("more.js").exists());
+}
+
+/// Review I6: a merge never replaces a file the user's Git ignores (an
+/// agent could stop ignoring it and add its own): it is refused, unchanged.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_merge_never_overwrites_an_ignored_file_of_the_user() {
+    let mut fixture = Fixture::open();
+    fs::write(fixture.source.join(".gitignore"), b".env\n").unwrap();
+    commit_in(&fixture.source, "ignore env");
+    fs::write(fixture.source.join(".env"), b"secret\n").unwrap();
+    let (address, path) = worktree_chat(&mut fixture, "ignored");
+    fs::write(path.join(".gitignore"), b"").unwrap();
+    fs::write(path.join(".env"), b"from the task\n").unwrap();
+    assert!(fixture.manager.workspace_commit_step(&fixture.storage, &address, "개발").unwrap());
+    let outcome = merge_now(&fixture, &address);
+    assert_eq!((outcome["outcome"].as_str(), outcome["reason"].as_str()), (Some("blocked"), Some("userChangesOverlap")), "{outcome}");
+    assert_eq!(fs::read(fixture.source.join(".env")).unwrap(), b"secret\n");
+}
+
+/// After a merge (or the user's own commit) the project, opened again
+/// without a task, shows the folder as it is now: an untouched view copy
+/// is replaced; one with the user's edits is kept as it is.
+#[cfg(target_os = "macos")]
+#[test]
+fn reopening_a_project_shows_the_original_as_it_is_now() {
+    let mut fixture = source_index_fixture();
+    let path = fixture.source.to_str().unwrap().to_owned();
+    fixture.manager.open_project(&mut fixture.storage, &path, "req_reopen_first").unwrap();
+    let first = fixture.create();
+    let commit = |source: &Path, message: &str| {
+        git_raw(source, ["add", "."]);
+        git_raw(source, ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "-m", message]);
+    };
+    fs::write(fixture.source.join("src/new.txt"), b"merged\n").unwrap();
+    commit(&fixture.source, "merged task");
+    fixture.manager.open_project(&mut fixture.storage, &path, "req_reopen_now").unwrap();
+    let second = fixture.create();
+    assert_ne!(second.worktree_id, first.worktree_id, "a fresh copy");
+    assert!(!first.worktree_path.exists(), "the old untouched copy is gone");
+    assert_eq!(fs::read(second.worktree_path.join("src/new.txt")).unwrap(), b"merged\n");
+
+    // The user's edit in the view copy is never dropped by a newer original.
+    fs::write(second.worktree_path.join("src/new.txt"), b"mine").unwrap();
+    fs::write(fixture.source.join("src/later.txt"), b"later\n").unwrap();
+    commit(&fixture.source, "later");
+    fixture.manager.open_project(&mut fixture.storage, &path, "req_reopen_kept").unwrap();
+    let third = fixture.create();
+    assert_eq!(third.worktree_id, second.worktree_id, "kept");
+    assert_eq!(fs::read(third.worktree_path.join("src/new.txt")).unwrap(), b"mine");
+
+    // A copy with a submodule folder (files Git would not show) is kept
+    // (review M24).
+    let mut nested = Fixture::open();
+    let nested_path = nested.source.to_str().unwrap().to_owned();
+    assert!(git_text(&nested.source, ["ls-files", "-s"]).lines().any(|line| line.starts_with("160000 ")));
+    let before = nested.create();
+    fs::write(nested.source.join("src/new.txt"), b"merged\n").unwrap();
+    commit_in(&nested.source, "merged task");
+    nested.manager.open_project(&mut nested.storage, &nested_path, "req_reopen_nested").unwrap();
+    assert_eq!(nested.create().worktree_id, before.worktree_id);
+}
+
+/// A copy task's changes panel (user decision 2026-11-20): not applied yet,
+/// applied (kept by the engine's receipt, so the same after a restart), and
+/// changed again since, counting only what differs from what was applied.
+#[cfg(target_os = "macos")]
+#[test]
+fn an_applied_copy_task_says_applied_and_counts_what_changed_since() {
+    let mut fixture = Fixture::open();
+    fixture.manager.git_worktrees_enabled = false;
+    fixture.manager.source_writes_enabled = true;
+    let manifest = fixture.manager.prepare_chat_workspace(&mut fixture.storage, &fixture.project_id, "req_apply_receipt").unwrap().result;
+    let address = WorkspaceAddress {
+        chat_id: "chat_apply".into(),
+        project_id: fixture.project_id.clone(),
+        worktree_id: manifest["worktreeId"].as_str().unwrap().into(),
+        workspace_identity: manifest["workspaceIdentity"].as_str().unwrap().into(),
+    };
+    let payload = json!({"chat_id":address.chat_id,"project_id":address.project_id,"worktree_id":address.worktree_id,"workspace_identity":address.workspace_identity,"state":"draft","durable_event_sequence":0,"last_message":null,"record":{"chatId":address.chat_id,"projectId":address.project_id,"worktreeId":address.worktree_id,"workspaceIdentity":address.workspace_identity,"taskId":"task_apply","state":"draft"}});
+    fixture.storage.upsert_projection_record("chat", &address.chat_id, "op_apply_chat", None, payload.as_object().unwrap().clone()).unwrap();
+    let path = PathBuf::from(manifest["worktreePath"].as_str().unwrap());
+    let project = fixture.project_id.clone();
+    let inspect = |fixture: &Fixture| {
+        let result = fixture.manager.inspect_chat_apply(&fixture.storage, &project, "chat_apply").unwrap().result;
+        (result["applied"].as_bool().unwrap(), result["pending"].as_u64().unwrap(), result["total"].as_u64().unwrap())
+    };
+    fs::write(path.join("src/edit.txt"), b"from the task").unwrap();
+    assert_eq!(inspect(&fixture), (false, 1, 1));
+    let applied = fixture.manager.apply_chat_latest(&fixture.storage, &project, "chat_apply").unwrap().result;
+    assert_eq!(applied["written"], 1, "{applied}");
+    assert_eq!(fs::read(fixture.source.join("src/edit.txt")).unwrap(), b"from the task");
+    assert_eq!(inspect(&fixture), (true, 0, 1));
+    // The workspace changes again: only that counts as new.
+    fs::write(path.join("src/edit.txt"), b"changed again").unwrap();
+    assert_eq!(inspect(&fixture), (true, 1, 1));
+    fs::write(path.join("src/edit.txt"), b"from the task").unwrap();
+    assert_eq!(inspect(&fixture), (true, 0, 1), "back to what was applied");
+    // Review I9: a path the apply skips (a folder of that name in the user's
+    // folder) is never "applied", so the panel keeps offering to apply it.
+    fs::create_dir(fixture.source.join("blocked")).unwrap();
+    fs::write(path.join("blocked"), b"a file named like the user's folder").unwrap();
+    let applied = fixture.manager.apply_chat_latest(&fixture.storage, &project, "chat_apply").unwrap().result;
+    assert_eq!(applied["skipped"], json!(["blocked"]), "{applied}");
+    assert!(fixture.source.join("blocked").is_dir());
+    assert_eq!(inspect(&fixture), (true, 1, 2));
+}
+
+/// A task of a plain folder's earlier record (the folder was recorded anew)
+/// can no longer open, but it can be discarded: only its own folder goes,
+/// and the old history goes with its last task once no folder uses it
+/// (review M8). A look-alike folder elsewhere is never taken.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_task_of_an_earlier_folder_record_can_be_discarded() {
+    use std::os::unix::fs::MetadataExt as _;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let data = root.join("app-data");
+    fs::create_dir_all(&data).unwrap();
+    let database = data.join("elsecrew.sqlite3");
+    let mut storage = Storage::open(&database).unwrap();
+    let mut manager = ProjectManager::new(&database).unwrap();
+    let folder = root.join("todo");
+    fs::create_dir(&folder).unwrap();
+    fs::write(folder.join("index.html"), b"x").unwrap();
+    let identity = |path: &Path| { let meta = fs::metadata(path).unwrap(); format!("{}:{}", meta.dev(), meta.ino()) };
+    manager.initialize_folder_project(folder.to_str().unwrap(), &identity(&folder)).unwrap();
+    let project_id = manager.open_project(&mut storage, folder.to_str().unwrap(), "req_open_first").unwrap().result["projectId"].as_str().unwrap().to_owned();
+    let mut fixture = Fixture { _root: temp, source: folder.clone(), storage, manager, project_id };
+    let (address, path) = worktree_chat(&mut fixture, "earlier");
+    fs::write(path.join("app.js"), b"1").unwrap();
+    assert!(fixture.manager.workspace_commit_step(&fixture.storage, &address, "개발").unwrap());
+    let old_history = PathBuf::from(fs::read_to_string(folder.join(".git")).unwrap().trim_start_matches("gitdir: ").trim_end());
+    let manifest = read_bounded_json(&fixture.manager.manifests_dir, &format!("{}.json", address.worktree_id)).unwrap();
+
+    // The old record loses its mark (as an earlier build's had none): the
+    // folder is recorded anew; the old history keeps its task.
+    fs::remove_file(old_history.join(super::empty_project::SHADOW_OWNER_FILE)).unwrap();
+    fixture.manager.initialize_folder_project(folder.to_str().unwrap(), &identity(&folder)).unwrap();
+    assert!(old_history.exists(), "a history with a task left is kept");
+    fixture.manager.open_project(&mut fixture.storage, folder.to_str().unwrap(), "req_open_again").unwrap();
+    assert!(fixture.manager.validate_workspace_address(&fixture.storage, &address).is_err(), "cannot open");
+    let active = fixture.manager.validate_workspace_binding_with_lock(&fixture.storage, &address, "active", WorkspaceLockAdmission::Discard).unwrap();
+    let worktree = fixture.manager.worktree_capability(&active).unwrap();
+    assert!(fixture.manager.verify_snapshot_repository(&worktree, &active).is_err(), "cannot work");
+    fixture.manager.verify_repository_for_discard(&worktree, &active).unwrap();
+
+    // A copy of that task folder elsewhere, under the same name, is not it.
+    let short = &address.worktree_id["worktree_".len().."worktree_".len() + 8];
+    let elsewhere = root.join("user-docs").join(format!("task-{short}"));
+    fs::create_dir_all(elsewhere.parent().unwrap()).unwrap();
+    assert!(Command::new("/bin/cp").args(["-R", path.to_str().unwrap(), elsewhere.to_str().unwrap()]).status().unwrap().success());
+    let mut forged = manifest.clone();
+    forged["worktreePath"] = json!(elsewhere.to_str().unwrap());
+    assert!(fixture.manager.remove_task_worktree_folder(&address.worktree_id, &forged, None).is_err());
+    assert!(elsewhere.join("app.js").exists());
+
+    fixture.manager.remove_task_worktree_folder(&address.worktree_id, &manifest, None).unwrap();
+    assert!(!path.exists());
+    assert!(!old_history.exists(), "its last task gone and no folder using it");
+    assert_eq!(fs::read(folder.join("index.html")).unwrap(), b"x");
+    assert!(fixture.manager.open_project(&mut fixture.storage, folder.to_str().unwrap(), "req_open_after").is_ok());
+}
+
+/// Review M8 when a copy is recorded anew: the original's history stays
+/// (its folder still uses it); a folder's own stale history with no task
+/// goes.
+#[cfg(target_os = "macos")]
+#[test]
+fn recording_a_folder_anew_retires_only_its_unused_old_history() {
+    use std::os::unix::fs::MetadataExt as _;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let data = root.join("app-data");
+    fs::create_dir_all(&data).unwrap();
+    let manager = ProjectManager::new(&data.join("elsecrew.sqlite3")).unwrap();
+    let identity = |path: &Path| { let meta = fs::metadata(path).unwrap(); format!("{}:{}", meta.dev(), meta.ino()) };
+    let history = |folder: &Path| PathBuf::from(fs::read_to_string(folder.join(".git")).unwrap().trim_start_matches("gitdir: ").trim_end());
+    let original = root.join("original");
+    fs::create_dir(&original).unwrap();
+    fs::write(original.join("a.txt"), b"a").unwrap();
+    manager.initialize_folder_project(original.to_str().unwrap(), &identity(&original)).unwrap();
+    let kept = history(&original);
+    let copy = root.join("copy");
+    assert!(Command::new("/bin/cp").args(["-R", original.to_str().unwrap(), copy.to_str().unwrap()]).status().unwrap().success());
+    manager.initialize_folder_project(copy.to_str().unwrap(), &identity(&copy)).unwrap();
+    assert!(kept.exists(), "the original still uses its history");
+    // The copy's own history loses its mark: recorded anew, the old one goes.
+    let stale = history(&copy);
+    fs::remove_file(stale.join(super::empty_project::SHADOW_OWNER_FILE)).unwrap();
+    manager.initialize_folder_project(copy.to_str().unwrap(), &identity(&copy)).unwrap();
+    assert!(!stale.exists());
+    assert!(kept.exists() && history(&copy).exists());
+
+    // Review I5: the original moved away and another folder (its own record)
+    // took its old path. That folder is not the marked one (another file
+    // number): the original's history is kept.
+    let moved = root.join("original-moved");
+    fs::rename(&original, &moved).unwrap();
+    fs::create_dir(&original).unwrap();
+    fs::write(original.join("b.txt"), b"b").unwrap();
+    manager.initialize_folder_project(original.to_str().unwrap(), &identity(&original)).unwrap();
+    assert_ne!(history(&original), kept);
+    manager.retire_orphaned_history(&kept);
+    assert!(kept.exists(), "the moved original still uses it");
+    // Review M13: a mark that cannot be read keeps the history.
+    let mark = kept.join(super::empty_project::SHADOW_OWNER_FILE);
+    fs::remove_file(&mark).unwrap();
+    fs::create_dir(&mark).unwrap();
+    manager.retire_orphaned_history(&kept);
+    assert!(kept.exists());
+}
+
+/// A link into another app data's shadow folder (another Mac, or app data
+/// reset) is "record missing" even before this app data has any shadow
+/// folder, so the user is offered to record the folder anew (review N1).
+#[cfg(target_os = "macos")]
+#[test]
+fn a_plain_folder_from_another_mac_can_be_recorded_anew() {
+    use std::os::unix::fs::MetadataExt as _;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let data = root.join("fresh-app-data");
+    fs::create_dir_all(&data).unwrap();
+    let database = data.join("elsecrew.sqlite3");
+    let mut storage = Storage::open(&database).unwrap();
+    let mut manager = ProjectManager::new(&database).unwrap();
+    let folder = root.join("from-another-mac");
+    fs::create_dir(&folder).unwrap();
+    fs::write(folder.join("index.html"), b"x").unwrap();
+    fs::write(folder.join(".git"), b"gitdir: /Users/someone-else/Library/Application Support/Elsecrew/m5/shadow-git-v1/abc.git\n").unwrap();
+    assert!(fs::symlink_metadata(data.join("shadow-git-v1")).is_err());
+    let error = manager.open_project(&mut storage, folder.to_str().unwrap(), "req_open_foreign").unwrap_err();
+    assert!(error.detail.contains("record is missing or belongs to another folder"), "{}", error.detail);
+    let meta = fs::metadata(&folder).unwrap();
+    manager.initialize_folder_project(folder.to_str().unwrap(), &format!("{}:{}", meta.dev(), meta.ino())).unwrap();
+    assert!(manager.open_project(&mut storage, folder.to_str().unwrap(), "req_open_foreign2").is_ok());
+    assert_eq!(git_text(&folder, ["ls-files"]).trim(), "index.html");
 }

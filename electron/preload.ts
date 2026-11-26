@@ -1,4 +1,5 @@
-import { CLAUDE_USAGE_CHANNEL, validateClaudeUsageResult } from "../src/m5/contracts/provider-usage-v1.ts";
+import { PREVIEW_CHANNEL_V1 as M5_PREVIEW_CHANNEL, PREVIEW_EVENT_CHANNEL_V1 as M5_PREVIEW_EVENT_CHANNEL, validatePreviewEventV1, validatePreviewIpcRequestV1, validatePreviewIpcResultV1, type M5PreviewBridgeV1, type PreviewEventV1 } from "../src/m5/contracts/preview-v1.ts";
+import { CLAUDE_USAGE_CHANNEL as M5_CLAUDE_USAGE_CHANNEL, validateClaudeUsageResult } from "../src/m5/contracts/provider-usage-v1.ts";
 import { GIT_SELECTION_CHANNEL as M5_GIT_SELECTION_CHANNEL, validateGitSelectionAction, validateGitSelection, type GitSelectionAction } from "../src/m5/contracts/git-selection-v1.ts";
 import { SAVE_RECOVERY_RESOLVE_CHANNEL as M5_SAVE_RECOVERY_RESOLVE_CHANNEL, validateSaveRecoveryResolveRequest, validateSaveRecoveryResolveResult } from "../src/m5/contracts/save-recovery-v1.ts";
 import { SAVE_RECOVERY_CHANNEL as M5_SAVE_RECOVERY_CHANNEL, validateSaveRecoveryRequest, validateSaveRecoveryResult } from "../src/m5/contracts/save-recovery-v1.ts";
@@ -33,6 +34,7 @@ import { validateProjectIdentityV1 } from "../src/m5/contracts/project-v1.ts";
 import { validateTeamMessageV1 } from "../src/m5/contracts/run-recovery-v1.ts";
 import { validateWorkspaceEventV1 } from "../src/m5/contracts/workspace-addressing-v1.ts";
 import { validateStorageStatusRequestV1 } from "../src/m5/contracts/storage-lifetime-v1.ts";
+import { EXTERNAL_LINK_CHANNEL as M5_EXTERNAL_LINK_CHANNEL, validateExternalLink, validateExternalLinkResult } from "../src/m5/contracts/external-link-v1.ts";
 import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS, M5_BRIDGE_V6_CHANNELS } from "./ipc-channels.ts";
 import {
   validateChatCreateInput, validateChatGetInput, validateChatListInput, validateFixtureRunStartInput,
@@ -126,6 +128,13 @@ contextBridge.exposeInMainWorld("m5Projects", Object.freeze({
     return validateProjectCatalogResult(await ipcRenderer.invoke(M5_PROJECT_CATALOG_CHANNEL, request), request);
   },
 }));
+contextBridge.exposeInMainWorld("m5ExternalLink", Object.freeze({
+  open: async (input: string) => {
+    const url = validateExternalLink(input);
+    if (!url) throw new Error("invalid external link");
+    return validateExternalLinkResult(await ipcRenderer.invoke(M5_EXTERNAL_LINK_CHANNEL, url));
+  },
+}));
 contextBridge.exposeInMainWorld("m5Approval", Object.freeze({
   request: async (input: ApprovalRequest) => {
     const request = validateApprovalRequest(input);
@@ -158,33 +167,37 @@ const chatListeners = new Set<Parameters<M5BridgeV6["onChatEvent"]>[0]>();
 const agentPublicEventListeners = new Set<Parameters<M5BridgeV6["onAgentPublicEvent"]>[0]>();
 const agentRunStateChangedListeners = new Set<Parameters<M5BridgeV6["onAgentRunStateChanged"]>[0]>();
 const agentOutputListeners = new Set<(head: OutputHead) => void>();
-ipcRenderer.on(M5_BRIDGE_V8_CHANNELS.agentOutputAvailable, (_event, payload: { event: OutputHead; streamId: string; seq: number }) => {
+// Acknowledge delivery in every case. The credit only paces delivery; an event
+// that fails its check or a listener that throws must not leave the credit
+// queue stuck, which would make the very next acknowledgement look
+// out of order and stop the whole engine.
+function delivered(payload: Pick<EventV1, "streamId" | "seq">, handle: () => void): void {
+  try { handle(); }
+  catch (error) { console.error("m5: renderer could not handle a sidecar event", error); }
+  finally { acknowledge(payload); }
+}
+ipcRenderer.on(M5_BRIDGE_V8_CHANNELS.agentOutputAvailable, (_event, payload: { event: OutputHead; streamId: string; seq: number }) => delivered(payload, () => {
   const head = validateOutputHead(payload.event, payload.event.binding);
   for (const listener of agentOutputListeners) listener(head);
-  acknowledge(payload);
-});
-ipcRenderer.on(M5_INTERNAL_CHANNELS_V1.sidecarEvent, (_event, payload: EventV1) => { for (const listener of sidecarListeners) listener(payload); acknowledge(payload); });
-ipcRenderer.on(M5_BRIDGE_V2_CHANNELS.projectEvent, (_event, payload: { event: Parameters<M5BridgeV6["onProjectEvent"]>[0] extends (event: infer T) => unknown ? T : never; streamId: string; seq: number }) => { for (const listener of projectListeners) listener(payload.event); acknowledge(payload); });
-ipcRenderer.on(M5_BRIDGE_V3_CHANNELS.workspaceEvent, (_event, payload: { event: unknown; streamId: string; seq: number }) => {
+}));
+ipcRenderer.on(M5_INTERNAL_CHANNELS_V1.sidecarEvent, (_event, payload: EventV1) => delivered(payload, () => { for (const listener of sidecarListeners) listener(payload); }));
+ipcRenderer.on(M5_BRIDGE_V2_CHANNELS.projectEvent, (_event, payload: { event: Parameters<M5BridgeV6["onProjectEvent"]>[0] extends (event: infer T) => unknown ? T : never; streamId: string; seq: number }) => delivered(payload, () => { for (const listener of projectListeners) listener(payload.event); }));
+ipcRenderer.on(M5_BRIDGE_V3_CHANNELS.workspaceEvent, (_event, payload: { event: unknown; streamId: string; seq: number }) => delivered(payload, () => {
   const workspaceEvent = validateWorkspaceEventV1(payload.event);
   for (const listener of workspaceListeners) listener(workspaceEvent);
-  acknowledge(payload);
-});
-ipcRenderer.on(M5_BRIDGE_V3_CHANNELS.chatEvent, (_event, payload: { event: unknown; streamId: string; seq: number }) => {
+}));
+ipcRenderer.on(M5_BRIDGE_V3_CHANNELS.chatEvent, (_event, payload: { event: unknown; streamId: string; seq: number }) => delivered(payload, () => {
   const message = validateTeamMessageV1(payload.event);
   for (const listener of chatListeners) listener(message);
-  acknowledge(payload);
-});
-ipcRenderer.on(M5_BRIDGE_V4_CHANNELS.agentPublicEvent, (_event, payload: { event: unknown; streamId: string; seq: number }) => {
+}));
+ipcRenderer.on(M5_BRIDGE_V4_CHANNELS.agentPublicEvent, (_event, payload: { event: unknown; streamId: string; seq: number }) => delivered(payload, () => {
   const agentPublicEvent = validateAgentPublicEventV1(payload.event);
   for (const listener of agentPublicEventListeners) listener(agentPublicEvent);
-  acknowledge(payload);
-});
-ipcRenderer.on(M5_BRIDGE_V5_CHANNELS.agentRunStateChanged, (_event, payload: { event: unknown; streamId: string; seq: number }) => {
+}));
+ipcRenderer.on(M5_BRIDGE_V5_CHANNELS.agentRunStateChanged, (_event, payload: { event: unknown; streamId: string; seq: number }) => delivered(payload, () => {
   const stateChanged = validateAgentRunStateChangedV1(payload.event);
   for (const listener of agentRunStateChangedListeners) listener(stateChanged);
-  acknowledge(payload);
-});
+}));
 function subscribe<T>(listeners: Set<(event: T) => void>, listener: (event: T) => void): () => void { listeners.add(listener); return () => listeners.delete(listener); }
 function acknowledge(event: Pick<EventV1, "streamId" | "seq">): void { ipcRenderer.send(M5_BRIDGE_V2_CHANNELS.eventAck, { streamId: event.streamId, seq: event.seq }); }
 
@@ -201,8 +214,32 @@ contextBridge.exposeInMainWorld("m5GitSelection", Object.freeze({
 const M5_APP_UPDATE_CHANNEL = "m5:app-update:open";
 const M5_UPDATE_READINESS = "m5:app-update:readiness";
 const M5_UPDATE_READINESS_REPLY = "m5:app-update:readiness-reply";
+const M5_APP_UPDATE_STATE = "m5:app-update:state";
+const M5_APP_UPDATE_REQUEST = "m5:app-update:request";
+const M5_APP_UPDATE_CHANGED = "m5:app-update:changed";
+const M5_APP_UPDATE_REVEAL = "m5:app-update:reveal";
+const APP_UPDATE_STATES = ["unavailable", "idle", "current", "checking", "downloading", "ready", "restarting", "error"] as const;
+type AppUpdateState = typeof APP_UPDATE_STATES[number];
+const asUpdateState = (value: unknown): AppUpdateState => (APP_UPDATE_STATES as readonly unknown[]).includes(value) ? value as AppUpdateState : "unavailable";
 const appUpdateApi = Object.freeze({
   open: () => ipcRenderer.invoke(M5_APP_UPDATE_CHANNEL),
+  // The in-app banner (ADE U8): main's state, and requests main decides on.
+  state: async (): Promise<AppUpdateState> => asUpdateState(await ipcRenderer.invoke(M5_APP_UPDATE_STATE)),
+  onState: (listener: (state: AppUpdateState) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: unknown) => listener(asUpdateState(state));
+    ipcRenderer.on(M5_APP_UPDATE_CHANGED, handler);
+    return () => { ipcRenderer.removeListener(M5_APP_UPDATE_CHANGED, handler); };
+  },
+  /** The app menu asked to show the update in the app (settings › general). */
+  onReveal: (listener: () => void) => {
+    const handler = () => listener();
+    ipcRenderer.on(M5_APP_UPDATE_REVEAL, handler);
+    return () => { ipcRenderer.removeListener(M5_APP_UPDATE_REVEAL, handler); };
+  },
+  request: async (action: unknown): Promise<AppUpdateState> => {
+    if (action !== "check" && action !== "restart") throw new Error("invalid app update request");
+    return asUpdateState(await ipcRenderer.invoke(M5_APP_UPDATE_REQUEST, action));
+  },
   onRestartCheck: (check: () => boolean, resume: () => void) => {
     const listener = (_event: Electron.IpcRendererEvent, nonce: unknown) => {
       if (typeof nonce !== "string") return;
@@ -218,6 +255,50 @@ const appUpdateApi = Object.freeze({
 });
 contextBridge.exposeInMainWorld("m5AppUpdate", appUpdateApi);
 
-contextBridge.exposeInMainWorld("m5ClaudeUsage", Object.freeze({
-  read: async () => validateClaudeUsageResult(await ipcRenderer.invoke(CLAUDE_USAGE_CHANNEL)),
+// Screen brightness choice (system / light / dark). main keeps the record the
+// settings screen starts from and follows the choice for native parts.
+const M5_APPEARANCE_CHANNEL = "m5:appearance:set";
+const M5_APPEARANCE_GET_CHANNEL = "m5:appearance:get";
+const isTheme = (value: unknown): value is "system" | "light" | "dark" => value === "system" || value === "light" || value === "dark";
+const field = (value: unknown, name: string): unknown => typeof value === "object" && value !== null ? (value as Record<string, unknown>)[name] : undefined;
+contextBridge.exposeInMainWorld("m5Appearance", Object.freeze({
+  get: async () => {
+    const result: unknown = await ipcRenderer.invoke(M5_APPEARANCE_GET_CHANNEL);
+    const theme = field(result, "theme");
+    return { theme: isTheme(theme) ? theme : "system", saved: field(result, "saved") === true && isTheme(theme), dark: field(result, "dark") === true };
+  },
+  set: async (theme: unknown) => {
+    if (!isTheme(theme)) throw new Error("invalid appearance");
+    const result: unknown = await ipcRenderer.invoke(M5_APPEARANCE_CHANNEL, theme);
+    return { dark: field(result, "dark") === true, saved: field(result, "saved") === true };
+  },
 }));
+
+contextBridge.exposeInMainWorld("m5ClaudeUsage", Object.freeze({
+  read: async () => validateClaudeUsageResult(await ipcRenderer.invoke(M5_CLAUDE_USAGE_CHANNEL)),
+}));
+
+// Result preview (ADE 1차-나 F12). On by default; with `ELSECREW_PREVIEW=0`
+// main refuses all but `status`. The page shown in a preview never
+// gets this bridge: its view has no preload at all.
+const previewListeners = new Set<(event: PreviewEventV1) => void>();
+ipcRenderer.on(M5_PREVIEW_EVENT_CHANNEL, (_event, payload: unknown) => {
+  let event: PreviewEventV1;
+  try { event = validatePreviewEventV1(payload); } catch { return; }
+  for (const listener of previewListeners) listener(event);
+});
+async function previewCall<T>(input: unknown): Promise<T> {
+  const request = validatePreviewIpcRequestV1(input);
+  return validatePreviewIpcResultV1(await ipcRenderer.invoke(M5_PREVIEW_CHANNEL, request), request) as T;
+}
+type PreviewBridgeResult<K extends keyof M5PreviewBridgeV1> = Awaited<ReturnType<M5PreviewBridgeV1[K]>>;
+const previewBridge: M5PreviewBridgeV1 = Object.freeze({
+  status: () => previewCall<PreviewBridgeResult<"status">>({ action: "status" }),
+  open: (input: Parameters<M5PreviewBridgeV1["open"]>[0]) => previewCall<PreviewBridgeResult<"open">>({ ...input, action: "open" }),
+  layout: (input: Parameters<M5PreviewBridgeV1["layout"]>[0]) => previewCall<PreviewBridgeResult<"layout">>({ ...input, action: "layout" }),
+  reload: (input: { previewId: string }) => previewCall<PreviewBridgeResult<"reload">>({ ...input, action: "reload" }),
+  hide: (input: { previewId: string }) => previewCall<PreviewBridgeResult<"hide">>({ ...input, action: "hide" }),
+  close: (input: { previewId: string }) => previewCall<PreviewBridgeResult<"close">>({ ...input, action: "close" }),
+  onEvent: (listener: (event: PreviewEventV1) => void) => subscribe(previewListeners, listener),
+});
+contextBridge.exposeInMainWorld("m5Preview", previewBridge);

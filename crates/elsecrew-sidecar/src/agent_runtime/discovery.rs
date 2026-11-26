@@ -255,7 +255,7 @@ impl AgentRuntime {
             &preparation.profile.model_selector,
             preparation.profile.reasoning_effort.as_deref(), access,
             Path::new(preparation.manifest["worktreePath"].as_str().ok_or_else(failure)?),
-            Path::new(preparation.manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?), &home,
+            Path::new(elsecrew_protocol::project_v1::manifest_source_root(&preparation.manifest).ok_or_else(failure)?), &home,
         ) { return Err(checkpoint("launch binding")); }
         observed.evidence.executable.revalidate()?;
         let preflight = elsecrew_protocol::agent_adapter_v1::phased_claude::Preflight {
@@ -265,7 +265,7 @@ impl AgentRuntime {
                 &preparation.profile.model_selector,
                 preparation.profile.reasoning_effort.as_deref(), access, &home,
                 Path::new(preparation.manifest["worktreePath"].as_str().ok_or_else(failure)?),
-                Path::new(preparation.manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?),
+                Path::new(elsecrew_protocol::project_v1::manifest_source_root(&preparation.manifest).ok_or_else(failure)?),
             )?,
             resolved_model:observed.evidence.observation.resolved_model()?.into(),
             credentials_present:observed.evidence.credentials_present, observed_at:now(),
@@ -318,7 +318,7 @@ impl AgentRuntime {
         use crate::provider_profile::LoginProfile;
         let binding = crate::provider_claude_profile::ClaudeProfileBinding::from_storage(storage)?;
         let workspace = PathBuf::from(manifest["worktreePath"].as_str().ok_or_else(failure)?);
-        let source = PathBuf::from(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?);
+        let source = PathBuf::from(elsecrew_protocol::project_v1::manifest_source_root(&manifest).ok_or_else(failure)?);
         let admission = crate::provider_claude_session::admission::Admission::new(
             &workspace, &binding.revalidate()?, &source, &profile.model_selector,
             profile.reasoning_effort.as_deref(), access,
@@ -351,6 +351,24 @@ impl AgentRuntime {
     }
 
     #[allow(dead_code)]
+    /// Drops a start's finished discovery that waited for the engine longer
+    /// than a start may use it (ADE multi-project P5: beside other runs of the
+    /// agent a start can wait behind another's launch), so the caller can
+    /// discover again. A failed one, or one still cleaning up, stays.
+    pub(crate) fn drop_stale_start_discovery(&mut self, request_id: &str) -> bool {
+        let stale_claude = self.pending_claude_discoveries.get(request_id).is_some_and(|pending| {
+            pending.completion.as_ref().is_some_and(|done| done.cleanup.is_none()
+                && done.result.as_ref().is_ok_and(|evidence| !evidence.fresh_for_start()))
+        });
+        let stale_codex = self.pending_discoveries.get(request_id).is_some_and(|pending| {
+            pending.completion.as_ref().is_some_and(|done| done.cleanup.is_none()
+                && done.result.as_ref().is_ok_and(|evidence| !evidence.observation.fresh_for_start()))
+        });
+        if stale_claude { self.pending_claude_discoveries.remove(request_id); }
+        if stale_codex { self.pending_discoveries.remove(request_id); }
+        stale_claude || stale_codex
+    }
+
     pub(crate) fn take_claude_discovery(
         &mut self, storage: &Storage, projects: &ProjectManager, request_id: &str,
     ) -> Option<Result<ScopedClaudeEvidence, SidecarError>> {
@@ -379,7 +397,7 @@ impl AgentRuntime {
             if !evidence.is_fresh() || !evidence.observation.matches(&pending.profile.model_selector,
                 pending.profile.reasoning_effort.as_deref(), access,
                 Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?),
-                Path::new(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?), &home) {
+                Path::new(elsecrew_protocol::project_v1::manifest_source_root(&manifest).ok_or_else(failure)?), &home) {
                 return Err(failure());
             }
             evidence.executable.revalidate()?;
@@ -467,6 +485,7 @@ impl AgentRuntime {
                     .reasoning_effort
                     .as_deref()
                     .ok_or_else(failure)?,
+                approval: preparation::codex_approval_policy(storage, projects, preparation.chat["projectId"].as_str().ok_or_else(failure)?)?,
             };
         let workspace = Path::new(
             preparation.manifest["worktreePath"]
@@ -547,11 +566,13 @@ impl AgentRuntime {
         let workspace = PathBuf::from(manifest["worktreePath"].as_str().ok_or_else(failure)?);
         let scope = capability_scope(&chat, role_id).map_err(|_| failure())?;
         let binding = crate::provider_profile::CodexProfileBinding::from_storage(storage)?;
+        let approval = preparation::codex_approval_policy(storage, projects, &address.project_id)?;
         let worker = DiscoveryWorker::spawn(
             binding,
             profile.model_selector.clone(),
             profile.reasoning_effort.clone().ok_or_else(failure)?,
             permission,
+            approval,
             workspace,
         )?;
         self.pending_discoveries.insert(

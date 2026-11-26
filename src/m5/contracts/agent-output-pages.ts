@@ -20,7 +20,8 @@ export interface OutputPageRequest {
 export interface OutputItemUpdate {
   itemId: string;
   operation: "append" | "complete";
-  channel: "message" | "plan";
+  /** activity: one tool use as compact JSON (see work-history.ts); always a completed status row. */
+  channel: "message" | "plan" | "activity";
 }
 export interface OutputRow { outputSequence: number; event: AgentPublicEventV1; itemUpdate?: OutputItemUpdate }
 /** sealed closes output only; it does not prove process termination/success. */
@@ -106,9 +107,10 @@ function validatePage(value: unknown, expectedValue: OutputPageRequest): OutputP
       if (typeof update.itemId !== "string" || !update.itemId.length
         || new TextEncoder().encode(update.itemId).length > 128 || /[\u0000-\u001f\u007f-\u009f]/u.test(update.itemId)
         || (update.operation !== "append" && update.operation !== "complete")
-        || (update.channel !== "message" && update.channel !== "plan")
+        || (update.channel !== "message" && update.channel !== "plan" && update.channel !== "activity")
         || (event.kind !== "status" && event.kind !== "final")
-        || (event.kind === "final" && update.operation !== "complete")) return fail();
+        || (event.kind === "final" && update.operation !== "complete")
+        || (update.channel === "activity" && (event.kind !== "status" || update.operation !== "complete"))) return fail();
       itemUpdate = update as unknown as OutputItemUpdate;
     }
     rows.push({ outputSequence, event, ...(itemUpdate ? { itemUpdate } : {}) });

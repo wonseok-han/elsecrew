@@ -55,24 +55,11 @@
 
 에이전트 모델이나 벤더보다 역할과 권한이 먼저다. 같은 모델을 여러 역할에 쓸 수 있지만, **같은 실행이 구현자와 최종 검토자를 겸하지 않는다.**
 
-### 2.1 Codex 프로젝트 역할 설정
+### 2.1 개발용 서브에이전트 설정 (2026-11-12 사용자 결정)
 
-다음 표는 **필요 시 사용하도록 보관한 서브에이전트 설정**이며 메인 모델을 지정하지 않는다. 메인은 현재 앱에서 사용자가 선택한 Astra를 따른다. Sol/Terra 역할을 일괄 Astra로 변경하거나 실제 호출하지 않았으며, 위임 재개 시 과제에 맞춰 모델과 추론 수준을 정한다.
+사용자 공통 커스텀 역할12개와 프로젝트 전용 역할8개, 프로젝트 고정 모델·추론·동시 실행 설정을 백업 후 제거했다. 별도 역할 프리셋은 유지하지 않는다. 메인이 직접 작업하며, 필요한 읽기 전용 독립 검토는 기본 에이전트 1명에게 정확한 대상 diff/commit·범위·검토 기준·수정 금지를 명시해 호출한다. 현재 모델과 추론 설정을 상속하고 역할명에 따른 모델 강제 지정은 하지 않는다.
 
-Codex는 저장소의 [`.codex/config.toml`](../../.codex/config.toml)과 [`.codex/agents/`](../../.codex/agents/)에서 M5 전용 역할을 읽는다. 프로젝트를 신뢰한 로컬 Codex에서 적용되며, 동시에 열린 서브에이전트 thread는 최대 3개다. 이 상한은 쓰기 작업자 3명을 모두 투입하라는 뜻이 아니라 충돌 없이 독립적인 작업만 병렬화하라는 안전 한도다.
-
-| 설정 역할 | 기본 모델 | 권한 | 사용하는 때 |
-| --- | --- | --- | --- |
-| `m5_architect` | `gpt-5.6-sol` high | 읽기 전용 | 경계·의존성·직렬화 지점 분석 |
-| `m5_contract_engineer` | `gpt-5.6-sol` high | 작업 공간 쓰기 | protocol/schema/API/migration/fixture 단일 소유 |
-| `m5_electron_engineer` | `gpt-5.6-terra` high | 작업 공간 쓰기 | Electron main/preload/lifecycle/package |
-| `m5_rust_safety_engineer` | `gpt-5.6-sol` high | 작업 공간 쓰기 | Rust core/sidecar/process/standalone snapshot/recovery |
-| `m5_ui_engineer` | `gpt-5.6-terra` high | 작업 공간 쓰기 | React/TypeScript/Monaco 작업대와 상태 UI |
-| `m5_code_reviewer` | `gpt-5.6-terra` high | 읽기 전용 | 정확한 commit/diff의 독립 코드 리뷰 |
-| `m5_qa_executor` | `gpt-5.6-terra` high | QA artifact만 쓰기 | 최신 통합 commit의 시나리오·실패 주입 |
-| `m5_gate_reviewer` | `gpt-5.6-sol` high | 읽기 전용 | 명세·diff·리뷰·QA의 최종 대조 |
-
-역할 설정은 책임과 기본 성향을 고정할 뿐 작업 범위를 부여하지 않는다. 오케스트레이터는 매번 §4 작업 계약에 base commit, worktree, 소유 파일, 변경 금지 영역, 합격 기준을 넣어야 한다. 모델을 임의로 바꾸기보다 역할 기본값을 쓰고, 비용·속도·난이도 때문에 예외가 필요하면 작업 기록에 이유를 남긴다.
+서브에이전트 기능 자체와 독립 검토자 1명의 기존 상시 승인은 유지한다. 구현 위임·추가 검토자는 별도 승인 대상이며 승인된 다중 작성의 파일 소유권·worktree·동시 작성자 제한은 계속 적용한다. 이 설정 정리는 Elsecrew 제품 안의 사용자 팀 역할 설정에 영향을 주지 않는다.
 
 ## 3. 시작 전 Gate 0
 
@@ -104,7 +91,6 @@ owns:
   - pnpm-lock.yaml
 mustNotTouch:
   - crates/**
-  - src-tauri/**
   - src/m5/**
 dependsOn:
   - protocol-fixture-v1
@@ -291,5 +277,5 @@ PowerShell에서는 `$env:CARGO_BUILD_JOBS='4'; $env:RUST_TEST_THREADS='4'` 설�
 
 ## 참고 근거
 
-- [OpenAI Codex Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents): 프로젝트 전용 `.codex/agents/*.toml`, 역할별 모델·추론 강도·sandbox, 동시 thread 설정과 독립 작업 위임 방식을 따른다.
-- [OpenAI Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference): `.codex/config.toml`의 `[agents]` 설정과 신뢰된 프로젝트 적용 범위를 따른다.
+- [OpenAI Codex Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents): 서브에이전트 호출과 작업 위임 참고. 현재 저장소는 커스텀 역할 파일을 사용하지 않는다.
+- [OpenAI Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference): 설정 형식 참고. 현재 저장소의 고정 `[agents]` 설정은 제거됐다.

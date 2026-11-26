@@ -1,3 +1,13 @@
+// Optional before/after captures (see m5-renderer-smoke-runner.cjs): only with the variables set.
+const smokeEnv = typeof process === "undefined" ? {} : process.env;
+if (smokeEnv.M5_SMOKE_CAPTURE_DIR) window.m5SmokeCapture = name => require("electron").ipcRenderer.invoke("m5-smoke-capture", name);
+if (smokeEnv.M5_SMOKE_THEME) { try { localStorage.setItem("elsecrew.theme.v1", smokeEnv.M5_SMOKE_THEME); } catch {} }
+// Rendered contrast at each capture point (PR #10 review I4); main keeps the results across page loads.
+if (typeof require === "function") {
+  const { measureRenderedContrast } = require("./m5-rendered-contrast-probe.cjs");
+  window.m5SmokeMeasureOnly = measureRenderedContrast;
+  window.m5SmokeMeasure = async (screen, options) => require("electron").ipcRenderer.invoke("m5-smoke-contrast", await measureRenderedContrast(screen, options));
+}
 window.m5SmokeClaudeUsageReads = 0;
 window.m5ClaudeUsage={read:async()=>{window.m5SmokeClaudeUsageReads++;return ({state:"available",usage:{windows:[{id:"primary",usedPercent:12,windowMinutes:300,resetsAt:null},{id:"secondary",usedPercent:27,windowMinutes:10080,resetsAt:null}]},checkedAt:Date.now()});}};
 let smokeConnections = {codex:false,"claude-code":false};
@@ -10,7 +20,19 @@ window.m5Models = { request: async input => {
     {modelSelector:"new-default", reasoningEfforts:["medium","high"], isDefault:true},
   ] };
 } };
-window.m5AppUpdate = { open: async () => {}, onRestartCheck: (check, resume) => {
+// ADE U8: main's update state, played by the smoke; requests are recorded, never acted on here.
+window.m5SmokeUpdateRequests = [];
+{
+  let updateListener = null;
+  window.m5SmokeUpdateState = "unavailable";
+  window.m5SmokeSetUpdateState = state => { window.m5SmokeUpdateState = state; updateListener?.(state); };
+  window.m5SmokeUpdateApi = {
+    state: async () => window.m5SmokeUpdateState,
+    onState: listener => { updateListener = listener; return () => { if (updateListener === listener) updateListener = null; }; },
+    request: async action => { window.m5SmokeUpdateRequests.push(action); return window.m5SmokeUpdateState; },
+  };
+}
+window.m5AppUpdate = { ...window.m5SmokeUpdateApi, open: async () => {}, onRestartCheck: (check, resume) => {
   window.m5SmokeUpdateCheck = check; window.m5SmokeUpdateResume = resume;
   return () => { window.m5SmokeUpdateCheck = undefined; window.m5SmokeUpdateResume = undefined; };
 } };
@@ -26,6 +48,7 @@ let preparationAttempts = 0;
 window.m5SmokePermissions = {};
 window.m5CleanupCalls = [];
 window.m5Projects = { request: async (input) => {
+  if (input.action === "chatErasureList") return {schemaVersion:1,action:input.action,entries:[]};
   if (input.action === "workspaceCleanupList") return {schemaVersion:1,action:input.action,entries:[{chatId:"chat_cleanup",projectId:"smoke_project",title:"Discarded sample",eligible:true,pending:false},{chatId:"chat_blocked",projectId:"smoke_project",title:"Recovery required",eligible:false,pending:false}].filter(item=>!window.m5CleanupCalls.includes(item.chatId))};
   if (input.action === "cleanupWorkspace") {
     if (!input.confirmed || input.chatId !== "chat_cleanup") throw new Error("cleanup blocked");
@@ -38,7 +61,7 @@ window.m5Projects = { request: async (input) => {
       if(input.confirmed !== true) throw new Error("missing consent");
       window.m5SmokePermissions[input.projectId] = {...input.permissions};
     }
-    return {schemaVersion:1,action:input.action,projectId:input.projectId,permissions:window.m5SmokePermissions[input.projectId] || {files:false,commands:false}};
+    return {schemaVersion:1,action:input.action,projectId:input.projectId,permissions:window.m5SmokePermissions[input.projectId] || {files:false,commands:false},recorded:Boolean(window.m5SmokePermissions[input.projectId])};
   }
 
   if(input.action === "getProviderConnections" || input.action === "setProviderConnection") {
@@ -62,10 +85,25 @@ window.m5Projects = { request: async (input) => {
     if (++preparationAttempts === 1) throw new Error("synthetic response loss");
     return {schemaVersion: 1, action: input.action, inspection: preparationInspection};
   }
+  if (input.action === "finishDeletions") return {schemaVersion: 1, action: input.action, pending: 0};
+  // ADE multi-project (PR #18 review I3): whether any project's team works.
+  if (input.action === "workStatus") return {schemaVersion: 1, action: "workStatus", working: Boolean(window.m5SmokeAppWorking)};
+  // ADE multi-project P4·P3′: every project's tasks, and the run limits.
+  if (input.action === "taskInbox") {
+    const items = window.m5SmokeInbox ?? [];
+    const workingTasks = items.filter(item => item.state !== "needsAttention" && item.state !== "recoveryRequired" && item.state !== "waitingForUser" && (item.state !== "reviewReady" || item.working || item.waiting)).map(({projectId, chatId}) => ({projectId, chatId}));
+    return {schemaVersion: 1, action: "taskInbox", items, workingTasks};
+  }
+  if (input.action === "getRunLimits") return {schemaVersion: 1, action: "getRunLimits", limits: window.m5SmokeRunLimits ?? {codex: 3, "claude-code": 3}};
+  if (input.action === "setRunLimit") { window.m5SmokeRunLimits = {...(window.m5SmokeRunLimits ?? {codex: 3, "claude-code": 3}), [input.runtime]: input.limit}; return {schemaVersion: 1, action: "setRunLimit", limits: window.m5SmokeRunLimits}; }
   if (input.action === "releaseView" && input.projectId === "smoke_project") return {schemaVersion: 1, action: "releaseView", projectId: input.projectId};
+  // ADE U2 smoke (PR #12 review I3): the list cannot be read.
+  if (input.action === "list" && window.m5SmokeCatalogFail) throw new Error("smoke: catalog unavailable");
   if (input.action === "list" && window.m5SmokeCatalogEmpty) return {schemaVersion:1, action:"list", projects:[], nextCursor:null};
   if (input.action === "list") return input.cursor === null
-    ? {schemaVersion: 1, action: "list", projects: [{projectId: "earlier_project", canonicalPath: "/work/earlier"}], nextCursor: "earlier_project"}
+    // After pagination is checked, the first page also lists the open project so
+    // its rail ⋯ menu (where closing lives) is reachable while the rail is locked.
+    ? {schemaVersion: 1, action: "list", projects: [{projectId: "earlier_project", canonicalPath: "/work/earlier"}, ...(window.m5SmokeCatalogListsCurrent ? [{projectId: "smoke_project", canonicalPath: "/work/smoke"}] : [])], nextCursor: window.m5SmokeCatalogListsCurrent ? null : "earlier_project"}
     : {schemaVersion: 1, action: "list", projects: [{projectId: "smoke_project", canonicalPath: "/work/smoke"}], nextCursor: null};
   if (input.action !== "reopen" || input.projectId !== "smoke_project") throw new Error("unexpected catalog selection");
   return {schemaVersion: 1, action: "reopen", project: {schemaVersion: 1, projectId: "smoke_project", selectedPath: "/work/smoke", canonicalGitRoot: "/work/smoke"}};
@@ -158,6 +196,24 @@ window.m5SmokeVisualRunning = () => {
     state:'running',stage:'implementing',terminationOutcome:null,createdAt:smokeChat.createdAt,updatedAt:smokeChat.updatedAt};
   for (const listener of agentRunStateListeners) listener({run:diagnosticRun});
 };
+// ADE multi-project: a task with many finished stages (the stage bar folds
+// them into "+N"), and a team at work in another project (badges).
+let stageRuns = [];
+window.m5SmokeManyStages = count => {
+  const roles = ['coordinator', 'planning', 'coordinator', 'coding', 'coordinator', 'review', 'coordinator', 'coding', 'coordinator', 'review'];
+  const start = Date.parse(smokeChat.createdAt);
+  stageRuns = Array.from({ length: count }, (_, index) => ({schemaVersion:1,runId:`smoke_stage_${index}`,chatId:smokeChat.chatId,taskId:smokeChat.taskId,
+    projectId:smokeChat.projectId,worktreeId:smokeChat.worktreeId,workspaceIdentity:smokeChat.workspaceIdentity,
+    selectedProfile:{...smokeChat.roleSnapshots[0], roleId: roles[index % roles.length]},source:'actualAgent',capabilityFingerprint:`sha256:${'0'.repeat(64)}`,
+    state:'succeeded',stage:'implementing',terminationOutcome:'cleanExit',createdAt:new Date(start + index * 90_000).toISOString(),updatedAt:new Date(start + index * 90_000 + 45_000).toISOString()}));
+  for (const listener of agentRunStateListeners) listener({run: stageRuns.at(-1) ?? diagnosticRun});
+};
+window.m5SmokeClearStages = () => { stageRuns = []; };
+window.m5SmokeOtherProjectWorking = state => {
+  for (const listener of agentRunStateListeners) listener({run:{schemaVersion:1,runId:'smoke_other_project_run',chatId:'chat_earlier',taskId:'task_earlier',
+    projectId:'earlier_project',worktreeId:'worktree_earlier',workspaceIdentity:'workspace_earlier',selectedProfile:smokeChat.roleSnapshots[3],
+    source:'actualAgent',capabilityFingerprint:`sha256:${'0'.repeat(64)}`,state,stage:'implementing',terminationOutcome:null,createdAt:smokeChat.createdAt,updatedAt:smokeChat.updatedAt}});
+};
 // Visual-only state transition; no process or provider request is performed.
 window.m5SmokeVisualChatState = state => {
   if (!['draft', 'running', 'reviewReady', 'recoveryRequired'].includes(state)) throw new Error('unexpected visual state');
@@ -174,6 +230,44 @@ window.m5SmokeEnableParallelChats = () => {
   const { parallelChatFixture } = require("./m5-parallel-chat-fixture.cjs");
   parallelPaint = parallelChatFixture(smokeChat, message => { for (const listener of chatListeners) listener(message); });
   return parallelPaint.chats;
+};
+// The tree has no root button at the top level any more; an overflowing watch
+// is the real path that offers a full reload ("다시 확인").
+const SMOKE_READ_VERSION = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const SMOKE_DIFF_ENTRIES = [{ path: "src/example.ts", kind: "modified", binary: false }];
+function smokeFileText(path) {
+  return path.endsWith(".rs") ? "fn main() {}\n" : path.endsWith(".py") ? "def main():\n    pass\n" : path.endsWith(".json") ? '{"ready":true}\n' : "export const smoke = true;\n";
+}
+function smokeDiffText() {
+  return "@@ -1 +1,401 @@\n-old\n" + Array.from({ length: 401 }, (_, index) => `+line ${index + 1}\n`).join("");
+}
+function workspaceRef(input) {
+  return { chatId: input.chatId, projectId: input.projectId, worktreeId: input.worktreeId, workspaceIdentity: input.workspaceIdentity };
+}
+function emitWorkspaceChunk(input, streamId, text) {
+  for (const listener of workspaceListeners) listener({ protocolVersion: 1, kind: "event", sidecarInstanceId: "smoke_sidecar", streamId, seq: 1, event: "workspace.blob.chunk", payload: { ...workspaceRef(input), text } });
+}
+function smokeTreePage(parentPath, cursor) {
+    if (window.m5SmokeLongTree && parentPath === "") {
+      window.m5SmokeTreeReads = (window.m5SmokeTreeReads ?? 0) + 1;
+      return { projectId: "smoke_project", parentPath, entries: Array.from({length: cursor ? 1 : 500}, (_, i) => {
+        const name = `file-${String((cursor ? 500 : 0) + i).padStart(4, "0")}.ts`;
+        return {path:name,name,kind:"file"};
+      }), nextCursor: cursor ? null : "next-tree" };
+    }
+    return {
+      projectId: "smoke_project",
+      parentPath,
+      entries: parentPath === "src/nested" ? [{path:"src/nested/child.ts",name:"child.ts",kind:"file"}] : parentPath === "src" ? [{path:"src/nested",name:"nested",kind:"directory"}, ...["example.ts", "sample.rs", "sample.py", "sample.json"].map(name => ({ path: `src/${name}`, name, kind: "file" }))] : [...(window.m5SmokeHiddenTree ? [{path:".git",name:".git",kind:"directory"}] : []), { path: "src", name: "src", kind: "directory" }],
+      nextCursor: null,
+    };
+}
+const projectListeners = new Set();
+window.m5SmokeRescan = () => {
+  for (const listener of projectListeners) listener({ projectId: "smoke_project", event: "file.changed", paths: [], rescanRequired: true });
+  // The resumed task's workspace watches too (opening a project resumes its last task).
+  for (const listener of workspaceListeners) listener({ protocolVersion: 1, kind: "event", sidecarInstanceId: "smoke", streamId: "smoke_watch", seq: 1, event: "workspace.changed",
+    payload: { chatId: smokeChat.chatId, projectId: smokeChat.projectId, worktreeId: smokeChat.worktreeId, workspaceIdentity: smokeChat.workspaceIdentity, event: "file.changed", paths: [], rescanRequired: true } });
 };
 window.m5SmokeEmitParallelRound = () => {
   if (!parallelPaint) throw new Error("parallel paint fixture not enabled");
@@ -254,7 +348,8 @@ window.m5 = {
   getStorageStatus: unexpected("getStorageStatus"),
   prepareQuit: async () => ({ safeToQuit: true, blockers: [] }),
   onSidecarEvent: (listener) => unsubscribe(listeners, listener),
-  openProject: async () => ({
+  // ADE U2·U3 smoke: a cancelled folder pick, and a project with no task yet (first-task window).
+  openProject: async () => window.m5SmokeOpenCancel ? null : ({
     schemaVersion: 1,
     projectId: "smoke_project",
     selectedPath: "/work/smoke",
@@ -262,19 +357,7 @@ window.m5 = {
   }),
   getProjectTree: async ({ parentPath = "", cursor = null }) => {
     if (!snapshotCreated) throw new Error("renderer requested the tree before creating its standalone snapshot");
-    if (window.m5SmokeLongTree && parentPath === "") {
-      window.m5SmokeTreeReads = (window.m5SmokeTreeReads ?? 0) + 1;
-      return { projectId: "smoke_project", parentPath, entries: Array.from({length: cursor ? 1 : 500}, (_, i) => {
-        const name = `file-${String((cursor ? 500 : 0) + i).padStart(4, "0")}.ts`;
-        return {path:name,name,kind:"file"};
-      }), nextCursor: cursor ? null : "next-tree" };
-    }
-    return {
-      projectId: "smoke_project",
-      parentPath,
-      entries: parentPath === "src/nested" ? [{path:"src/nested/child.ts",name:"child.ts",kind:"file"}] : parentPath === "src" ? [{path:"src/nested",name:"nested",kind:"directory"}, ...["example.ts", "sample.rs", "sample.py", "sample.json"].map(name => ({ path: `src/${name}`, name, kind: "file" }))] : [...(window.m5SmokeHiddenTree ? [{path:".git",name:".git",kind:"directory"}] : []), { path: "src", name: "src", kind: "directory" }],
-      nextCursor: null,
-    };
+    return smokeTreePage(parentPath, cursor);
   },
   createProjectWorktree: async ({ projectId }) => {
     if (projectId !== "smoke_project") throw new Error("renderer supplied an unexpected project ID");
@@ -299,7 +382,7 @@ window.m5 = {
   },
   closeProject: async () => ({ projectId: "smoke_project", lifecycle: "abandoned", physicallyDeleted: false }),
   readFile: async ({ path }) => {
-    const text = path.endsWith(".rs") ? "fn main() {}\n" : path.endsWith(".py") ? "def main():\n    pass\n" : path.endsWith(".json") ? '{"ready":true}\n' : "export const smoke = true;\n";
+    const text = smokeFileText(path);
     for (const listener of listeners) {
       listener({
         protocolVersion: 1,
@@ -329,23 +412,41 @@ window.m5 = {
   },
   getDiffSummary: async () => {
     if (!snapshotCreated) throw new Error("renderer requested changes before creating its standalone snapshot");
-    return { projectId: "smoke_project", baseCommit: "a".repeat(40), entries: [{ path: "src/example.ts", kind: "modified", binary: false }] };
+    return { projectId: "smoke_project", baseCommit: "a".repeat(40), entries: SMOKE_DIFF_ENTRIES };
   },
   getDiffFile: async () => {
-    const text = "@@ -1 +1,401 @@\n-old\n" + Array.from({ length: 401 }, (_, index) => `+line ${index + 1}\n`).join("");
+    const text = smokeDiffText();
     for (const listener of listeners) listener({ protocolVersion: 1, kind: "event", sidecarInstanceId: "smoke_sidecar", streamId: "smoke_diff", seq: 1, event: "blob.chunk", payload: { text } });
     return { projectId: "smoke_project", path: "src/example.ts", kind: "modified", oldPath: null, baseVersion: "sha256:" + "a".repeat(64), worktreeVersion: "sha256:" + "b".repeat(64), byteLength: text.length, stream: { streamId: "smoke_diff", chunkBytes: 262144 } };
   },
-  onProjectEvent: () => () => {},
-  getWorkspaceTree: async (input) => ({ ...input, entries: [], nextCursor: null }),
-  closeWorkspace: unexpected("closeWorkspace"),
-  readWorkspaceFile: unexpected("readWorkspaceFile"),
-  beginWorkspaceFileSave: unexpected("beginWorkspaceFileSave"),
-  appendWorkspaceFileSaveChunk: unexpected("appendWorkspaceFileSaveChunk"),
-  commitWorkspaceFileSave: unexpected("commitWorkspaceFileSave"),
+  onProjectEvent: (listener) => unsubscribe(projectListeners, listener),
+  // Opening the project resumes its last task (2026-11-17), so the tree the
+  // screen shows first is that task's workspace: the same smoke files.
+  getWorkspaceTree: async (input) => {
+    const page = smokeTreePage(input.parentPath ?? "", input.cursor ?? null);
+    return { ...input, entries: page.entries, nextCursor: page.nextCursor };
+  },
+  // Opening a project resumes its last task, so files, saves and comparisons
+  // go through the task's workspace. They serve the same smoke content as the
+  // project calls, with the workspace address and `workspace.blob.chunk`
+  // events; a save commits through `commitFileSave`, so wrappers the runner
+  // puts on it (save counting) still see every save.
+  closeWorkspace: async (input) => ({ ...workspaceRef(input), lifecycle: "abandoned", physicallyDeleted: false }),
+  readWorkspaceFile: async (input) => {
+    const text = smokeFileText(input.path);
+    emitWorkspaceChunk(input, "smoke_workspace_file", text);
+    return { ...workspaceRef(input), path: input.path, classification: "utf8", byteLength: Buffer.byteLength(text), version: SMOKE_READ_VERSION, stream: { streamId: "smoke_workspace_file", chunkBytes: 262144 } };
+  },
+  beginWorkspaceFileSave: async (input) => ({ ...workspaceRef(input), saveId: "smoke_workspace_save", chunkBytes: 262144 }),
+  appendWorkspaceFileSaveChunk: async (input) => ({ ...workspaceRef(input), saveId: input.saveId, acceptedSeq: input.seq }),
+  commitWorkspaceFileSave: async (input) => ({ ...(await window.m5.commitFileSave(input)), ...workspaceRef(input), saveId: input.saveId }),
   watchWorkspaceFiles: async (input) => ({ ...input, watching: true }),
-  getWorkspaceDiffSummary: async (input) => ({ ...input, baseCommit: "a".repeat(40), entries: [] }),
-  getWorkspaceDiffFile: unexpected("getWorkspaceDiffFile"),
+  getWorkspaceDiffSummary: async (input) => ({ ...workspaceRef(input), baseCommit: "a".repeat(40), entries: SMOKE_DIFF_ENTRIES }),
+  getWorkspaceDiffFile: async (input) => {
+    const text = smokeDiffText();
+    emitWorkspaceChunk(input, "smoke_workspace_diff", text);
+    return { ...workspaceRef(input), path: input.path, kind: "modified", oldPath: null, baseVersion: "sha256:" + "a".repeat(64), worktreeVersion: "sha256:" + "b".repeat(64), byteLength: text.length, stream: { streamId: "smoke_workspace_diff", chunkBytes: 262144 } };
+  },
   onWorkspaceEvent: (listener) => unsubscribe(workspaceListeners, listener),
   prepareChatWorkspace: unexpected("prepareChatWorkspace"),
   abandonPreparedWorkspace: unexpected("abandonPreparedWorkspace"),
@@ -362,10 +463,10 @@ window.m5 = {
   }),
   updateProjectRoleSettings: unexpected("updateProjectRoleSettings"),
   createChat: unexpected("createChat"),
-  listChats: async ({ projectId }) => ({ projectId, items: parallelPaint ? parallelPaint.chats : [smokeChat], nextCursor: null }),
+  listChats: async ({ projectId }) => ({ projectId, items: window.m5SmokeNoChats ? [] : parallelPaint ? parallelPaint.chats : [smokeChat], nextCursor: null }),
   getChat: async (request) => {
     if (historyReadFailures > 0) { historyReadFailures--; throw new Error("synthetic history read failure"); }
-    return parallelPaint ? parallelPaint.detail(request) : ({ chat: smokeChat, afterEventSequence: request.afterEventSequence, messages: smokeMessages.filter(message => message.eventSequence > request.afterEventSequence), runs: [], agentRuns:diagnosticRun ? [diagnosticRun] : [], agentRecovery:null, nextEventSequence: null });
+    return parallelPaint ? parallelPaint.detail(request) : ({ chat: smokeChat, afterEventSequence: request.afterEventSequence, messages: smokeMessages.filter(message => message.eventSequence > request.afterEventSequence), runs: [], agentRuns:[...stageRuns, ...(diagnosticRun ? [diagnosticRun] : [])], agentRecovery:null, nextEventSequence: null });
   },
   startFixtureRun: unexpected("startFixtureRun"),
   cancelRun: unexpected("cancelRun"),

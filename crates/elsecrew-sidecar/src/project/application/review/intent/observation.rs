@@ -52,11 +52,11 @@ pub(in crate::project) fn observe_pending_source_checked(
     #[cfg(unix)]
     let meta = reopened.dir_metadata().map_err(|_| invalid())?;
     #[cfg(unix)]
-    if crate::project::application::stamp(&meta) != raw.root_stamp {
+    if crate::project::application::recorded_stamp(&meta) != raw.root_stamp {
         return Err(invalid());
     }
     #[cfg(unix)]
-    let root_identity = json!([meta.dev(), meta.ino()]);
+    let root_identity = json!([0, meta.ino()]);
     #[cfg(windows)]
     let root_identity = {
         let identity = crate::project::windows_fs::identity(&reopened, true)?;
@@ -97,7 +97,7 @@ pub(in crate::project) fn observe_pending_source_checked(
         .unwrap_or(Value::Null);
     let comparison = if !parents_present {
         "conflict"
-    } else if before == item["before"] {
+    } else if before == crate::project::without_device(&item["before"]) {
         "matchesBeforeEntry"
     } else if after == item["after"] {
         "matchesAfterImage"

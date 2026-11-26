@@ -8,7 +8,7 @@ import type { M5BridgeV5 } from "./contracts/bridge-v5.ts";
 import type { M5BridgeV6 } from "./contracts/bridge-v6.ts";
 import type { M5BridgeV7 } from "./contracts/bridge-v7.ts";
 import type { M5BridgeV8 } from "./contracts/bridge-v8.ts";
-import { coordinatorRoles, validateChatAppendMessageRequestV1, validateChatAppendMessageTranscriptV1, type ChatAppendMessageRequestV1 } from "./contracts/run-recovery-v1.ts";
+import { roleSettingsAsV3, validateChatAppendMessageRequestV1, validateChatAppendMessageTranscriptV1, type ChatAppendMessageRequestV1 } from "./contracts/run-recovery-v1.ts";
 
 export interface FollowupDraft {
   text: string;
@@ -18,7 +18,7 @@ export interface FollowupDraft {
 }
 import { isAgentChatDetailPageV1, type AgentRecoveryRecordV1, type AgentRunRecordV1, type AgentPublicEventV1, type AgentRunStateChangedV1 } from "./contracts/agent-adapter-v1.ts";
 import type {
-  ChatRecordV1, ProjectRoleSettingsV1, RecoveryRecordV1, RoleIdV1, RoleProfileV1,
+  ChatRecordV1, ProjectRoleSettingsV1, RecoveryRecordV1, RoleDefinitionV3, RoleIdV1, RoleProfileV1,
   RunRecordV1, TeamMessageV1, PreparedChatWorkspaceV1,
 } from "./contracts/run-recovery-v1.ts";
 
@@ -95,7 +95,7 @@ export class ChatUiController {
     const chat = this.#state.activeChat;
     const bridge = this.#bridge;
     const draft = chat && this.#state.followups?.[chat.chatId];
-    if (sendToCoordinator && (chat?.schemaVersion !== 2 || chat.state === "running" || this.#state.agentStartingRoleId || this.#state.agentRuns.some(isAgentActive))) return;
+    if (sendToCoordinator && (!chat || chat.schemaVersion === 1 || chat.state === "running" || this.#state.agentStartingRoleId || this.#state.agentRuns.some(isAgentActive))) return;
     if (!admissionReady || !chat || (bridge.version !== 7 && bridge.version !== 8) || !draft || draft.sending || !this.canAppendFollowup() || (!draft.request && !draft.text.trim())) return;
     const generation = this.#generation;
     let request: ChatAppendMessageRequestV1;
@@ -121,7 +121,7 @@ export class ChatUiController {
       this.#setFollowup(chat.chatId, { text: latest.text === request.text ? "" : latest.text, request: null, sending: false, error: null });
       if (this.#live(generation) && this.#state.activeChat?.chatId === chat.chatId) {
         this.#onEvent(message);
-        if (sendToCoordinator && chat.schemaVersion === 2) await this.startAgent("coordinator", lang);
+        if (sendToCoordinator && chat.schemaVersion !== 1) await this.startAgent("coordinator", lang);
       }
     } catch (error) {
       if (this.#disposed) return;
@@ -173,16 +173,29 @@ export class ChatUiController {
     } catch (error) { if (this.#live(generation)) this.#error("m5.chatError.project", error); }
   }
 
+  /**
+   * The view can be left: nothing this screen asked for is still on its way
+   * (a start, a stop, a message being sent, a switch, a recovery choice).
+   * A team that works is not a reason to stay (ADE multi-project P1): its
+   * runs go on in the engine and the task shows them again, from the saved
+   * history, when it is opened again.
+   */
   canLeaveProjectView(): boolean {
     return !this.#disposed && !this.#state.preparing && !this.#state.switching
-      && !this.isRecoveryBlocked() && !this.#state.agentStartingRoleId && !this.#state.activeRunId
-      && !this.#state.runs.some(isActive)
-      && !this.#state.agentRuns.some(run => ["preparing", "running", "cancelling"].includes(run.state))
+      && !this.isRecoveryBlocked() && !this.#state.agentStartingRoleId && this.#state.activeRunId !== "starting"
       && !Object.values(this.#state.followups ?? {}).some(draft => draft.sending);
   }
 
-  clearProjectView(): boolean {
-    if (!this.canLeaveProjectView()) return false;
+  /** A run of the open task is starting, working or stopping. */
+  isTeamWorking(): boolean {
+    return Boolean(this.#state.agentStartingRoleId) || Boolean(this.#state.activeRunId)
+      || this.#state.runs.some(isActive)
+      || this.#state.agentRuns.some(run => ["preparing", "running", "cancelling"].includes(run.state));
+  }
+
+  /** `force` closes the view even while runs are still stopping (list removal). */
+  clearProjectView(force = false): boolean {
+    if (this.#disposed || (!force && !this.canLeaveProjectView())) return false;
     this.#generation++;
     this.#pending = null;
     this.#set({ projectId: null, settings: null, chats: [], nextChatCursor: null, loadingMoreChats: false,
@@ -241,17 +254,19 @@ export class ChatUiController {
     }
   }
 
-  async updateSettings(roles: readonly RoleProfileV1[]): Promise<void> {
+  /** True only when this project's team was saved and is now shown (review PR #8 I4). */
+  async updateSettings(roles: readonly RoleProfileV1[], roleDefinitions?: readonly RoleDefinitionV3[]): Promise<boolean> {
     const settings = this.#state.settings;
-    if (!settings) return;
+    if (!settings) return false;
     const generation = this.#generation;
     try {
-      const updated = await this.#bridge.updateProjectRoleSettings({ projectId: settings.projectId, expectedRevision: settings.revision, roles });
-      if (!this.#live(generation) || this.#state.projectId !== settings.projectId || this.#state.settings?.revision !== settings.revision) return;
+      const updated = await this.#bridge.updateProjectRoleSettings({ projectId: settings.projectId, expectedRevision: settings.revision, roles, ...(roleDefinitions ? { roleDefinitions } : {}) });
+      if (!this.#live(generation) || this.#state.projectId !== settings.projectId || this.#state.settings?.revision !== settings.revision) return false;
       this.#set({ settings: updated, ...chatNotice("m5.chatNotice.settingsSaved"), error: null });
+      return true;
     } catch (error) {
-      if (!this.#live(generation) || this.#state.projectId !== settings.projectId) return;
-      this.#error("m5.chatError.settingsSave", error);
+      if (this.#live(generation) && this.#state.projectId === settings.projectId) this.#error("m5.chatError.settingsSave", error);
+      return false;
     }
   }
 
@@ -275,8 +290,9 @@ export class ChatUiController {
     const generation = this.#generation;
     this.#creatingCoordinator = true;
     try {
-      if (settings.schemaVersion !== 2) {
-        const updated = await this.#bridge.updateProjectRoleSettings({ projectId: source.projectId, expectedRevision: settings.revision, roles: coordinatorRoles(settings.roles) });
+      if (settings.schemaVersion === 1) {
+        // Legacy V1 projects gain the default coordinator team as a V3 role set.
+        const updated = await this.#bridge.updateProjectRoleSettings({ projectId: source.projectId, expectedRevision: settings.revision, ...roleSettingsAsV3(settings) });
         if (!this.#live(generation) || this.#state.projectId !== source.projectId) return null;
         this.#set({ settings: updated });
       }
@@ -362,22 +378,24 @@ export class ChatUiController {
 
   async startAgent(roleId: RoleIdV1, lang: "ko" | "en" = "ko"): Promise<void> {
     const chat = this.#state.activeChat; const generation = this.#generation; const bridge = this.#agentBridge();
-    if (!chat || !bridge || (chat.schemaVersion === 2 && chat.state === "running") || this.#state.switching || this.#state.activeRunId || this.#state.agentStartingRoleId || this.#state.agentRuns.some(isAgentActive) || this.isActionBlocked()) {
+    if (!chat || !bridge || (chat.schemaVersion !== 1 && chat.state === "running") || this.#state.switching || this.#state.activeRunId || this.#state.agentStartingRoleId || this.#state.agentRuns.some(isAgentActive) || this.isActionBlocked()) {
       if (chat && !bridge) this.#set({ ...chatNotice("m5.chatNotice.unavailable") });
       return;
     }
     const profile = chat.roleSnapshots.find((item) => item.roleId === roleId);
     if (!profile) return;
-    this.#set({ agentStartingRoleId: roleId, error: null, ...chatNotice("m5.agentNotice.checking", { roleId, runtime: profile.runtime }) });
+    const roleName = chat.roleDefinitions?.find((item) => item.roleId === roleId)?.name;
+    this.#set({ agentStartingRoleId: roleId, error: null, ...chatNotice("m5.agentNotice.checking", { roleId, runtime: profile.runtime, roleName }) });
     try {
-      const capability = await bridge.getAgentCapabilities({ runtime: profile.runtime, refresh: true, chatId: chat.chatId, roleId });
+      const capability = await whileProviderBusy(() => bridge.getAgentCapabilities({ runtime: profile.runtime, refresh: true, chatId: chat.chatId, roleId }),
+        () => this.#live(generation) && this.#state.activeChat?.chatId === chat.chatId);
       if (!this.#live(generation) || this.#state.activeChat?.chatId !== chat.chatId) return;
       if (capability.scope && (capability.scope.chatId !== chat.chatId || capability.scope.roleId !== roleId
         || capability.scope.worktreeId !== chat.worktreeId || capability.scope.workspaceIdentity !== chat.workspaceIdentity)) {
         throw new Error("Capability response does not match the selected chat and role");
       }
       if (!capability.canStart) {
-        this.#set({ ...chatNotice("m5.agentNotice.blocked", { roleId, runtime: profile.runtime, reason: capability.blockedReason }) });
+        this.#set({ ...chatNotice("m5.agentNotice.blocked", { roleId, runtime: profile.runtime, reason: capability.blockedReason, roleName }) });
         return;
       }
       await this.#hydrateChat(chat, generation);
@@ -401,12 +419,19 @@ export class ChatUiController {
           || this.#state.agentRuns.some(isAgentActive)) return;
       const accepted = await bridge.startAgentRun({ chatId: chat.chatId, roleId, inputMessageIds, expectedCapabilityFingerprint: capability.fingerprint });
       if (!this.#live(generation) || this.#state.activeChat?.chatId !== chat.chatId) return;
-      this.#set({ ...chatNotice("m5.agentNotice.ready", { roleId, runtime: profile.runtime }) });
+      this.#set({ ...chatNotice("m5.agentNotice.ready", { roleId, runtime: profile.runtime, roleName }) });
       await this.#hydrateChat(chat, generation);
       // The accepted binding is independently validated by the bridge. The durable ledger owns terminal state.
       if (accepted.runId.length === 0) throw new Error("empty accepted agent run identity");
     } catch (error) {
       if (this.#live(generation) && this.#state.activeChat?.chatId === chat.chatId) {
+        // Over the agent's run limit the engine puts the team in line instead
+        // (ADE multi-project P3′): not a failure; it starts on its own.
+        if (/waits its turn/.test(error instanceof Error ? error.message : String(error))) {
+          this.#set({ ...chatNotice("m5.chatNotice.waitingTurn") });
+          void this.#hydrateChat(chat, generation).catch(() => undefined);
+          return;
+        }
         this.#set({ notice: null });
         this.#error("m5.chatError.run", error);
       }
@@ -417,7 +442,7 @@ export class ChatUiController {
   async cancelTeamTask(send: (input: TeamTaskCancelRequest) => Promise<unknown>): Promise<void> {
     const chat = this.#state.activeChat; const generation = this.#generation;
     const trigger = [...this.#state.messages].reverse().find(message => message.kind === "user");
-    if (!chat || chat.schemaVersion !== 2 || !trigger || this.#state.switching) return;
+    if (!chat || chat.schemaVersion === 1 || !trigger || this.#state.switching) return;
     const input: TeamTaskCancelRequest = { action: "cancelTeamTask", chatId: chat.chatId, taskId: chat.taskId, projectId: chat.projectId, worktreeId: chat.worktreeId, workspaceIdentity: chat.workspaceIdentity, triggerMessageId: trigger.messageId };
     try {
       validateProjectCatalogResult(await send(input), input);
@@ -483,7 +508,11 @@ export class ChatUiController {
       this.#hydrateAfterNotification(chat, this.#generation);
       return;
     }
-    try { this.#set({ messages: mergeMessages(this.#state.messages, [event]) }); } catch (error) { this.#error("m5.chatError.order", error); }
+    try { this.#set({ messages: mergeMessages(this.#state.messages, [event]) }); } catch (error) { this.#error("m5.chatError.order", error); return; }
+    // Team status notices (continue, paused, finished) accompany chat state
+    // changes that have no run event of their own; reload so the header and
+    // stop button never keep showing "running" after the team stopped.
+    if (event.kind === "status") this.#hydrateAfterNotification(chat, this.#generation);
   }
   #onAgentPublicEvent(event: AgentPublicEventV1): void {
     this.#hydrateForAgentRun(event);
@@ -580,7 +609,26 @@ export function isActive(run: RunRecordV1): boolean { return run.state === "prep
 export function isAgentActive(run: AgentRunRecordV1): boolean { return run.state === "preparing" || run.state === "running" || run.state === "cancelling"; }
 /** An identityless recovery has no process evidence that can make abandon safe. */
 export function canAbandonAgentRecovery(recovery: AgentRecoveryRecordV1 | null): boolean { return recovery !== null && recovery.reason !== "processIdentityUnavailable"; }
-export function stateLabel(state: ChatRecordV1["state"]): string { return ({ draft: "초안", preparing: "준비 중", running: "진행 중", waitingForUser: "사용자 확인 대기", reviewReady: "검토 준비", applying: "적용 중", stopping: "중지 중", completed: "완료", needsAttention: "확인 필요", recoveryRequired: "복구 필요", canceled: "취소됨", discarded: "버림" })[state]; }
+/** The provider was only briefly busy with another check (a model list, a
+ * sign-in check): the engine says to retry once it finishes. Asking again is
+ * safe for a capability check, which starts nothing. */
+export function isProviderBusy(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("another provider check currently owns this profile");
+}
+
+export async function whileProviderBusy<T>(ask: () => Promise<T>, stillWanted: () => boolean,
+  { waitMs = 60_000, everyMs = 1_000, sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)) } = {}): Promise<T> {
+  const until = Date.now() + waitMs;
+  for (;;) {
+    try { return await ask(); } catch (error) {
+      if (!isProviderBusy(error) || Date.now() + everyMs > until || !stillWanted()) throw error;
+    }
+    await sleep(everyMs);
+    if (!stillWanted()) throw new Error("provider check is no longer wanted");
+  }
+}
+
+export function stateLabel(state: ChatRecordV1["state"]): string { return ({ draft: "초안", preparing: "준비 중", running: "진행 중", waitingForUser: "사용자 확인 대기", reviewReady: "검토 준비", applying: "적용 중", stopping: "중지 중", completed: "완료", needsAttention: "확인 필요", recoveryRequired: "복구 필요", canceled: "중단됨", discarded: "버림" })[state]; }
 
 function matchesChat(event: TeamMessageV1, chat: ChatRecordV1): boolean { return event.chatId === chat.chatId && event.taskId === chat.taskId && event.worktreeId === chat.worktreeId; }
 function matchesChatRecord(left: ChatRecordV1, right: ChatRecordV1): boolean { return left.chatId === right.chatId && left.taskId === right.taskId && left.projectId === right.projectId && left.worktreeId === right.worktreeId && left.workspaceIdentity === right.workspaceIdentity; }

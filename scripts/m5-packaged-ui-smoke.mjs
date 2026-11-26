@@ -10,6 +10,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { createRequire } from 'node:module';
+const completeAppDefaultTeam = createRequire(import.meta.url)('./m5-smoke-complete-team.cjs');
 import { parseCurrentSystemStatusV1 } from '../src/m5/contracts/lifecycle-g5d-v1.ts';
 import { seedPackagedProject } from './m5-packaged-project-seed.mjs';
 import { probePackagedApplication } from './m5-packaged-application-probe.mjs';
@@ -218,6 +219,7 @@ try {
       ? {enabledButtons: buttons.length, projectSelectionEnabled: true, rootChildren: root.childElementCount, origin: location.origin} : null;
   })()`));
   report.uiObservedMs = performance.now() - started;
+  await evaluate(completeAppDefaultTeam);
   report.rendererStartupMark = await until(() => evaluate(`(${readPackagedStartupMark.toString()})()`));
   assert.ok(!report.rendererStartupMark.error, report.rendererStartupMark.error);
   if (diagnosticLanguage) {

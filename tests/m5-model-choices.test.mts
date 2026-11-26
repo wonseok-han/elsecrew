@@ -44,3 +44,11 @@ test("usage projection accepts bounded display windows and rejects fabricated va
   assert.throws(() => validateModelChoicesResult({ ...value, usage: { windows: [value.usage.windows[0], value.usage.windows[0]] } }, request));
   assert.equal(validateModelChoicesResult({ ...value, usage: null }, request).usage, null);
 });
+
+test("model choices may show the concrete model an alias resolves to, display only", () => {
+  const value = { ...result(), models: [{ modelSelector: "opus", reasoningEfforts: [], resolvedModel: "claude-opus-5-5" }] };
+  assert.equal(validateModelChoicesResult(value, request).models[0].resolvedModel, "claude-opus-5-5");
+  assert.throws(() => validateModelChoicesResult({ ...value, models: [{ ...value.models[0], resolvedModel: "" }] }, request));
+  assert.throws(() => validateModelChoicesResult({ ...value, models: [{ ...value.models[0], resolvedModel: "has space" }] }, request));
+  assert.throws(() => validateModelChoicesResult({ ...value, models: [{ ...value.models[0], resolvedModel: "x".repeat(129) }] }, request));
+});

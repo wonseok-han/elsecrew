@@ -43,9 +43,12 @@ export function BackupStorageUsageView({ disabled }: { disabled: boolean }) {
     finally { pending.current = false; setBusy(false); }
     // No automatic replay after success or failure; inspect the persisted value.
   }
-  return <section className="m5-storage-settings" aria-label={t("m5.backup.storageTitle")} aria-busy={busy}>
-    <button type="button" disabled={disabled || busy} onClick={() => void inspect()}>{t("m5.backup.storageTitle")}</button>
+  return <section className="m5-setting m5-preferences-row m5-storage-settings" aria-label={t("m5.backup.storageTitle")} aria-busy={busy}>
+    <span className="m5-setting-text"><strong>{t("m5.backup.sectionTitle")}</strong><small>{t("m5.backup.sectionHelp")}</small></span>
+    <span className="m5-setting-control"><button type="button" className="m5-secondary" disabled={disabled || busy} onClick={() => void inspect()}>{t("m5.backup.storageTitle")}</button></span>
+    <div className="m5-setting-detail">
     {usage && <div className="m5-storage-content">
+      <div className="m5-meter" role="presentation"><i style={{ width: `${Math.min(100, Math.round(usage.usedBytes / Math.max(1, usage.limitBytes) * 100))}%` }} /></div>
       <p className="m5-storage-summary" role="status">{t("m5.backup.storageAmounts", { used: capacity(usage.usedBytes), limit: capacity(usage.limitBytes), remaining: capacity(usage.remainingBytes) })}</p>
       <p>{t("m5.backup.storageHelp")}</p>
       {usage.remainingBytes === 0 && <p>{t("m5.backup.storageFull")}</p>}
@@ -56,5 +59,6 @@ export function BackupStorageUsageView({ disabled }: { disabled: boolean }) {
     {!usage && !busy && agreed === false && <p>{t("m5.backup.limitInspect")}</p>}
     {changeUnknown && <p role="status">{t("m5.backup.limitUnknown")}</p>}
     {failed && <p role="status">{t("m5.backup.storageError")}</p>}
+    </div>
   </section>;
 }

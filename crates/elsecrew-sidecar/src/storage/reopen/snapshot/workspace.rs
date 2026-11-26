@@ -17,7 +17,11 @@ pub(super) struct Member {
     root_prefix: bool,
     descendant_separator: bool,
     digest: Sha256,
+    root_key: &'static str,
 }
+
+/// A v2 member is read whole; real records are well under this.
+const V2_MEMBER_MAX_BYTES: i64 = 16 * 1024;
 
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct ProgressMarker {
@@ -80,96 +84,110 @@ impl Member {
             usage,
         )?;
         let from = member_from(frozen);
-        let valid: bool = connection.query_row(
-            &format!("SELECT j.type='object' \
-             AND (SELECT count(*) FROM json_each(j.value))=7 \
-             AND NOT EXISTS(SELECT 1 FROM json_each(j.value) WHERE key NOT IN ('schemaVersion','preparationId','manifest','bindingState','boundChatId','createdAt','updatedAt')) \
-             AND json_type(j.value,'$.schemaVersion')='integer' AND json_extract(j.value,'$.schemaVersion')=1 \
-             AND json_type(j.value,'$.preparationId')='text' AND CAST(json_extract(j.value,'$.preparationId') AS BLOB)=CAST(j.key AS BLOB) \
-             AND json_type(j.value,'$.manifest')='object' \
-             AND (SELECT count(*) FROM json_each(j.value,'$.manifest'))=15 \
-             AND NOT EXISTS(SELECT 1 FROM json_each(j.value,'$.manifest') WHERE key NOT IN ('schemaVersion','projectId','canonicalGitRoot','worktreeId','worktreePath','workspaceKind','snapshotTransport','sourceMutationPolicy','objectFormat','baseCommit','baseTree','sourceIdentity','workspaceIdentity','headMode','lifecycle')) \
-             AND json_type(j.value,'$.manifest.schemaVersion')='integer' AND json_extract(j.value,'$.manifest.schemaVersion')=1 \
-             AND json_type(j.value,'$.manifest.projectId')='text' AND CAST(json_extract(j.value,'$.manifest.projectId') AS BLOB)=CAST(s.aggregate_id AS BLOB) \
-             AND json_type(j.value,'$.manifest.canonicalGitRoot')='text' AND json_type(j.value,'$.manifest.worktreePath')='text' \
-             AND json_type(j.value,'$.bindingState')='text' AND json_extract(j.value,'$.bindingState') IN ('unbound','bound','abandoned') \
-             AND ((json_extract(j.value,'$.bindingState')='bound' AND json_type(j.value,'$.boundChatId')='text' AND length(CAST(json_extract(j.value,'$.boundChatId') AS BLOB)) BETWEEN 1 AND 512) \
-               OR (json_extract(j.value,'$.bindingState')!='bound' AND json_type(j.value,'$.boundChatId')='null')) {from}"),
+        // A v2 record (real worktree, 2026-11-18) is bounded and small, so it
+        // is read whole and checked by the shared contract; v1 keeps its
+        // fragment-by-fragment check below.
+        let version: i64 = connection.query_row(
+            &format!("SELECT CASE WHEN json_type(j.value,'$.manifest.schemaVersion')='integer' THEN json_extract(j.value,'$.manifest.schemaVersion') ELSE -1 END {from}"),
             params![source.identity().source_rowid, key], |r| r.get(0),
         ).map_err(|_| session_error())?;
         usage.work_units += 1;
-        if !valid {
-            return Err(session_error());
-        }
-        // The accepted scalar fields are bounded by their existing V1 rules.
-        // Reject an overlong invalid field before allocating its TEXT.
-        let fields: [&str; 16] = [
-            "$.manifest.projectId",
-            "$.manifest.worktreeId",
-            "$.manifest.sourceIdentity",
-            "$.manifest.workspaceIdentity",
-            "$.manifest.workspaceKind",
-            "$.manifest.snapshotTransport",
-            "$.manifest.sourceMutationPolicy",
-            "$.manifest.objectFormat",
-            "$.manifest.baseCommit",
-            "$.manifest.baseTree",
-            "$.manifest.headMode",
-            "$.manifest.lifecycle",
-            "$.bindingState",
-            "$.createdAt",
-            "$.updatedAt",
-            "$.preparationId",
-        ];
-        let mut values = Vec::with_capacity(fields.len());
-        for field in fields {
-            let length: i64 = connection.query_row(
-                &format!("SELECT CASE WHEN json_type(j.value,?3)='text' THEN length(CAST(json_extract(j.value,?3) AS BLOB)) ELSE -1 END {from}"),
-                params![source.identity().source_rowid, key, field], |r| r.get(0),
+        let v2 = version == 2;
+        if v2 {
+            Self::check_v2(connection, &source, &from, &key, usage)?;
+        } else {
+            let valid: bool = connection.query_row(
+                &format!("SELECT j.type='object' \
+                 AND (SELECT count(*) FROM json_each(j.value))=7 \
+                 AND NOT EXISTS(SELECT 1 FROM json_each(j.value) WHERE key NOT IN ('schemaVersion','preparationId','manifest','bindingState','boundChatId','createdAt','updatedAt')) \
+                 AND json_type(j.value,'$.schemaVersion')='integer' AND json_extract(j.value,'$.schemaVersion')=1 \
+                 AND json_type(j.value,'$.preparationId')='text' AND CAST(json_extract(j.value,'$.preparationId') AS BLOB)=CAST(j.key AS BLOB) \
+                 AND json_type(j.value,'$.manifest')='object' \
+                 AND (SELECT count(*) FROM json_each(j.value,'$.manifest'))=15 \
+                 AND NOT EXISTS(SELECT 1 FROM json_each(j.value,'$.manifest') WHERE key NOT IN ('schemaVersion','projectId','canonicalGitRoot','worktreeId','worktreePath','workspaceKind','snapshotTransport','sourceMutationPolicy','objectFormat','baseCommit','baseTree','sourceIdentity','workspaceIdentity','headMode','lifecycle')) \
+                 AND json_type(j.value,'$.manifest.schemaVersion')='integer' AND json_extract(j.value,'$.manifest.schemaVersion')=1 \
+                 AND json_type(j.value,'$.manifest.projectId')='text' AND CAST(json_extract(j.value,'$.manifest.projectId') AS BLOB)=CAST(s.aggregate_id AS BLOB) \
+                 AND json_type(j.value,'$.manifest.canonicalGitRoot')='text' AND json_type(j.value,'$.manifest.worktreePath')='text' \
+                 AND json_type(j.value,'$.bindingState')='text' AND json_extract(j.value,'$.bindingState') IN ('unbound','bound','abandoned') \
+                 AND ((json_extract(j.value,'$.bindingState')='bound' AND json_type(j.value,'$.boundChatId')='text' AND length(CAST(json_extract(j.value,'$.boundChatId') AS BLOB)) BETWEEN 1 AND 512) \
+                   OR (json_extract(j.value,'$.bindingState')!='bound' AND json_type(j.value,'$.boundChatId')='null')) {from}"),
+                params![source.identity().source_rowid, key], |r| r.get(0),
             ).map_err(|_| session_error())?;
             usage.work_units += 1;
-            if !(1..=512).contains(&length)
-                || usage
-                    .encoded_bytes()
-                    .checked_add(length as usize)
-                    .is_none_or(|n| n > INPUT_BYTES)
-            {
+            if !valid {
                 return Err(session_error());
             }
-            let value: String = connection
-                .query_row(
-                    &format!("SELECT json_extract(j.value,?3) {from}"),
-                    params![source.identity().source_rowid, key, field],
-                    |r| r.get(0),
-                )
-                .map_err(|_| session_error())?;
-            usage.work_units += 1;
-            if value.len() != length as usize {
-                return Err(session_error());
+            // The accepted scalar fields are bounded by their existing V1 rules.
+            // Reject an overlong invalid field before allocating its TEXT.
+            let fields: [&str; 16] = [
+                "$.manifest.projectId",
+                "$.manifest.worktreeId",
+                "$.manifest.sourceIdentity",
+                "$.manifest.workspaceIdentity",
+                "$.manifest.workspaceKind",
+                "$.manifest.snapshotTransport",
+                "$.manifest.sourceMutationPolicy",
+                "$.manifest.objectFormat",
+                "$.manifest.baseCommit",
+                "$.manifest.baseTree",
+                "$.manifest.headMode",
+                "$.manifest.lifecycle",
+                "$.bindingState",
+                "$.createdAt",
+                "$.updatedAt",
+                "$.preparationId",
+            ];
+            let mut values = Vec::with_capacity(fields.len());
+            for field in fields {
+                let length: i64 = connection.query_row(
+                    &format!("SELECT CASE WHEN json_type(j.value,?3)='text' THEN length(CAST(json_extract(j.value,?3) AS BLOB)) ELSE -1 END {from}"),
+                    params![source.identity().source_rowid, key, field], |r| r.get(0),
+                ).map_err(|_| session_error())?;
+                usage.work_units += 1;
+                if !(1..=512).contains(&length)
+                    || usage
+                        .encoded_bytes()
+                        .checked_add(length as usize)
+                        .is_none_or(|n| n > INPUT_BYTES)
+                {
+                    return Err(session_error());
+                }
+                let value: String = connection
+                    .query_row(
+                        &format!("SELECT json_extract(j.value,?3) {from}"),
+                        params![source.identity().source_rowid, key, field],
+                        |r| r.get(0),
+                    )
+                    .map_err(|_| session_error())?;
+                usage.work_units += 1;
+                if value.len() != length as usize {
+                    return Err(session_error());
+                }
+                usage.metadata_bytes += value.len();
+                values.push(value);
             }
-            usage.metadata_bytes += value.len();
-            values.push(value);
+            validate_worktree_manifest_policy_fields_v1(&WorktreeManifestPolicyFieldsV1 {
+                workspace_kind: &values[4],
+                snapshot_transport: &values[5],
+                source_mutation_policy: &values[6],
+                object_format: &values[7],
+                base_commit: &values[8],
+                base_tree: &values[9],
+                head_mode: &values[10],
+                lifecycle: &values[11],
+            })
+            .map_err(|_| session_error())?;
+            elsecrew_protocol::run_recovery_v1::validate_prepared_workspace_state_fields_v1(
+                &values[12],
+                &values[11],
+                &values[13],
+                &values[14],
+            )
+            .map_err(|_| session_error())?;
         }
-        validate_worktree_manifest_policy_fields_v1(&WorktreeManifestPolicyFieldsV1 {
-            workspace_kind: &values[4],
-            snapshot_transport: &values[5],
-            source_mutation_policy: &values[6],
-            object_format: &values[7],
-            base_commit: &values[8],
-            base_tree: &values[9],
-            head_mode: &values[10],
-            lifecycle: &values[11],
-        })
-        .map_err(|_| session_error())?;
-        elsecrew_protocol::run_recovery_v1::validate_prepared_workspace_state_fields_v1(
-            &values[12],
-            &values[11],
-            &values[13],
-            &values[14],
-        )
-        .map_err(|_| session_error())?;
+        let root_key = if v2 { "canonicalSourceRoot" } else { "canonicalGitRoot" };
         let lengths: [i64;3] = connection.query_row(
-            &format!("SELECT length(CAST(j.value AS BLOB)),length(CAST(json_extract(j.value,'$.manifest.canonicalGitRoot') AS BLOB)),length(CAST(json_extract(j.value,'$.manifest.worktreePath') AS BLOB)) {from}"),
+            &format!("SELECT length(CAST(j.value AS BLOB)),length(CAST(json_extract(j.value,'$.manifest.{root_key}') AS BLOB)),length(CAST(json_extract(j.value,'$.manifest.worktreePath') AS BLOB)) {from}"),
             params![source.identity().source_rowid,key], |r| Ok([r.get(0)?,r.get(1)?,r.get(2)?]),
         ).map_err(|_| session_error())?;
         usage.work_units += 1;
@@ -188,6 +206,7 @@ impl Member {
             root_prefix: true,
             descendant_separator: false,
             digest: Sha256::new(),
+            root_key,
         })
     }
 
@@ -234,7 +253,7 @@ impl Member {
             let root = self.fragment(
                 connection,
                 &from,
-                "json_extract(j.value,'$.manifest.canonicalGitRoot')",
+                &format!("json_extract(j.value,'$.manifest.{}')", self.root_key),
                 offset,
                 root_len,
                 usage,
@@ -257,7 +276,7 @@ impl Member {
             self.path_offset += amount;
         } else {
             self.paths[0]
-                .finish("canonicalGitRoot")
+                .finish(self.root_key)
                 .map_err(|_| session_error())?;
             self.paths[1]
                 .finish("worktreePath")
@@ -271,6 +290,49 @@ impl Member {
             return Ok(Disposition::Complete);
         }
         Ok(Disposition::Pending)
+    }
+
+    /// The whole v2 member through the shared contract: exact keys, both
+    /// paths, branch names and the binding state.
+    fn check_v2(
+        connection: &Connection,
+        source: &BoundColumn,
+        from: &str,
+        key: &str,
+        usage: &mut ByteUsage,
+    ) -> Result<(), SidecarError> {
+        let length: i64 = connection.query_row(
+            &format!("SELECT CASE WHEN j.type='object' THEN length(CAST(j.value AS BLOB)) ELSE -1 END {from}"),
+            params![source.identity().source_rowid, key], |r| r.get(0),
+        ).map_err(|_| session_error())?;
+        usage.work_units += 1;
+        if !(1..=V2_MEMBER_MAX_BYTES).contains(&length)
+            || usage.encoded_bytes().checked_add(length as usize).is_none_or(|n| n > INPUT_BYTES)
+        {
+            return Err(session_error());
+        }
+        let text: String = connection.query_row(
+            &format!("SELECT CAST(j.value AS TEXT) {from}"),
+            params![source.identity().source_rowid, key], |r| r.get(0),
+        ).map_err(|_| session_error())?;
+        usage.work_units += 1;
+        usage.metadata_bytes += text.len();
+        let value: serde_json::Value = serde_json::from_str(&text).map_err(|_| session_error())?;
+        elsecrew_protocol::run_recovery_v1::validate_g5_payload_v1("preparedChatWorkspace", &value)
+            .map_err(|_| session_error())?;
+        if value["manifest"]["schemaVersion"] != 2 {
+            return Err(session_error());
+        }
+        let project_matches: bool = connection.query_row(
+            &format!("SELECT CAST(json_extract(j.value,'$.preparationId') AS BLOB)=CAST(j.key AS BLOB) \
+             AND CAST(json_extract(j.value,'$.manifest.projectId') AS BLOB)=CAST(s.aggregate_id AS BLOB) {from}"),
+            params![source.identity().source_rowid, key], |r| r.get(0),
+        ).map_err(|_| session_error())?;
+        usage.work_units += 1;
+        if !project_matches {
+            return Err(session_error());
+        }
+        Ok(())
     }
 
     fn fragment(

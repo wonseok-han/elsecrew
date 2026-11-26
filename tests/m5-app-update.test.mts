@@ -10,7 +10,7 @@ function fixture(safe = true) {
     setFeedURL: () => { feeds++; }, checkForUpdates: () => { checks++; }, quitAndInstall: () => { installs++; },
   };
   const controller = new AppUpdateController(native, async install => {
-    const quit = new QuitCoordinatorV1({ prepareSidecarQuit: async () => ({ safeToQuit: safe, blockers: safe ? [] : ["recovery"] }),
+    const quit = new QuitCoordinatorV1({ prepareSidecarQuit: async () => ({ safeToQuit: safe, blockers: safe ? [] : ["run:recovery"] }),
       failedBeforeReady: () => false, allowProcessExit: kind => { if (kind === "clean") install(); } });
     return (await quit.prepareQuit()).safeToQuit;
   }, () => {});

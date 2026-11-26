@@ -35,6 +35,7 @@ pub struct PreflightExchange {
     effort: String,
     expected_home: String,
     permission: ExpectedPermission,
+    approval: super::CodexApprovalPolicy,
     state: PreflightState,
     started: bool,
     thread_cwd: Option<std::path::PathBuf>,
@@ -42,6 +43,7 @@ pub struct PreflightExchange {
     notified_thread_id: Option<String>,
     configuration_only: bool,
     account_note_seen: bool,
+    routing_note_seen: bool,
     named_cwd: Option<std::path::PathBuf>,
     isolation_cwd: Option<std::path::PathBuf>,
     isolation_warning: Option<super::super::codex_isolation_warning::IsolationWarning>,
@@ -103,6 +105,7 @@ impl PreflightExchange {
             effort: profile.reasoning_effort.into(),
             expected_home: expected_home.into(),
             permission,
+            approval: profile.approval,
             state: PreflightState::Checking,
             started: false,
             thread_cwd: None,
@@ -110,6 +113,7 @@ impl PreflightExchange {
             notified_thread_id: None,
             configuration_only: false,
             account_note_seen: false,
+            routing_note_seen: false,
             named_cwd: None,
             isolation_cwd: None,
             isolation_warning: None,
@@ -238,7 +242,7 @@ impl PreflightExchange {
         }
         let mut request = serde_json::json!({"id":5,"method":"thread/start","params":{
             "model":self.model,"modelProvider":"openai","cwd":path,
-            "approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":self.permission.sandbox_mode(),
+            "approvalPolicy":self.approval.as_str(),"approvalsReviewer":"user","sandbox":self.permission.sandbox_mode(),
             "config":{"model_reasoning_effort":self.effort},"ephemeral":true,
             "baseInstructions":"","developerInstructions":""
         }});
@@ -291,7 +295,8 @@ impl PreflightExchange {
         text: &str,
     ) -> Result<crate::provider::vendor_observation::codex_turn::TurnStart, ProviderError> {
         let thread = self.matched_thread_id().ok_or_else(invalid)?;
-        crate::provider::vendor_observation::codex_turn::TurnStart::new(thread, text)
+        Ok(crate::provider::vendor_observation::codex_turn::TurnStart::new(thread, text)?
+            .in_untrusted_thread(self.approval == super::CodexApprovalPolicy::Untrusted))
     }
 
     /// Split initialized and its following request into individual JSONL frames.
@@ -316,6 +321,47 @@ impl PreflightExchange {
         result.map_err(|_| invalid())
     }
 
+    /// One `account/updated` for the signed-in account and, since Codex
+    /// 0.171, at most one more once workspace routing is ready (`reason`).
+    /// Neither advances the exchange or proves account state.
+    fn accept_account_note(&mut self, input: &BoundedObservation) -> Result<(), ProviderError> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields, rename_all = "camelCase")]
+        struct Params {
+            auth_mode: String,
+            plan_type: Option<String>,
+            #[serde(default)]
+            reason: Option<String>,
+        }
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Note {
+            method: String,
+            params: Params,
+            #[serde(default, rename = "emittedAtMs")]
+            emitted_at_ms: u64,
+        }
+        let note: Note = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
+        // An "unknown" reason shares the initial note's single slot.
+        let seen = match note.params.reason.as_deref() {
+            None | Some("unknown") => &mut self.account_note_seen,
+            Some("workspaceRoutingReady") => &mut self.routing_note_seen,
+            Some(_) => return Err(invalid()),
+        };
+        if *seen
+            || note.method != "account/updated"
+            || note.params.auth_mode != "chatgpt"
+            || note.emitted_at_ms > 9_007_199_254_740_991
+            || note.params.plan_type.as_ref().is_some_and(|value| {
+                value.is_empty() || value.len() > 128 || value.chars().any(char::is_control)
+            })
+        {
+            return Err(invalid());
+        }
+        *seen = true;
+        Ok(())
+    }
+
     fn match_thread_pair(&mut self) -> Result<PreflightState, ProviderError> {
         if let (Some(reply), Some(note)) = (&self.thread_id, &self.notified_thread_id) {
             if reply != note {
@@ -330,6 +376,15 @@ impl PreflightExchange {
         &mut self,
         input: &BoundedObservation,
     ) -> Result<PreflightState, ProviderError> {
+        // Codex reports workspace routing readiness asynchronously, so its
+        // account note can land while the thread starts (the only later state
+        // in which the sidecar reads frames).
+        if self.state == PreflightState::ThreadStarting
+            && input.json()?.get("method").and_then(|m| m.as_str()) == Some("account/updated")
+        {
+            self.accept_account_note(input)?;
+            return Ok(self.state);
+        }
         if self.state == PreflightState::ThreadStarting {
             #[derive(Deserialize)]
             #[serde(deny_unknown_fields)]
@@ -383,6 +438,7 @@ impl PreflightExchange {
                     &ExpectedProfile {
                         model: &self.model,
                         reasoning_effort: &self.effort,
+                        approval: self.approval,
                     },
                     self.thread_cwd.as_deref().ok_or_else(invalid)?,
                 )?;
@@ -392,6 +448,7 @@ impl PreflightExchange {
                     &ExpectedProfile {
                         model: &self.model,
                         reasoning_effort: &self.effort,
+                        approval: self.approval,
                     },
                     self.thread_cwd.as_deref().ok_or_else(invalid)?,
                     self.permission,
@@ -421,35 +478,12 @@ impl PreflightExchange {
                 Some("configWarning") => "configuration warning notification",
                 _ => "unexpected preflight notification",
             });
-            #[derive(Deserialize)]
-            #[serde(deny_unknown_fields, rename_all = "camelCase")]
-            struct Params {
-                auth_mode: String,
-                plan_type: Option<String>,
-            }
-            #[derive(Deserialize)]
-            #[serde(deny_unknown_fields)]
-            struct Note {
-                method: String,
-                params: Params,
-                #[serde(default, rename = "emittedAtMs")]
-                emitted_at_ms: u64,
-            }
-            let note: Note = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
             // This asynchronous note may precede config/read's response after
             // initialized. It never advances RPC order or proves account state.
-            if !self.rpc.awaiting_initialized_reply()
-                || self.account_note_seen
-                || note.method != "account/updated"
-                || note.params.auth_mode != "chatgpt"
-                || note.emitted_at_ms > 9_007_199_254_740_991
-                || note.params.plan_type.as_ref().is_some_and(|value| {
-                    value.is_empty() || value.len() > 128 || value.chars().any(char::is_control)
-                })
-            {
+            if !self.rpc.awaiting_initialized_reply() {
                 return Err(invalid());
             }
-            self.account_note_seen = true;
+            self.accept_account_note(input)?;
             self.configuration_failure = None;
             return Ok(self.state);
         }
@@ -462,6 +496,7 @@ impl PreflightExchange {
         let profile = ExpectedProfile {
             model: &self.model,
             reasoning_effort: &self.effort,
+            approval: self.approval,
         };
         match kind {
             ObservationKind::Usage => { self.display_usage = super::super::account_usage::codex(&observation).ok(); }
@@ -600,6 +635,19 @@ impl PreflightExchange {
 
 #[cfg(test)]
 mod tests {
+    /// The thread is started with the run's approval policy (2026-11-27).
+    #[test]
+    fn thread_start_asks_for_the_runs_approval_policy() {
+        for (approval, wire) in [(super::super::CodexApprovalPolicy::OnRequest, "on-request"), (super::super::CodexApprovalPolicy::Untrusted, "untrusted")] {
+            let profile = ExpectedProfile { model: "test-model", reasoning_effort: "medium", approval };
+            let mut flow = PreflightExchange::new(&profile, test_path!("/profile")).unwrap();
+            flow.state = PreflightState::ObservationsMatched;
+            let request = flow.start_thread(std::path::Path::new(test_path!("/managed/snapshot"))).unwrap();
+            let value: serde_json::Value = serde_json::from_str(request.as_str()).unwrap();
+            assert_eq!(value["params"]["approvalPolicy"], wire);
+        }
+    }
+
     use super::*;
     use serde_json::{json, Value};
 
@@ -607,7 +655,7 @@ mod tests {
     fn model_name_cannot_opt_a_normal_preflight_into_usage_queries() {
         for opt_in in [false, true] {
             let mut flow = PreflightExchange::with_named_permission(
-                &ExpectedProfile { model: "catalog-probe", reasoning_effort: "medium" },
+                &ExpectedProfile { model: "catalog-probe", reasoning_effort: "medium", approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest },
                 test_path!("/app/home"), std::path::Path::new(test_path!("/app/workspace")), ExpectedPermission::ReadOnly,
             ).unwrap();
             if opt_in { flow.enable_usage_display().unwrap(); }
@@ -626,6 +674,7 @@ mod tests {
             &ExpectedProfile {
                 model: "test-model",
                 reasoning_effort: "medium",
+                approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
             },
             test_path!("/app/profile"),
         )
@@ -857,6 +906,7 @@ mod tests {
             &ExpectedProfile {
                 model: "test-model",
                 reasoning_effort: "medium",
+                approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
             },
             test_path!("/app/profile"),
             ExpectedPermission::WorkspaceWrite,
@@ -876,6 +926,7 @@ mod tests {
                     &ExpectedProfile {
                         model: "test-model",
                         reasoning_effort: "medium",
+                        approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
                     },
                     test_path!("/app/profile"),
                     cwd,
@@ -954,6 +1005,7 @@ mod tests {
                         &ExpectedProfile {
                             model: "test-model",
                             reasoning_effort: "medium",
+                            approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
                         },
                         test_path!("/app/profile"),
                     )
@@ -997,6 +1049,7 @@ mod tests {
             &ExpectedProfile {
                 model: "test-model",
                 reasoning_effort: "medium",
+                approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
             },
             test_path!("/app/profile"),
         )
@@ -1028,6 +1081,7 @@ mod tests {
                 &ExpectedProfile {
                     model: "test-model",
                     reasoning_effort: "medium",
+                    approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
                 },
                 test_path!("/app/profile"),
             )
@@ -1054,6 +1108,7 @@ mod tests {
             &ExpectedProfile {
                 model: "test-model",
                 reasoning_effort: "medium",
+                approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
             },
             test_path!("/app/profile"),
         )
@@ -1273,6 +1328,95 @@ mod tests {
             assert!(flow.accept(&note).is_err()); // wrong stage or duplicate
             assert_eq!(flow.state(), PreflightState::Failed);
         }
+    }
+
+    #[test]
+    fn codex_0_171_account_notes_with_a_reason_pass_once_each() {
+        let initial = r#"{"method":"account/updated","emittedAtMs":1,"params":{"authMode":"chatgpt","planType":"pro","reason":null}}"#;
+        let routed = r#"{"method":"account/updated","emittedAtMs":2,"params":{"authMode":"chatgpt","planType":"pro","reason":"workspaceRoutingReady"}}"#;
+        let note = |raw: &str| BoundedObservation::new(raw.as_bytes().to_vec()).unwrap();
+        // Both kinds once each, in either order, without advancing the exchange.
+        for order in [[initial, routed], [routed, initial]] {
+            let mut flow = exchange();
+            let values = results();
+            for (index, value) in values.iter().take(2).enumerate() {
+                flow.next_frames().unwrap();
+                flow.accept(&reply(index, value)).unwrap();
+            }
+            flow.next_frames().unwrap();
+            for raw in order {
+                assert_eq!(flow.accept(&note(raw)).unwrap(), PreflightState::Checking);
+                assert!(flow.awaiting_response());
+            }
+            for (index, value) in values.iter().enumerate().skip(2) {
+                if index > 2 {
+                    flow.next_frames().unwrap();
+                }
+                flow.accept(&reply(index, value)).unwrap();
+            }
+            assert_eq!(flow.state(), PreflightState::ObservationsMatched);
+        }
+        // "unknown" alone stands in for the initial note.
+        let mut flow = exchange();
+        let values = results();
+        for (index, value) in values.iter().take(2).enumerate() {
+            flow.next_frames().unwrap();
+            flow.accept(&reply(index, value)).unwrap();
+        }
+        flow.next_frames().unwrap();
+        assert_eq!(
+            flow.accept(&note(r#"{"method":"account/updated","params":{"authMode":"chatgpt","reason":"unknown"}}"#)).unwrap(),
+            PreflightState::Checking
+        );
+        // A repeat of either kind, an unknown reason or another account fails.
+        for (first, second) in [
+            (initial, initial),
+            (routed, routed),
+            (initial, r#"{"method":"account/updated","params":{"authMode":"chatgpt","reason":"unknown"}}"#),
+            (initial, r#"{"method":"account/updated","params":{"authMode":"chatgpt","reason":"PRIVATE"}}"#),
+            (initial, r#"{"method":"account/updated","params":{"authMode":"apikey","reason":"workspaceRoutingReady"}}"#),
+            (initial, r#"{"method":"account/updated","params":{"authMode":"chatgpt","reason":1}}"#),
+        ] {
+            let mut flow = exchange();
+            let values = results();
+            for (index, value) in values.iter().take(2).enumerate() {
+                flow.next_frames().unwrap();
+                flow.accept(&reply(index, value)).unwrap();
+            }
+            flow.next_frames().unwrap();
+            flow.accept(&note(first)).unwrap();
+            let error = flow.accept(&note(second)).unwrap_err();
+            assert!(!error.to_string().contains("PRIVATE"));
+            assert_eq!(flow.state(), PreflightState::Failed);
+        }
+        // Routing readiness may arrive while the thread starts; it does not
+        // stand in for thread/started.
+        let cwd = std::path::Path::new(test_path!("/managed/snapshot"));
+        let mut flow = exchange();
+        for (index, result) in results().iter().enumerate() {
+            flow.next_frames().unwrap();
+            flow.accept(&reply(index, result)).unwrap();
+        }
+        assert!(flow.accept(&note(routed)).is_err()); // nothing is read here
+        let mut flow = exchange();
+        for (index, result) in results().iter().enumerate() {
+            flow.next_frames().unwrap();
+            flow.accept(&reply(index, result)).unwrap();
+        }
+        flow.start_read_only_thread(cwd).unwrap();
+        assert_eq!(flow.accept(&note(routed)).unwrap(), PreflightState::ThreadStarting);
+        assert!(flow.accept(&note(routed)).is_err());
+        let mut flow = exchange();
+        for (index, result) in results().iter().enumerate() {
+            flow.next_frames().unwrap();
+            flow.accept(&reply(index, result)).unwrap();
+        }
+        flow.start_read_only_thread(cwd).unwrap();
+        assert_eq!(flow.accept(&note(routed)).unwrap(), PreflightState::ThreadStarting);
+        let result = json!({"thread":{"id":"thread-1"},"model":"test-model","modelProvider":"openai","cwd":test_path!("/managed/snapshot"),"instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"readOnly","networkAccess":false},"reasoningEffort":"medium"});
+        assert_eq!(flow.accept(&thread_reply(&result)).unwrap(), PreflightState::ThreadStarting);
+        let started = note(r#"{"method":"thread/started","params":{"thread":{"id":"thread-1"}}}"#);
+        assert_eq!(flow.accept(&started).unwrap(), PreflightState::ThreadMatched);
     }
 
     #[test]

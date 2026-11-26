@@ -59,6 +59,9 @@ impl CodexCommand {
             crate::provider_login_gate::command(executable.revalidate()?, &borrowed, workspace)
                 .map_err(|_| failure())?;
         super::discovery_environment(&mut command, home);
+        // A task worktree: Git works inside Codex's own sandbox (no user
+        // config, the developer folder's git). Nothing else changes.
+        crate::provider_runtime_sandbox::task_git_environment(&mut command, workspace);
         let scope = Scope {
             workspace: workspace.into(),
             home: home.into(),
@@ -91,6 +94,7 @@ mod tests {
             elsecrew_core::provider::vendor_observation::codex_preflight::ExpectedProfile {
                 model: "test-model",
                 reasoning_effort: "medium",
+                approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
             };
         assert!(CodexCommand::new(
             Path::new("/usr/bin/true"),

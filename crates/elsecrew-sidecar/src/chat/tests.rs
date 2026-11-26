@@ -12,6 +12,9 @@ use tempfile::TempDir;
 
 mod claude_native;
 mod durable_output;
+mod erasure;
+#[cfg(unix)]
+mod preview;
 
 #[test]
 fn legacy_cancel_returns_exact_durable_run_outside_chat_page() {
@@ -192,6 +195,31 @@ fn project_application_fence_blocks_other_chat_runs_before_reservation() {
     assert!(RunPreparation::resolve(&f.storage, &f.projects, &request).is_ok());
 }
 
+/// A command carrying a synthetic token (it says FAKE): the work history must
+/// store it masked, never as written (review PR #11 B1/B2).
+const FAKE_TOKEN_COMMAND: &str = "GITHUB_TOKEN=ghp_FAKEexample0FAKEexample0FAKEexample0 echo test";
+
+/// Reads every file of the app's store as bytes (the database and its
+/// write-ahead log included) and fails if any `needle` is in it: what the
+/// work history must never keep (review PR #11).
+fn assert_store_lacks(root: &std::path::Path, needles: &[&str]) {
+    fn walk(path: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+        for entry in fs::read_dir(path).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() { walk(&path, files); } else { files.push(path); }
+        }
+    }
+    let mut files = Vec::new();
+    walk(&root.join("data"), &mut files);
+    assert!(files.iter().any(|file| file.to_string_lossy().ends_with("elsecrew.sqlite3")), "store not found: {files:?}");
+    for file in files {
+        let bytes = fs::read(&file).unwrap();
+        for needle in needles {
+            assert!(!bytes.windows(needle.len()).any(|window| window == needle.as_bytes()), "{needle} stored in {}", file.display());
+        }
+    }
+}
+
 struct Fixture {
     _root: TempDir,
     source: std::path::PathBuf,
@@ -298,7 +326,7 @@ impl Fixture {
                     {"roleId":"planning","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"},
                     {"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},
                     {"roleId":"review","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"}
-                ]),
+                ]), None,
                 &format!("{request}_exact_roles"),
             )
             .unwrap();
@@ -473,21 +501,16 @@ fn reserved_run_identity_is_persisted_before_gate_release_and_storage_failure_bl
             .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
             .unwrap();
         let after = fixture.storage.projection_records("run").unwrap();
-        assert_eq!(
-            after[0]["recovery"]["reason"],
-            if fail_store {
-                "processIdentityUnavailable"
-            } else {
-                "uncleanShutdown"
-            }
-        );
-        assert_eq!(
-            after[0]["recovery"]["trackedProcesses"]
-                .as_array()
-                .unwrap()
-                .is_empty(),
-            fail_store
-        );
+        if fail_store {
+            assert_eq!(after[0]["recovery"]["reason"], "processIdentityUnavailable");
+            assert!(after[0]["recovery"]["trackedProcesses"].as_array().unwrap().is_empty());
+        } else {
+            // Every recorded process is gone: the run simply ended.
+            assert_eq!(after[0]["state"], "canceled");
+            assert!(after[0]["recovery"].is_null());
+            assert_eq!(after[0]["termination"]["processesProvenGone"], true);
+            AgentRuntime::blocked().validate_persisted_runs(&fixture.storage).unwrap();
+        }
         assert!(LoginProcess::reserve(&profile).is_ok());
     }
 }
@@ -506,7 +529,8 @@ fn actual_run_preparation_reserves_once_and_is_visible_to_restart_recovery() {
                 .projection_record("chat", chat_id)
                 .unwrap()
                 .unwrap();
-            let review = &mut saved["record"]["roleSnapshots"][2];
+            let review_index = role_index(&saved["record"], "review");
+            let review = &mut saved["record"]["roleSnapshots"][review_index];
             review["runtime"] = json!("claude-code");
             review["modelSelector"] = json!("claude-opus-5");
             review["reasoningEffort"] = Value::Null;
@@ -919,7 +943,8 @@ fn text_candidate_cases_with_output(
                 .unwrap()
                 .unwrap();
             let coding = writer || failure == "bound-write-mismatch";
-            let role = &mut saved["record"]["roleSnapshots"][if coding { 1 } else { 2 }];
+            let role_position = role_index(&saved["record"], if coding { "coding" } else { "review" });
+            let role = &mut saved["record"]["roleSnapshots"][role_position];
             role["runtime"] = json!("codex");
             role["modelSelector"] = json!("test-model");
             role["reasoningEffort"] = json!("medium");
@@ -975,6 +1000,9 @@ fn text_candidate_cases_with_output(
             settings["sandbox_workspace_write"] = json!({"writable_roots":[],"network_access":false,"exclude_tmpdir_env_var":true,"exclude_slash_tmp":true});
             sandbox = json!({"type":"workspaceWrite","writableRoots":[],"networkAccess":false,"excludeTmpdirEnvVar":true,"excludeSlashTmp":true});
         }
+        // The thread reports the policy the run asked for: `untrusted` here,
+        // as this project has no command permission (2026-11-27 decision).
+        let approval = crate::agent_runtime::preparation::codex_approval_policy(&fixture.storage, &fixture.projects, &address.project_id).unwrap().as_str();
         let messages = [
             json!({"id":1,"result":{"userAgent":"test","codexHome":home,"platformFamily":"unix","platformOs":"macos"}}),
             json!({"id":2,"result":{"config":settings,"layers":[
@@ -984,7 +1012,7 @@ fn text_candidate_cases_with_output(
             ]}}),
             json!({"id":3,"result":{"account":{"type":"chatgpt"},"requiresOpenaiAuth":true}}),
             json!({"id":4,"result":{"data":[{"id":"test-model","model":"test-model","hidden":false,"supportedReasoningEfforts":[{"reasoningEffort":"medium"}]}],"nextCursor":null}}),
-            json!({"id":5,"result":{"thread":{"id":"thread-test"},"model":"test-model","modelProvider":"openai","cwd":snapshot["worktreePath"],"instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":sandbox,"reasoningEffort":"medium"}}),
+            json!({"id":5,"result":{"thread":{"id":"thread-test"},"model":"test-model","modelProvider":"openai","cwd":snapshot["worktreePath"],"instructionSources":[],"approvalPolicy":approval,"approvalsReviewer":"user","sandbox":sandbox,"reasoningEffort":"medium"}}),
             json!({"id":6,"result":{"turn":{"id":"t1","status":"inProgress","items":[],"error":null}}}),
         ];
         let mut replies: Vec<String> = messages.iter().map(Value::to_string).collect();
@@ -1037,7 +1065,7 @@ fn text_candidate_cases_with_output(
         let handler = failure.starts_with("bound-handler") || accepting;
         if handler {
             let lines: Vec<_> = replies[5].lines().map(str::to_owned).collect();
-            let tool = json!({"type":"commandExecution","id":"c1","command":"echo test","cwd":snapshot["worktreePath"],"status":"inProgress"});
+            let tool = json!({"type":"commandExecution","id":"c1","command":FAKE_TOKEN_COMMAND,"cwd":snapshot["worktreePath"],"status":"inProgress"});
             replies[5] = format!(
                 "{}\n{}\n{}\n{}",
                 lines[0],
@@ -1047,6 +1075,8 @@ fn text_candidate_cases_with_output(
             );
             let mut completed = tool;
             completed["status"] = json!("declined");
+            // What a command printed is never stored (review PR #11 B3).
+            completed["aggregatedOutput"] = json!("FAKE-OUTPUT-MARKER printed");
             if accepting {
                 completed["status"] = json!("completed");
                 completed["exitCode"] = json!(0);
@@ -1064,6 +1094,8 @@ fn text_candidate_cases_with_output(
             &ExpectedProfile {
                 model: "test-model",
                 reasoning_effort: "medium",
+                // The same policy the fake thread reports for this project.
+                approval: crate::agent_runtime::preparation::codex_approval_policy(&fixture.storage, &fixture.projects, &address.project_id).unwrap(),
             },
             home.to_str().unwrap(),
         )
@@ -1300,9 +1332,10 @@ fn text_candidate_cases_with_output(
                     AgentRuntime::blocked()
                         .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
                         .unwrap();
+                    // The finished process is proven gone: ended as canceled.
                     assert_eq!(
                         fixture.storage.projection_records("run").unwrap()[0]["state"],
-                        "recoveryRequired"
+                        "canceled"
                     );
                     continue;
                 }
@@ -1398,7 +1431,8 @@ fn text_candidate_cases_with_output(
                 if failure == "bound-input" {
                     saved["last_message"]["text"] = json!("different goal");
                 } else {
-                    saved["record"]["roleSnapshots"][2]["modelSelector"] = json!("changed-model");
+                    let review_index = role_index(&saved["record"], "review");
+                    saved["record"]["roleSnapshots"][review_index]["modelSelector"] = json!("changed-model");
                 }
                 fixture
                     .storage
@@ -1646,13 +1680,15 @@ fn text_candidate_cases_with_output(
                                         &mut fixture.projects,
                                     )
                                     .unwrap();
+                                // Dropping the runtime ended its processes: the run
+                                // whose terminal record failed ends as canceled.
                                 assert_eq!(
                                     fixture
                                         .storage
                                         .projection_record("run", &identity.run_id)
                                         .unwrap()
                                         .unwrap()["state"],
-                                    "recoveryRequired"
+                                    "canceled"
                                 );
                                 continue 'cases;
                             }
@@ -1742,7 +1778,7 @@ fn text_candidate_cases_with_output(
                                     }
                                     let detail = runtime.approval_request(&mut fixture.storage, &fixture.projects, &json!({"action":"inspect","identity":public_identity,"approvalId":id})).unwrap();
                                     assert_eq!(detail["inspection"]["approvalId"], id);
-                                    assert_eq!(detail["inspection"]["command"], "echo test");
+                                    assert_eq!(detail["inspection"]["command"], FAKE_TOKEN_COMMAND);
                                     if failure == "bound-handler-runtime" {
                                         let error = runtime
                                             .accept_native_approval_once(
@@ -1788,7 +1824,8 @@ fn text_candidate_cases_with_output(
                                                 .projection_record("chat", &address.chat_id)
                                                 .unwrap()
                                                 .unwrap();
-                                            changed["record"]["roleSnapshots"][2]
+                                            let review_index = role_index(&changed["record"], "review");
+                                            changed["record"]["roleSnapshots"][review_index]
                                                 ["modelSelector"] = json!("changed-after-accept");
                                             fixture
                                                 .storage
@@ -1814,6 +1851,12 @@ fn text_candidate_cases_with_output(
                                         .unwrap();
                                         assert_eq!(receipt["queued"], id);
                                         assert_eq!(receipt["pending"], json!([]));
+                                        // The screen may still click "view" on it.
+                                        let viewed = runtime.approval_request(&mut fixture.storage, &fixture.projects,
+                                            &json!({"action":"inspect","identity":public_identity,"approvalId":id})).unwrap();
+                                        assert_eq!(viewed["inspection"], Value::Null);
+                                        assert_eq!(viewed["pending"], json!([]));
+                                        assert_eq!(viewed["queued"], Value::Null);
                                     }
                                     assert!(runtime
                                         .decline_native_approval(
@@ -1865,6 +1908,7 @@ fn text_candidate_cases_with_output(
                         }
                         assert_eq!(intents[0]["state"], "intentRecorded");
                         assert!(!intents[0].to_string().contains("echo test"));
+                        assert!(!intents[0].to_string().contains("FAKEexample0"));
                     }
                     if accepting && canceled {
                         assert!(!fs::read_to_string(&captured)
@@ -1890,6 +1934,20 @@ fn text_candidate_cases_with_output(
                         let output = durable_output::read_all(&mut fixture.storage, &run["record"]);
                         assert_eq!(output.last().unwrap()["kind"], "final");
                         assert_eq!(output.last().unwrap()["text"], "hello");
+                        // The declined command leaves its start (naming the command, user
+                        // request 2026-11-18, the token masked) and a closing row with
+                        // the app's own id saying it was refused (2026-11-26).
+                        let history: Vec<Value> = output.iter().filter(|event| event["kind"] == "status")
+                            .filter_map(|event| serde_json::from_str::<Value>(event["text"].as_str()?).ok())
+                            .filter(|row| row.get("action").is_some()).collect();
+                        assert_eq!(history, vec![
+                            // It starts with an assignment: only that a command ran (round 3).
+                            json!({"action":"command","cwd":".","id":"c1"}),
+                            json!({"action":"command","cwd":".","id":"c1","outcome":"refused","phase":"done"}),
+                        ], "{failure}");
+                        // Read back from the files themselves: neither the token nor
+                        // the output is anywhere in the store.
+                        assert_store_lacks(fixture._root.path(), &["FAKEexample0FAKEexample0", "FAKE-OUTPUT-MARKER"]);
                     } else {
                         assert!(emitted
                             .iter()
@@ -1918,7 +1976,8 @@ fn text_candidate_cases_with_output(
                                 }
                                 if failure == "bound-handler-role" {
                                     let mut chat = storage.projection_record("chat", &address.chat_id)?.unwrap();
-                                    chat["record"]["roleSnapshots"][2]["modelSelector"] = json!("changed-model");
+                                    let review_index = role_index(&chat["record"], "review");
+                                    chat["record"]["roleSnapshots"][review_index]["modelSelector"] = json!("changed-model");
                                     storage.upsert_projection_record("chat", &address.chat_id, "op_approval_role_changed", None, chat)?;
                                 }
                                 *decision = Some(elsecrew_core::provider::vendor_observation::codex_approval::Decision::Decline);
@@ -1989,18 +2048,24 @@ fn text_candidate_cases_with_output(
                                     runtime.validate_persisted_runs(&fixture.storage).unwrap();
                                     let recovered =
                                         fixture.storage.projection_records("run").unwrap();
-                                    assert_eq!(recovered[0]["state"], "recoveryRequired");
+                                    // Both recorded processes are gone: the run ended
+                                    // as canceled, with no recovery left for the user,
+                                    // and like a confirmed close its records keep one.
+                                    assert_eq!(recovered[0]["state"], "canceled");
+                                    assert!(recovered[0]["recovery"].is_null());
                                     assert_eq!(
                                         recovered[0]["process_identity_internal"],
-                                        before[0]["process_identity_internal"]
+                                        json!([before[0]["process_identity_internal"][0]])
                                     );
                                     assert_eq!(
-                                        recovered[0]["recovery"]["trackedProcesses"]
+                                        recovered[0]["termination"]["trackedProcesses"]
                                             .as_array()
                                             .unwrap()
                                             .len(),
-                                        2
+                                        1
                                     );
+                                    // This candidate path holds an unbound sign-in hold;
+                                    // the run-bound release is covered in orchestration_dispatch.
                                     assert!(LoginProcess::reserve(&profile).is_err());
                                     continue 'cases;
                                 }
@@ -2034,12 +2099,15 @@ fn text_candidate_cases_with_output(
                     assert!(!process.closure_evidence().unwrap().confirmed());
                     let run = &fixture.storage.projection_records("run").unwrap()[0];
                     assert_eq!(run["state"], "recoveryRequired");
+                    // The injected descendant was stopped and observed gone
+                    // (only its evidence write failed): the record keeps the
+                    // root and whatever was not observed gone.
                     assert_eq!(
                         run["recovery"]["trackedProcesses"]
                             .as_array()
                             .unwrap()
                             .len(),
-                        2
+                        1
                     );
                     assert!(LoginProcess::reserve(&profile).is_err());
                     cleanup_child.as_mut().unwrap().wait().unwrap();
@@ -2310,6 +2378,20 @@ fn text_candidate_cases_with_output(
                             "-c",
                             "features.plugins=false",
                             "-c",
+                            "features.browser_use=false",
+                            "-c",
+                            "features.browser_use_external=false",
+                            "-c",
+                            "features.browser_use_full_cdp_access=false",
+                            "-c",
+                            "features.computer_use=false",
+                            "-c",
+                            "features.in_app_browser=false",
+                            "-c",
+                            "features.image_generation=false",
+                            "-c",
+                            "web_search=\"live\"",
+                            "-c",
                             isolation.as_str(),
                         ]
                     );
@@ -2391,9 +2473,13 @@ fn text_candidate_cases_with_output(
                     .iter()
                     .all(|item| item["observedGone"] == true));
             }
+            // A start that still cannot prove the uncertain stop changes
+            // nothing. (The reopen further down proves it and settles the run.)
+            crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(failure == "bound-cleanup"));
             AgentRuntime::blocked()
                 .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
                 .unwrap();
+            crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(false));
             assert_eq!(fixture.storage.projection_records("run").unwrap(), runs);
         }
         // Rejection before claiming the protocol leaves cleanup with the caller.
@@ -2460,14 +2546,23 @@ fn text_candidate_cases_with_output(
             runtime.validate_persisted_runs(&fixture.storage).unwrap();
             let after = fixture.storage.projection_records("run").unwrap();
             if failure == "bound-terminal" {
-                assert_eq!(after[0]["state"], "recoveryRequired");
-                assert_eq!(
-                    after[0]["recovery"]["recoveryId"],
-                    before[0]["recovery_id_reservation"]
-                );
+                // The finished process is proven gone, so the run whose terminal
+                // record failed ends as canceled at the next start.
+                assert_eq!(after[0]["state"], "canceled");
+                assert!(after[0]["recovery"].is_null());
+                assert_eq!(after[0]["termination"]["processesProvenGone"], true);
                 assert_eq!(after[0]["public_events"], before[0]["public_events"]);
                 // Reopening the ledger never silently removes a retained profile fence.
                 assert!(LoginProcess::reserve(&profile).is_err());
+            } else if before[0]["recovery"]["state"] == "unresolved" {
+                // A stop that could not be confirmed is settled at the next
+                // start once every recorded process is proven gone.
+                assert_eq!(after[0]["state"], "canceled", "{failure}");
+                assert!(after[0]["recovery"].is_null(), "{failure}");
+                assert_eq!(after[0]["termination"]["processesProvenGone"], true);
+                assert_eq!(after[0]["public_events"], before[0]["public_events"]);
+                // Its workspace is admitted like any other again.
+                assert!(fixture.projects.verify_workspace(&fixture.storage, &address).is_ok());
             } else {
                 assert_eq!(after, before);
             }
@@ -2874,7 +2969,7 @@ fn settings_are_snapshotted_and_global_workspace_aliases_are_rejected() {
             &mut fixture.storage,
             &fixture.project_id,
             1,
-            roles,
+            roles, None,
             "req_settings_update",
         )
         .unwrap();
@@ -3285,7 +3380,7 @@ fn unavailable_exact_profile_never_persists_or_spawns_a_run() {
             &mut fixture.storage,
             &fixture.project_id,
             1,
-            roles,
+            roles, None,
             "req_unavailable_settings",
         )
         .unwrap();
@@ -4740,12 +4835,10 @@ fn provider_terminal_recovery_required_poisons_even_after_clean_exit_until_aband
     let chat_id = chat["chatId"].as_str().unwrap();
     let before = fixture.storage.projection_record("chat", chat_id).unwrap();
     let before_run = fixture.storage.projection_record("run", &run_id).unwrap();
-    fixture.projects.change_catalog_visibility(&mut fixture.storage, &fixture.project_id, Some(chat_id), "removeChat", "req_hide_resolved_actual").unwrap();
+    fixture.projects.delete_chat(&mut fixture.storage, &fixture.project_id, chat_id, "req_delete_resolved_actual").unwrap();
     assert!(fixture.chats.list_chats(&fixture.storage, &fixture.project_id, None, 100).unwrap()["items"].as_array().unwrap().is_empty());
     assert_eq!(fixture.storage.projection_record("chat", chat_id).unwrap(), before);
     assert_eq!(fixture.storage.projection_record("run", &run_id).unwrap(), before_run);
-    fixture.projects.change_catalog_visibility(&mut fixture.storage, &fixture.project_id, None, "restoreChats", "req_restore_resolved_actual").unwrap();
-    assert_eq!(fixture.chats.list_chats(&fixture.storage, &fixture.project_id, None, 100).unwrap()["items"][0]["state"], "discarded");
 
     fixture
         .projects
@@ -5127,12 +5220,16 @@ fn startup_backfills_pre_g5c_recovery_ids_without_replacing_public_records() {
         .unwrap();
 
     let mut unresolved_runtime = AgentRuntime::blocked();
+    // A start in which the run's end still cannot be proven: the recovery
+    // stays for the person, with its ID backfilled and its record untouched.
+    crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(true));
     unresolved_runtime
         .recover_unclean_runs(
             &mut unresolved_fixture.storage,
             &mut unresolved_fixture.projects,
         )
         .unwrap();
+    crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(false));
     unresolved_runtime
         .validate_persisted_runs(&unresolved_fixture.storage)
         .unwrap();
@@ -5747,6 +5844,118 @@ fn deferred_cancel_never_reports_completion_after_terminal_persistence_failure()
     terminal_failure_cases(true);
 }
 
+/// Quitting interrupts the work; it never resets it. A writer run that lost
+/// its engine ends as canceled: what it left running is stopped, the writer
+/// lock is free, and the workspace with its half-done files stays in use.
+/// The same holds once an older app version had marked it for recovery.
+#[test]
+fn interrupted_writer_run_keeps_its_workspace_and_an_older_recovery_mark_is_lifted() {
+    use elsecrew_core::proctree::{ProbeResult, ProcIdentity, ProcTable, SystemProcTable};
+    for marked_by_older_version in [false, true] {
+        let mut fixture = Fixture::new();
+        let snapshot = fixture.snapshot("req_interrupted_writer_snapshot");
+        let chat = fixture.create_exact_claude_chat(&snapshot, "interrupted writer", "req_interrupted_writer_chat");
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let message_id = initial_message_id(&fixture, chat_id);
+        // A run that keeps going until it is stopped.
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::CancelClean);
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
+        let started = runtime
+            .start_agent(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                AgentRunStartRequestV1 {
+                    chat_id: chat_id.into(),
+                    role_id: "coding".into(),
+                    input_message_ids: vec![message_id],
+                    expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+                },
+                "req_interrupted_writer",
+            )
+            .unwrap();
+        let run_id = started.result["runId"].as_str().unwrap().to_string();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let run = loop {
+            runtime.poll(&mut fixture.storage, &mut fixture.projects).unwrap();
+            let run = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+            if run["state"] == "running" && run["process_identity_internal"].as_array().is_some_and(|ids| !ids.is_empty()) {
+                break run;
+            }
+            assert!(std::time::Instant::now() < deadline, "run did not start");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        let identities: Vec<_> = run["process_identity_internal"].as_array().unwrap().iter()
+            .map(|value| ProcIdentity { pid: value["pid"].as_u64().unwrap() as u32, start_us: value["start_us"].as_i64().unwrap() })
+            .collect();
+        let gone = |identity: &ProcIdentity| matches!(SystemProcTable.probe(*identity), ProbeResult::Gone);
+        let workspace = std::path::PathBuf::from(run["worktree_path"].as_str().unwrap());
+        fs::write(workspace.join("half-done.txt"), b"written before the app closed").unwrap();
+        let lock_id = format!("lock_{}", chat["worktreeId"].as_str().unwrap());
+        let manifest_path = fixture._root.path().join("data/worktree-manifests-v1").join(format!("{}.json", chat["worktreeId"].as_str().unwrap()));
+        let lifecycle = |path: &std::path::Path| serde_json::from_slice::<Value>(&fs::read(path).unwrap()).unwrap()["lifecycle"].clone();
+        // The engine goes away without ending the run or stopping its agent.
+        drop(runtime);
+        assert!(!identities.iter().all(gone));
+        if marked_by_older_version {
+            crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(true));
+            AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+            crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(false));
+            let marked = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+            assert_eq!(marked["record"]["state"], "recoveryRequired");
+            assert_eq!(marked["recovery"]["state"], "unresolved");
+            let lock = fixture.storage.projection_record("lock", &lock_id).unwrap().unwrap();
+            assert_eq!(lock["poisoned"], true);
+            assert_eq!(lock["writer_run_id"], run_id);
+            assert_eq!(lifecycle(&manifest_path), "recoveryRequired");
+            assert!(!fixture.storage.blocker_ids().unwrap().is_empty());
+            // An attempt that stopped right after lifting the workspace's mark
+            // (before its records were stored) leaves no half-lifted state: a
+            // start that still cannot settle the run puts the mark back.
+            let mut manifest: Value = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+            manifest["lifecycle"] = json!("active");
+            fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+            crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(true));
+            AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+            crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(false));
+            assert_eq!(lifecycle(&manifest_path), "recoveryRequired");
+            assert_eq!(fixture.storage.projection_record("run", &run_id).unwrap().unwrap(), marked);
+        }
+        AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+        AgentRuntime::blocked().validate_persisted_runs(&fixture.storage).unwrap();
+        let ended = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+        assert_eq!(ended["record"]["state"], "canceled");
+        assert_eq!(ended["record"]["terminationOutcome"], "cleanExit");
+        assert!(ended["recovery"].is_null());
+        assert_eq!(ended["termination"]["processesProvenGone"], true);
+        assert_eq!(ended["termination"]["writerLockState"], "released");
+        assert!(identities.iter().all(gone), "what the engine left running is stopped");
+        let lock = fixture.storage.projection_record("lock", &lock_id).unwrap().unwrap();
+        assert!(lock["writer_run_id"].is_null());
+        assert_eq!(lock["poisoned"], false);
+        assert_eq!(lock["recovery_required"], false);
+        assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+        // Nothing was reset.
+        assert_eq!(lifecycle(&manifest_path), "active");
+        assert_eq!(fs::read(workspace.join("half-done.txt")).unwrap(), b"written before the app closed");
+        let stored = fixture.storage.projection_record("chat", chat_id).unwrap().unwrap();
+        assert_eq!(stored["record"]["state"], "canceled");
+        // The workspace is admitted like any other again: the task takes a new message.
+        fixture
+            .chats
+            .append_user_message(&mut fixture.storage, &fixture.projects, &json!({
+                "projectId":chat["projectId"],"chatId":chat["chatId"],"taskId":chat["taskId"],
+                "worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],
+                "expectedEventSequence":stored["durable_event_sequence"],
+                "clientMessageId":format!("user_{}", "d".repeat(32)),"text":"Carry on from where it stopped.",
+            }))
+            .unwrap();
+        // A second look changes nothing.
+        let before = fixture.storage.projection_records("run").unwrap();
+        AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+        assert_eq!(fixture.storage.projection_records("run").unwrap(), before);
+    }
+}
+
 fn terminal_failure_cases(cancel: bool) {
     for scenario in [
         FakeScenario::TerminalConstructionFailure,
@@ -5833,16 +6042,21 @@ fn terminal_failure_cases(cancel: bool) {
             .projection_record("run", &run_id)
             .unwrap()
             .unwrap();
-        assert_eq!(recovered["record"]["state"], "recoveryRequired");
-        assert_eq!(recovered["recovery"]["state"], "unresolved");
+        AgentRuntime::blocked().validate_persisted_runs(&fixture.storage).unwrap();
         let lock = fixture
             .storage
             .projection_record("lock", &lock_id)
             .unwrap()
             .unwrap();
-        assert_eq!(lock["writer_run_id"], run_id);
-        assert_eq!(lock["poisoned"], true);
-        assert_eq!(lock["recovery_required"], true);
+        // The runtime went away before a terminal record (in one case after
+        // the stop had already marked the workspace for recovery): at the next
+        // start every process is proven gone, so the run ends as canceled and
+        // the workspace is in use again.
+        assert_eq!(recovered["record"]["state"], "canceled");
+        assert!(recovered["recovery"].is_null());
+        assert!(lock["writer_run_id"].is_null());
+        assert_eq!(lock["poisoned"], false);
+        assert_eq!(lock["recovery_required"], false);
     }
 }
 
@@ -6046,7 +6260,7 @@ fn fake_agent_cancel_uncertain_poison_survives_and_is_abandon_only() {
     let mut owner = crate::provider_login_process::LoginProcess::reserve_claude_owned(profile).unwrap();
     owner.retain_fence_before_launch(&run_id).unwrap();
     let binding = owner.bind_run_fence(&run_id).unwrap();
-    let fence_path = fixture.storage.path().parent().unwrap().join("claude-login.pending");
+    let fence_path = fixture.storage.path().parent().unwrap().join(binding.lease_name());
     let mut projection = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
     {
         use std::io::Write;
@@ -6066,7 +6280,11 @@ fn fake_agent_cancel_uncertain_poison_survives_and_is_abandon_only() {
     let recover_request = json!({"provider":"claude","action":"recover","attemptId":"bound-fence-repair"});
     let fence_bytes = fs::read(&fence_path).unwrap();
     // A live lock owner and an unresolved run each independently block release.
-    assert_eq!(login.request_with_projects(&fixture.storage, &recover_request, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired");
+    // A live run's own hold is left alone and the check goes on: runs of one
+    // agent go on side by side (ADE multi-project P5; before, a live owner was
+    // "busy, try again", review M37). The hold stays exactly as it was.
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover_request, &fixture.projects).unwrap()["error"], Value::Null);
+    assert_eq!(fs::read(&fence_path).unwrap(), fence_bytes);
     drop(owner);
     assert_eq!(login.request_with_projects(&fixture.storage, &recover_request, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired");
     assert_eq!(fs::read(&fence_path).unwrap(), fence_bytes);
@@ -6386,9 +6604,13 @@ fn dynamic_grandchild_is_durable_and_blocks_recovery_until_every_identity_is_gon
         .unwrap();
     drop(runtime);
     let recovered = AgentRuntime::blocked();
+    // A start in which the run's end cannot be proven leaves the explicit
+    // recovery, which lists the grandchild and waits for every identity.
+    crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(true));
     recovered
         .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
         .unwrap();
+    crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(false));
     let run = fixture
         .storage
         .projection_record("run", &run_id)
@@ -6439,6 +6661,242 @@ fn dynamic_grandchild_is_durable_and_blocks_recovery_until_every_identity_is_gon
     );
 }
 
+/// A writer run that keeps going until stopped, left behind by an engine that
+/// went away without ending it. Returns the run's ID and recorded processes.
+fn interrupted_writer_run(fixture: &mut Fixture, request: &str) -> (Value, String, Vec<elsecrew_core::proctree::ProcIdentity>) {
+    let snapshot = fixture.snapshot(&format!("{request}_snapshot"));
+    let chat = fixture.create_exact_claude_chat(&snapshot, "interrupted writer", &format!("{request}_chat"));
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let message_id = initial_message_id(fixture, chat_id);
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::CancelClean);
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
+    let started = runtime
+        .start_agent(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            AgentRunStartRequestV1 {
+                chat_id: chat_id.into(),
+                role_id: "coding".into(),
+                input_message_ids: vec![message_id],
+                expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+            },
+            request,
+        )
+        .unwrap();
+    let run_id = started.result["runId"].as_str().unwrap().to_string();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let identities = loop {
+        runtime.poll(&mut fixture.storage, &mut fixture.projects).unwrap();
+        let run = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+        if run["state"] == "running" && run["process_identity_internal"].as_array().is_some_and(|ids| !ids.is_empty()) {
+            break run["process_identity_internal"].as_array().unwrap().iter()
+                .map(|value| elsecrew_core::proctree::ProcIdentity { pid: value["pid"].as_u64().unwrap() as u32, start_us: value["start_us"].as_i64().unwrap() })
+                .collect::<Vec<_>>();
+        }
+        assert!(std::time::Instant::now() < deadline, "run did not start");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    drop(runtime);
+    (chat, run_id, identities)
+}
+
+fn stop_processes(identities: &[elsecrew_core::proctree::ProcIdentity]) {
+    use elsecrew_core::proctree::{ProbeResult, ProcTable, SystemProcTable};
+    for identity in identities {
+        unsafe { libc::kill(identity.pid as i32, libc::SIGKILL) };
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !identities.iter().all(|identity| matches!(SystemProcTable.probe(*identity), ProbeResult::Gone)) {
+        assert!(std::time::Instant::now() < deadline, "processes outlived the test");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+/// A copy of the app data opened while the real app still runs: the runs it
+/// calls unfinished belong to that live engine. Nothing is stopped or settled.
+#[test]
+fn a_start_on_data_whose_engine_still_runs_stops_and_settles_nothing() {
+    use elsecrew_core::proctree::{ProbeResult, ProcTable, SystemProcTable};
+    let mut fixture = Fixture::new();
+    let (_chat, run_id, identities) = interrupted_writer_run(&mut fixture, "req_live_engine");
+    let alive = |identity: &elsecrew_core::proctree::ProcIdentity| matches!(SystemProcTable.probe(*identity), ProbeResult::Alive(_));
+    // The engine that last registered here is still running (the fake agent
+    // is the same engine binary, so it stands in for it).
+    let engine = SystemProcTable.list().unwrap().into_iter()
+        .find(|entry| identities.contains(&entry.identity) && entry.comm.starts_with("elsecrew"))
+        .expect("the fixture agent is the engine binary");
+    let mut ready: elsecrew_protocol::ReadyPayloadV1 = serde_json::from_value(json!({
+        "protocolVersion": elsecrew_protocol::PROTOCOL_VERSION, "sidecarSchemaVersion": 1, "appSchemaVersion": 1,
+        "pid": engine.identity.pid, "platform": "darwin", "capabilities": [], "sidecarInstanceId": "sidecar_still_running",
+    })).unwrap();
+    fixture.storage.register_app_instance(&ready).unwrap();
+    AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+    assert!(identities.iter().all(alive), "another engine's processes are never stopped");
+    let untouched = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    assert_eq!(untouched["record"]["state"], "recoveryRequired", "and its runs are not settled");
+    assert_eq!(untouched["recovery"]["state"], "unresolved");
+    AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+    assert!(identities.iter().all(alive));
+    // The copy is opened again later: its own earlier opening registered (and
+    // ended) since, but the live engine's record still counts.
+    ready.pid = 4_000_000;
+    ready.sidecar_instance_id = "sidecar_earlier_opening_of_the_copy".into();
+    fixture.storage.register_app_instance(&ready).unwrap();
+    AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+    assert!(identities.iter().all(alive), "a later opening of the copy stops nothing either");
+    assert_eq!(fixture.storage.projection_record("run", &run_id).unwrap().unwrap(), untouched);
+    // Once that engine is gone, its unfinished runs are settled as usual.
+    stop_processes(&identities);
+    AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+    assert_eq!(fixture.storage.projection_record("run", &run_id).unwrap().unwrap()["record"]["state"], "canceled");
+}
+
+/// A recorded process ID now held by a different process (after a reboot,
+/// typically): the recorded process has certainly ended, since two live
+/// processes never share an ID. The run is settled and that other process is
+/// never signalled.
+#[test]
+fn a_recorded_process_id_now_held_by_another_process_counts_as_ended_and_is_left_alone() {
+    let mut fixture = Fixture::new();
+    let (_chat, run_id, identities) = interrupted_writer_run(&mut fixture, "req_reused_pid");
+    stop_processes(&identities);
+    // This very test process holds the recorded ID, with another start time.
+    let mut projection = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    projection.remove("last_event_sequence");
+    projection["process_identity_internal"].as_array_mut().unwrap().push(json!({"pid":std::process::id(),"start_us":1}));
+    fixture.storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
+        aggregate_type: "run", aggregate_id: run_id.clone(), operation_id: "op_test_reused_identity".into(), request_id: None, payload: projection,
+    }]).unwrap();
+    AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+    // Reaching this line means this process was not signalled.
+    let run = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    assert_eq!(run["record"]["state"], "canceled");
+    assert!(run["recovery"].is_null());
+    AgentRuntime::blocked().validate_persisted_runs(&fixture.storage).unwrap();
+}
+
+/// A workspace lock marked for any other reason is not this run's to clear:
+/// the settlement refuses and leaves the workspace's recovery mark in place.
+#[test]
+fn a_lock_marked_for_another_reason_refuses_the_settlement_and_keeps_the_mark() {
+    let mut fixture = Fixture::new();
+    let (chat, run_id, identities) = interrupted_writer_run(&mut fixture, "req_foreign_mark");
+    stop_processes(&identities);
+    crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(true));
+    AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+    crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(false));
+    let lock_id = format!("lock_{}", chat["worktreeId"].as_str().unwrap());
+    let mut lock = fixture.storage.projection_record("lock", &lock_id).unwrap().unwrap();
+    assert_eq!(lock["evidence"]["phase"], "agentRecoveryRequired");
+    lock.remove("last_event_sequence");
+    lock.insert("evidence".into(), json!({"phase":"sourceApplicationInterrupted","run_id":run_id}));
+    fixture.storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
+        aggregate_type: "lock", aggregate_id: lock_id.clone(), operation_id: "op_test_foreign_lock_mark".into(), request_id: None, payload: lock,
+    }]).unwrap();
+    let manifest_path = fixture._root.path().join("data/worktree-manifests-v1").join(format!("{}.json", chat["worktreeId"].as_str().unwrap()));
+    let lifecycle = || serde_json::from_slice::<Value>(&fs::read(&manifest_path).unwrap()).unwrap()["lifecycle"].clone();
+    let before = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+    assert_eq!(fixture.storage.projection_record("run", &run_id).unwrap().unwrap(), before);
+    assert_eq!(lifecycle(), "recoveryRequired");
+    assert_eq!(fixture.storage.projection_record("lock", &lock_id).unwrap().unwrap()["poisoned"], true);
+}
+
+/// A run that saw more processes than a record may list (a long build does)
+/// neither stops the app from opening nor loses its workspace: the records
+/// stay within their bound and the run is settled like any other.
+#[test]
+fn a_run_with_more_processes_than_a_record_lists_still_opens_and_settles() {
+    let mut fixture = Fixture::new();
+    let (_chat, run_id, identities) = interrupted_writer_run(&mut fixture, "req_many_processes");
+    stop_processes(&identities);
+    let mut projection = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    projection.remove("last_event_sequence");
+    let public = projection["barrier"]["trackedProcesses"][0].clone();
+    // Process IDs no system hands out: provably gone, like a build's children.
+    for index in 0..300u64 {
+        let pid = 3_000_000 + index;
+        projection["process_identity_internal"].as_array_mut().unwrap().push(json!({"pid":pid,"start_us":1_700_000_000_000_000i64 + index as i64}));
+        let mut entry = public.clone();
+        entry["pid"] = json!(pid);
+        projection["barrier"]["trackedProcesses"].as_array_mut().unwrap().push(entry);
+    }
+    fixture.storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
+        aggregate_type: "run", aggregate_id: run_id.clone(), operation_id: "op_test_many_processes".into(), request_id: None, payload: projection,
+    }]).unwrap();
+    // A start that cannot settle it must still succeed, with a valid recovery.
+    crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(true));
+    AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+    crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(false));
+    AgentRuntime::blocked().validate_persisted_runs(&fixture.storage).unwrap();
+    let marked = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    assert_eq!(marked["recovery"]["state"], "unresolved");
+    assert_eq!(marked["recovery"]["trackedProcesses"].as_array().unwrap().len(), 256);
+    assert!(marked["process_identity_internal"].as_array().unwrap().len() > 256);
+    // And a start that can settle it does.
+    AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+    AgentRuntime::blocked().validate_persisted_runs(&fixture.storage).unwrap();
+    let ended = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    assert_eq!(ended["record"]["state"], "canceled");
+    assert!(ended["recovery"].is_null());
+    // Proven gone: like a confirmed close, the records keep one identity.
+    assert_eq!(ended["termination"]["trackedProcesses"].as_array().unwrap().len(), 1);
+    assert_eq!(ended["process_identity_internal"].as_array().unwrap().len(), 1);
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+}
+
+/// What a dead engine left running is stopped down to the last recorded
+/// descendant before its run is settled; the durable grandchild identity is
+/// what makes that possible.
+#[test]
+fn interrupted_run_is_stopped_with_its_recorded_grandchild_before_it_is_settled() {
+    use elsecrew_core::proctree::{ProbeResult, ProcIdentity, ProcTable, SystemProcTable};
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_descendant_settled_snapshot");
+    let chat = fixture.create_exact_claude_chat(&snapshot, "settled descendant", "req_descendant_settled_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let message_id = initial_message_id(&fixture, chat_id);
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Descendant);
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
+    let started = runtime
+        .start_agent(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            AgentRunStartRequestV1 {
+                chat_id: chat_id.into(),
+                role_id: "coding".into(),
+                input_message_ids: vec![message_id],
+                expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+            },
+            "req_descendant_settled_start",
+        )
+        .unwrap();
+    let run_id = started.result["runId"].as_str().unwrap().to_string();
+    let mut identities = Vec::new();
+    for _ in 0..100 {
+        let _ = runtime.poll(&mut fixture.storage, &mut fixture.projects).unwrap();
+        let projection = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+        identities = projection["process_identity_internal"].as_array().cloned().unwrap_or_default().iter()
+            .map(|value| ProcIdentity { pid: value["pid"].as_u64().unwrap() as u32, start_us: value["start_us"].as_i64().unwrap() })
+            .collect();
+        if identities.len() >= 3 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(identities.len() >= 3, "grandchild identity must be durable");
+    drop(runtime);
+    assert!(identities.iter().any(|identity| matches!(SystemProcTable.probe(*identity), ProbeResult::Alive(_))));
+    AgentRuntime::blocked()
+        .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
+        .unwrap();
+    let run = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    assert_eq!(run["record"]["state"], "canceled");
+    assert!(run["recovery"].is_null());
+    assert_eq!(run["termination"]["trackedProcesses"].as_array().unwrap().len(), 1);
+    assert!(identities.iter().all(|identity| matches!(SystemProcTable.probe(*identity), ProbeResult::Gone)));
+}
+
 mod discard;
 
 #[test]
@@ -6453,17 +6911,17 @@ fn app_role_defaults_seed_once_and_survive_reopen() {
             "defaults_original",
         )
         .unwrap();
-    let defaults = fixture.projects.app_role_defaults().unwrap();
+    let defaults = fixture.projects.app_role_defaults(false).unwrap();
     let mut roles = defaults["roles"].clone();
     roles[0]["modelSelector"] = json!("configured-model");
     let saved = fixture
         .projects
-        .update_app_role_defaults(&fixture.storage, 1, roles.clone())
+        .update_app_role_defaults(&fixture.storage, 1, roles.clone(), None)
         .unwrap();
     assert_eq!(saved["revision"], 2);
     assert!(fixture
         .projects
-        .update_app_role_defaults(&fixture.storage, 1, roles.clone())
+        .update_app_role_defaults(&fixture.storage, 1, roles.clone(), None)
         .is_err());
     assert_eq!(
         fixture
@@ -6500,7 +6958,7 @@ fn app_role_defaults_seed_once_and_survive_reopen() {
     assert_eq!(seeded["revision"], 1);
     fixture
         .projects
-        .update_app_role_defaults(&fixture.storage, 2, defaults["roles"].clone())
+        .update_app_role_defaults(&fixture.storage, 2, defaults["roles"].clone(), None)
         .unwrap();
     assert_eq!(
         fixture
@@ -6515,13 +6973,13 @@ fn app_role_defaults_seed_once_and_survive_reopen() {
         seeded
     );
     let reopened = ProjectManager::new(fixture.storage.path()).unwrap();
-    assert_eq!(reopened.app_role_defaults().unwrap()["revision"], 3);
+    assert_eq!(reopened.app_role_defaults(false).unwrap()["revision"], 3);
     let file = fixture
         ._root
         .path()
         .join("data/application-settings-v1/role-defaults.json");
     fs::write(file, b"invalid").unwrap();
-    assert!(reopened.app_role_defaults().is_err());
+    assert!(reopened.app_role_defaults(false).is_err());
     assert_eq!(
         fixture
             .chats
@@ -6537,22 +6995,101 @@ fn app_role_defaults_seed_once_and_survive_reopen() {
 }
 
 #[test]
-fn catalog_removal_hides_and_restores_chat_without_changing_records() {
+fn streaming_workspace_check_skips_only_git_and_still_catches_a_closed_workspace() {
     let mut f = Fixture::new();
-    let snapshot = f.snapshot("req_hide_snapshot");
-    let chat = f.create_chat(&snapshot, "keep history", "req_hide_chat");
-    let chat_id = chat["chatId"].as_str().unwrap();
-    let before = f.storage.projection_record("chat", chat_id).unwrap();
-    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(chat_id), "removeChat", "req_hide").unwrap();
-    assert!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"].as_array().unwrap().is_empty());
-    assert_eq!(f.storage.projection_record("chat", chat_id).unwrap(), before);
-    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, None, "restoreChats", "req_restore").unwrap();
-    assert_eq!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"][0]["chatId"], chat_id);
-    assert_eq!(f.storage.projection_record("chat", chat_id).unwrap(), before);
+    let snapshot = f.snapshot("req_bind_snapshot");
+    let chat = f.create_chat(&snapshot, "bind", "req_bind_chat");
+    let field = |key: &str| chat[key].as_str().unwrap().to_owned();
+    let address = WorkspaceAddress { chat_id: field("chatId"), project_id: field("projectId"), worktree_id: field("worktreeId"), workspace_identity: field("workspaceIdentity") };
+    let full = f.projects.verify_workspace_for_run(&f.storage, &address).unwrap();
+    assert_eq!(f.projects.verify_workspace_binding_for_run(&f.storage, &address).unwrap(), full);
+    // Closing the workspace (manifest abandoned) fails the Git-free check at once.
+    f.projects.close_project(&mut f.storage, &f.project_id, "req_bind_close").unwrap();
+    assert!(f.projects.verify_workspace_binding_for_run(&f.storage, &address).is_err());
+    assert!(f.projects.verify_workspace_for_run(&f.storage, &address).is_err());
 }
 
 #[test]
-fn catalog_removal_of_idle_chat_does_not_hide_sibling_recovery() {
+fn deleting_the_latest_chat_closes_the_project_copy_it_shares() {
+    let mut f = Fixture::new();
+    let snapshot = f.snapshot("req_latest_snapshot");
+    let chat = f.create_chat(&snapshot, "latest", "req_latest_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let worktree_id = chat["worktreeId"].as_str().unwrap();
+    let path = std::path::PathBuf::from(f.storage.projection_record("lock", &format!("lock_{worktree_id}")).unwrap().unwrap()["worktree_path"].as_str().unwrap());
+    let deleted = f.projects.delete_chat(&mut f.storage, &f.project_id, chat_id, "req_latest_delete").unwrap();
+    assert_eq!(deleted.result["projectClosed"], true, "the project's copy was that task's workspace");
+    assert_eq!(f.projects.finish_deletions(&mut f.storage, "req_latest_finish").unwrap(), 0);
+    assert!(!path.exists(), "the deleted task's files are gone at once");
+    // The project reopens from the original and gets a fresh copy.
+    f.projects.reopen_project(&mut f.storage, &f.project_id, "req_latest_reopen").unwrap();
+    f.snapshot("req_latest_next_snapshot");
+    // Deleting the project afterwards leaves nothing pending.
+    f.projects.delete_project(&mut f.storage, &f.project_id, "req_latest_project_delete").unwrap();
+    assert_eq!(f.projects.finish_deletions(&mut f.storage, "req_latest_project_finish").unwrap(), 0);
+    assert_eq!(f.projects.finish_deletions(&mut f.storage, "req_latest_project_finish_again").unwrap(), 0);
+}
+
+#[test]
+fn deleting_a_chat_removes_its_workspace_and_never_shows_it_again() {
+    let mut f = Fixture::new();
+    let snapshot = f.snapshot("req_delete_snapshot");
+    let chat = f.create_chat(&snapshot, "delete me", "req_delete_chat");
+    // A newer snapshot means the deleted task no longer shares the project's.
+    f.snapshot("req_delete_newer_snapshot");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let worktree_id = chat["worktreeId"].as_str().unwrap();
+    let path = std::path::PathBuf::from(f.storage.projection_record("lock", &format!("lock_{worktree_id}")).unwrap().unwrap()["worktree_path"].as_str().unwrap());
+    assert!(path.exists());
+    let before = f.storage.projection_record("chat", chat_id).unwrap();
+    f.projects.delete_chat(&mut f.storage, &f.project_id, chat_id, "req_delete").unwrap();
+    assert!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"].as_array().unwrap().is_empty());
+    assert_eq!(f.storage.projection_record("chat", chat_id).unwrap(), before, "the ledger keeps its own record");
+    assert_eq!(f.projects.finish_deletions(&mut f.storage, "req_finish").unwrap(), 0);
+    assert!(!path.exists(), "the task's workspace is gone");
+    // Deleting again and finishing again are no-ops.
+    f.projects.delete_chat(&mut f.storage, &f.project_id, chat_id, "req_delete_again").unwrap();
+    assert_eq!(f.projects.finish_deletions(&mut f.storage, "req_finish_again").unwrap(), 0);
+    assert!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn deleting_a_project_removes_every_app_owned_workspace() {
+    let mut f = Fixture::new();
+    let first = f.snapshot("req_project_delete_snapshot");
+    let chat = f.create_chat(&first, "one", "req_project_delete_chat");
+    let paths: Vec<std::path::PathBuf> = f.storage.projection_records("lock").unwrap().iter()
+        .filter(|lock| lock["project_id"] == json!(f.project_id))
+        .map(|lock| std::path::PathBuf::from(lock["worktree_path"].as_str().unwrap()))
+        .filter(|path| path.exists()).collect();
+    assert!(!paths.is_empty());
+    // A discarded task in the deleted project must not break the storage lists.
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let mut discarded = f.storage.projection_record("chat", chat_id).unwrap().unwrap();
+    discarded.insert("state".into(), json!("discarded"));
+    discarded["record"]["state"] = json!("discarded");
+    f.storage.upsert_projection_record("chat", chat_id, "op_project_delete_discarded", None, discarded).unwrap();
+    f.projects.delete_project(&mut f.storage, &f.project_id, "req_project_delete").unwrap();
+    assert!(f.projects.workspace_cleanup_list(&f.storage).unwrap().result["entries"].as_array().unwrap().is_empty());
+    assert!(f.projects.chat_erasure_list(&f.storage).unwrap().result["entries"].as_array().unwrap().is_empty());
+    assert_eq!(f.projects.finish_deletions(&mut f.storage, "req_project_finish").unwrap(), 0);
+    assert!(paths.iter().all(|path| !path.exists()), "snapshots and task copies are gone");
+    let project = f.storage.projection_record("project", &f.project_id).unwrap().unwrap();
+    assert_eq!(project["project_deletion_v1"]["state"], "deleted");
+    assert!(f.storage.projection_record("chat", chat["chatId"].as_str().unwrap()).unwrap().is_some());
+    // The tombstoned ledger still passes full reopen verification, and the
+    // same folder then opens as a fresh project.
+    f.storage.checkpoint().unwrap();
+    let database = f.storage.path().to_path_buf();
+    drop(f.storage);
+    f.storage = Storage::open_for_admission(&database, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+    f.projects = ProjectManager::new(&database).unwrap();
+    let reopened = f.projects.open_project(&mut f.storage, f.source.to_str().unwrap(), "req_project_readd").unwrap();
+    assert_ne!(reopened.result["projectId"], json!(f.project_id));
+}
+
+#[test]
+fn deleting_any_chat_or_project_leaves_ledger_records_intact() {
     let mut f = Fixture::new();
     let snapshot = f.snapshot("req_sibling_snapshot");
     let healthy = f.create_chat(&snapshot, "healthy", "req_healthy_chat");
@@ -6563,69 +7100,83 @@ fn catalog_removal_of_idle_chat_does_not_hide_sibling_recovery() {
     let mut record = f.storage.projection_record("chat", recovery_id).unwrap().unwrap();
     record.insert("state".into(), json!("recoveryRequired"));
     record["record"]["state"] = json!("recoveryRequired");
-    f.storage.upsert_projection_record("chat", recovery_id, "op_sibling_recovery", None, record.clone()).unwrap();
-    let record = f.storage.projection_record("chat", recovery_id).unwrap().unwrap();
-    let sibling_lock_id = format!("lock_{}", recovery["worktreeId"].as_str().unwrap());
-    let mut lock = f.storage.projection_record("lock", &sibling_lock_id).unwrap().unwrap();
+    f.storage.upsert_projection_record("chat", recovery_id, "op_sibling_recovery", None, record).unwrap();
+    let lock_id = format!("lock_{}", recovery["worktreeId"].as_str().unwrap());
+    let mut lock = f.storage.projection_record("lock", &lock_id).unwrap().unwrap();
     lock.insert("poisoned".into(), json!(true));
-    f.storage.upsert_projection_record("lock", &sibling_lock_id, "op_sibling_poison", None, lock).unwrap();
-    let healthy_lock_id = format!("lock_{}", healthy["worktreeId"].as_str().unwrap());
-    let healthy_lock = f.storage.projection_record("lock", &healthy_lock_id).unwrap().unwrap();
-    let mut unknown = healthy_lock.clone();
-    unknown.insert("lock_id".into(), json!("lock_unknown"));
-    unknown.insert("poisoned".into(), json!(true));
-    f.storage.upsert_projection_record("lock", "lock_unknown", "op_unknown_lock", None, unknown.clone()).unwrap();
-    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(healthy_id), "removeChat", "req_unknown_lock").is_err());
-    unknown.insert("poisoned".into(), json!(false));
-    f.storage.upsert_projection_record("lock", "lock_unknown", "op_unknown_reset", None, unknown).unwrap();
-    let mut shared = record.clone();
-    shared.insert("worktree_id".into(), healthy["worktreeId"].clone());
-    f.storage.upsert_projection_record("chat", recovery_id, "op_shared_workspace", None, shared).unwrap();
-    let mut poisoned = healthy_lock.clone(); poisoned.insert("poisoned".into(), json!(true));
-    f.storage.upsert_projection_record("lock", &healthy_lock_id, "op_shared_poison", None, poisoned).unwrap();
-    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(healthy_id), "removeChat", "req_shared_poison").is_err());
-    f.storage.upsert_projection_record("lock", &healthy_lock_id, "op_shared_reset", None, healthy_lock).unwrap();
-    f.storage.upsert_projection_record("chat", recovery_id, "op_chat_reset", None, record).unwrap();
+    f.storage.upsert_projection_record("lock", &lock_id, "op_sibling_poison", None, lock).unwrap();
     let record = f.storage.projection_record("chat", recovery_id).unwrap().unwrap();
-    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(healthy_id), "removeChat", "req_hide_healthy").unwrap();
+    // Removal is the user's call: recovery, poisoned locks and siblings never block it.
+    f.projects.delete_chat(&mut f.storage, &f.project_id, healthy_id, "req_hide_healthy").unwrap();
     let page = f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap();
     assert_eq!(page["items"].as_array().unwrap().len(), 1);
     assert_eq!(page["items"][0]["chatId"], recovery_id);
+    f.projects.delete_chat(&mut f.storage, &f.project_id, recovery_id, "req_hide_recovery").unwrap();
+    assert!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"].as_array().unwrap().is_empty());
+    // Hiding never rewrites the chat's own record.
     assert_eq!(f.storage.projection_record("chat", recovery_id).unwrap().unwrap(), record);
-    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(recovery_id), "removeChat", "req_hide_recovery").is_err());
-    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", "req_hide_all").is_err());
+    assert!(f.projects.delete_chat(&mut f.storage, &f.project_id, "chat_missing", "req_missing").is_err());
+    f.projects.delete_project(&mut f.storage, &f.project_id, "req_hide_all").unwrap();
+    // A poisoned workspace that needs recovery is never erased behind the user's back.
+    assert!(f.projects.finish_deletions(&mut f.storage, "req_finish_poisoned").unwrap() >= 1);
+    let poisoned = f.storage.projection_record("lock", &lock_id).unwrap().unwrap();
+    assert!(std::path::Path::new(poisoned["worktree_path"].as_str().unwrap()).exists());
 }
 
 #[test]
-fn catalog_removal_refuses_runs_locks_and_nonmember_chat() {
+fn deleting_despite_unfinished_runs_waits_with_the_files() {
     let mut f = Fixture::new();
     let snapshot = f.snapshot("req_guard_snapshot");
     let chat = f.create_chat(&snapshot, "guard removal", "req_guard_chat");
     let chat_id = chat["chatId"].as_str().unwrap();
-    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some("chat_missing"), "removeChat", "req_missing").is_err());
     let cases: Value = serde_json::from_str(include_str!("../../../../tests/fixtures/m5/g5-v1/cases.json")).unwrap();
     let mut run = cases["valid"].as_array().unwrap().iter().find(|case| case["name"] == "valid-cancel-transition").unwrap()["value"]["after"].clone();
     for field in ["chatId", "taskId", "worktreeId", "workspaceIdentity"] { run[field] = chat[field].clone(); }
     run["runId"] = json!("run_hide_guard");
     persist_run(&mut f.storage, &run, &snapshot, None, "op_hide_guard").unwrap();
     let original = run_projection_record(&f.storage, "run_hide_guard").unwrap();
-    for state in ["preparing", "running", "cancelling", "recoveryRequired"] {
-        let mut changed = original.clone(); changed.insert("state".into(), json!(state)); changed["record"]["state"] = json!(state);
-        f.storage.upsert_projection_record("run", "run_hide_guard", &format!("op_hide_{state}"), None, changed).unwrap();
-        assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(chat_id), "removeChat", &format!("req_hide_{state}")).is_err());
-    }
-    let mut unresolved = original.clone(); unresolved.insert("recovery".into(), json!({"state":"unresolved"}));
-    f.storage.upsert_projection_record("run", "run_hide_guard", "op_hide_unresolved", None, unresolved).unwrap();
-    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", "req_hide_unresolved").is_err());
-    f.storage.upsert_projection_record("run", "run_hide_guard", "op_hide_terminal", None, original).unwrap();
+    let mut running = original.clone(); running.insert("state".into(), json!("running")); running["record"]["state"] = json!("running");
+    f.storage.upsert_projection_record("run", "run_hide_guard", "op_hide_running", None, running.clone()).unwrap();
     let lock_id = format!("lock_{}", chat["worktreeId"].as_str().unwrap());
-    let lock = f.storage.projection_record("lock", &lock_id).unwrap().unwrap();
-    for (field, value) in [("poisoned", json!(true)), ("recovery_required", json!(true)), ("writer_run_id", json!("run_hide_guard"))] {
-        let mut changed = lock.clone(); changed.insert(field.into(), value);
-        f.storage.upsert_projection_record("lock", &lock_id, &format!("op_hide_lock_{field}"), None, changed).unwrap();
-        assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", &format!("req_hide_lock_{field}")).is_err());
-    }
-    assert_eq!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"][0]["chatId"], chat_id);
+    let mut lock = f.storage.projection_record("lock", &lock_id).unwrap().unwrap();
+    lock.insert("writer_run_id".into(), json!("run_hide_guard"));
+    f.storage.upsert_projection_record("lock", &lock_id, "op_hide_lock", None, lock).unwrap();
+    f.projects.delete_chat(&mut f.storage, &f.project_id, chat_id, "req_hide_running").unwrap();
+    assert!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"].as_array().unwrap().is_empty());
+    // The run keeps its own record; its owner still decides how it ends.
+    let kept = run_projection_record(&f.storage, "run_hide_guard").unwrap();
+    assert_eq!((&kept["state"], &kept["record"]), (&running["state"], &running["record"]));
+    f.projects.delete_project(&mut f.storage, &f.project_id, "req_hide_project").unwrap();
+    // Files wait until the run has provably exited.
+    assert_eq!(f.projects.finish_deletions(&mut f.storage, "req_finish_running").unwrap(), 2);
+    let held = f.storage.projection_record("lock", &lock_id).unwrap().unwrap();
+    assert!(std::path::Path::new(held["worktree_path"].as_str().unwrap()).exists());
+}
+
+#[test]
+fn deleted_leftover_recovery_stops_blocking_but_live_runs_still_do() {
+    let mut f = Fixture::new();
+    let snapshot = f.snapshot("req_blocker_snapshot");
+    let chat = f.create_chat(&snapshot, "blocker", "req_blocker_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let cases: Value = serde_json::from_str(include_str!("../../../../tests/fixtures/m5/g5-v1/cases.json")).unwrap();
+    let mut run = cases["valid"].as_array().unwrap().iter().find(|case| case["name"] == "valid-cancel-transition").unwrap()["value"]["after"].clone();
+    for field in ["chatId", "taskId", "worktreeId", "workspaceIdentity"] { run[field] = chat[field].clone(); }
+    run["runId"] = json!("run_blocker");
+    persist_run(&mut f.storage, &run, &snapshot, None, "op_blocker").unwrap();
+    let original = run_projection_record(&f.storage, "run_blocker").unwrap();
+    let with_state = |state: &str| { let mut changed = original.clone(); changed.insert("state".into(), json!(state)); changed["record"]["state"] = json!(state); changed };
+    f.storage.upsert_projection_record("run", "run_blocker", "op_blocker_recovery", None, with_state("recoveryRequired")).unwrap();
+    let lock_id = format!("lock_{}", chat["worktreeId"].as_str().unwrap());
+    let mut lock = f.storage.projection_record("lock", &lock_id).unwrap().unwrap();
+    lock.insert("poisoned".into(), json!(true));
+    f.storage.upsert_projection_record("lock", &lock_id, "op_blocker_lock", None, lock).unwrap();
+    let blockers = f.storage.blocker_ids().unwrap();
+    assert!(blockers.contains(&"run:run_blocker".to_string()) && blockers.contains(&format!("lock:{lock_id}")));
+    f.projects.delete_chat(&mut f.storage, &f.project_id, chat_id, "req_blocker_hide").unwrap();
+    assert!(f.storage.blocker_ids().unwrap().is_empty(), "a deleted task's leftover recovery must not hold up quitting");
+    f.storage.upsert_projection_record("run", "run_blocker", "op_blocker_running", None, with_state("running")).unwrap();
+    assert!(f.storage.blocker_ids().unwrap().contains(&"run:run_blocker".to_string()), "a live run still counts until it ends");
 }
 
 #[test]
@@ -6640,12 +7191,12 @@ fn coordinator_v2_preserves_legacy_snapshot_and_runs_read_only_to_waiting_for_us
         {"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},
         {"roleId":"review","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"}
     ]);
-    let settings = f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, roles.clone(), "req_coordinator_settings").unwrap();
+    let settings = f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, roles.clone(), None, "req_coordinator_settings").unwrap();
     assert_eq!(settings["schemaVersion"], 2);
-    assert!(f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, roles.clone(), "req_coordinator_stale").is_err());
+    assert!(f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, roles.clone(), None, "req_coordinator_stale").is_err());
     let mut invalid = roles.clone();
     invalid[0]["permission"] = json!("workspaceWrite");
-    assert!(f.chats.update_role_settings(&mut f.storage, &f.project_id, 2, invalid, "req_coordinator_write").is_err());
+    assert!(f.chats.update_role_settings(&mut f.storage, &f.project_id, 2, invalid, None, "req_coordinator_write").is_err());
     let snapshot = f.snapshot("req_coordinator_snapshot");
     let chat = f.chats.create_chat(&mut f.storage, &f.projects, snapshot["preparationId"].as_str().unwrap(), &f.project_id, snapshot["worktreeId"].as_str().unwrap(), snapshot["workspaceIdentity"].as_str().unwrap(), "Explain this project", 2, "req_coordinator_chat").unwrap().result;
     assert_eq!(chat["schemaVersion"], 2);
@@ -6654,7 +7205,7 @@ fn coordinator_v2_preserves_legacy_snapshot_and_runs_read_only_to_waiting_for_us
     assert_eq!(old_detail["chat"], old);
     let mut changed = roles.clone();
     changed[0]["modelSelector"] = json!("future-model");
-    f.chats.update_role_settings(&mut f.storage, &f.project_id, 2, changed, "req_coordinator_edit").unwrap();
+    f.chats.update_role_settings(&mut f.storage, &f.project_id, 2, changed, None, "req_coordinator_edit").unwrap();
     let chat_id = chat["chatId"].as_str().unwrap();
     let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::CleanReadOnly);
     let capability = runtime.get_capabilities("claude-code", true).unwrap();
@@ -6677,7 +7228,7 @@ fn coordinator_v2_preserves_legacy_snapshot_and_runs_read_only_to_waiting_for_us
 #[test]
 fn app_defaults_preserve_coordinator_and_four_team_roles() {
     let mut fixture = Fixture::with_durable_output(true);
-    let original = fixture.projects.app_role_defaults().unwrap();
+    let original = fixture.projects.app_role_defaults(false).unwrap();
     let legacy = original["roles"].as_array().unwrap();
     let mut coordinator = legacy[0].clone();
     coordinator["roleId"] = json!("coordinator");
@@ -6686,16 +7237,16 @@ fn app_defaults_preserve_coordinator_and_four_team_roles() {
     design["modelSelector"] = json!("design-model");
     let roles = json!([coordinator, legacy[0], design, legacy[1], legacy[2]]);
     let legacy_fixture = Fixture::new();
-    let before = legacy_fixture.projects.app_role_defaults().unwrap();
-    assert!(legacy_fixture.projects.update_app_role_defaults(&legacy_fixture.storage, 1, roles.clone()).is_err());
-    assert_eq!(legacy_fixture.projects.app_role_defaults().unwrap(), before);
+    let before = legacy_fixture.projects.app_role_defaults(false).unwrap();
+    assert!(legacy_fixture.projects.update_app_role_defaults(&legacy_fixture.storage, 1, roles.clone(), None).is_err());
+    assert_eq!(legacy_fixture.projects.app_role_defaults(false).unwrap(), before);
     let saved = fixture
         .projects
-        .update_app_role_defaults(&fixture.storage, 1, roles.clone())
+        .update_app_role_defaults(&fixture.storage, 1, roles.clone(), None)
         .unwrap();
     assert_eq!(saved["schemaVersion"], 2);
     assert_eq!(
-        fixture.projects.app_role_defaults().unwrap()["roles"],
+        fixture.projects.app_role_defaults(false).unwrap()["roles"],
         roles
     );
     let seeded = fixture
@@ -6730,4 +7281,554 @@ fn project_automation_consent_is_explicit_durable_and_revocable() {
     let database = f.storage.path().to_owned();
     drop(f.storage);
     f.storage = Storage::open(&database).unwrap();
+}
+
+#[test]
+fn custom_roles_v3_seed_update_snapshot_and_legacy_gate() {
+    let mut f = Fixture::with_durable_output(true);
+    // Missing app defaults on V13 storage seed the default V3 team.
+    let seeded = f.chats.default_role_settings(&mut f.storage, &f.projects, &f.project_id, "req_v3_seed").unwrap();
+    assert_eq!(seeded["schemaVersion"], 3);
+    let ids: Vec<_> = seeded["roles"].as_array().unwrap().iter().map(|role| role["roleId"].as_str().unwrap().to_owned()).collect();
+    assert_eq!(ids, ["coordinator", "planning", "design", "coding", "review"]);
+    assert_eq!(seeded["roleDefinitions"][0]["name"], "총괄");
+    validate_g5_payload_v1("projectRoleSettings", &seeded).unwrap();
+    // A custom team: renamed read-only planning may write, new roles are allowed.
+    let profile = |id: &str, permission: &str| json!({"roleId":id,"runtime":"codex","modelSelector":"fixture-codex","reasoningEffort":"medium","permission":permission});
+    let roles = json!([profile("coordinator", "readOnly"), profile("research", "readOnly"), profile("planning", "workspaceWrite")]);
+    let definitions = json!([
+        {"roleId":"coordinator","name":"리드","responsibility":"Delegates."},
+        {"roleId":"research","name":"리서치","responsibility":"Investigates."},
+        {"roleId":"planning","name":"Implementer","responsibility":"Edits the copy.\nRuns checks."}
+    ]);
+    // Definitions are required for non-legacy role sets and must follow role order.
+    assert!(f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, roles.clone(), None, "req_v3_missing_definitions").is_err());
+    let mut reordered = definitions.clone();
+    reordered.as_array_mut().unwrap().swap(1, 2);
+    assert!(f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, roles.clone(), Some(reordered), "req_v3_reordered").is_err());
+    // Saving refuses a member posing as the coordinator, a duplicate or a direction override (R4),
+    // for the project's team and for the app defaults alike.
+    for name in ["리드", "총괄", "리서치", "리\u{202e}서치"] {
+        let mut posing = definitions.clone();
+        posing[2]["name"] = json!(name);
+        assert!(f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, roles.clone(), Some(posing.clone()), "req_v3_posing").is_err(), "{name}");
+        assert!(f.projects.update_app_role_defaults(&f.storage, 1, roles.clone(), Some(posing)).is_err(), "{name}");
+    }
+    let updated = f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, roles.clone(), Some(definitions.clone()), "req_v3_update").unwrap();
+    assert_eq!(updated["schemaVersion"], 3);
+    assert_eq!(updated["revision"], 2);
+    let snapshot = f.snapshot("req_v3_snapshot");
+    let chat = f.chats.create_chat(&mut f.storage, &f.projects, snapshot["preparationId"].as_str().unwrap(), &f.project_id, snapshot["worktreeId"].as_str().unwrap(), snapshot["workspaceIdentity"].as_str().unwrap(), "Investigate then build", 2, "req_v3_chat").unwrap().result;
+    assert_eq!(chat["schemaVersion"], 3);
+    assert_eq!(chat["roleSnapshots"], roles);
+    assert_eq!(chat["roleDefinitions"], definitions);
+    // Later setting changes do not retrofit the chat snapshot.
+    f.chats.update_role_settings(&mut f.storage, &f.project_id, 2, seeded["roles"].clone(), Some(seeded["roleDefinitions"].clone()), "req_v3_restore").unwrap();
+    let detail = f.chats.get_chat(&f.storage, chat["chatId"].as_str().unwrap(), 0, None, 10, false).unwrap();
+    assert_eq!(detail["chat"]["roleDefinitions"], definitions);
+    // V3 settings and chat snapshots survive a durable reopen with full ledger verification.
+    let database = f.storage.path().to_owned();
+    drop(f.storage);
+    f.storage = Storage::open_durable_output_for_test(&database).unwrap();
+    assert!(f.storage.custom_roles_enabled().unwrap());
+    let reopened = f.chats.get_chat(&f.storage, chat["chatId"].as_str().unwrap(), 0, None, 10, false).unwrap();
+    assert_eq!(reopened["chat"], detail["chat"]);
+    assert_eq!(f.chats.default_role_settings(&mut f.storage, &f.projects, &f.project_id, "req_v3_reopen").unwrap()["revision"], 3);
+    // Fixture scenarios are keyed by fixed V1 role names and never run in a V3 chat.
+    #[cfg(target_os = "macos")]
+    assert!(f.chats.start_fixture(&mut f.storage, &mut f.projects, chat["chatId"].as_str().unwrap(), "planning", "planning-success", "req_v3_fixture").err().unwrap().detail.contains("legacy fixed-role"));
+    // App defaults accept V3 and remain bounded.
+    let saved = f.projects.update_app_role_defaults(&f.storage, 1, roles.clone(), Some(definitions.clone())).unwrap();
+    assert_eq!(saved["schemaVersion"], 3);
+    assert_eq!(f.projects.app_role_defaults(true).unwrap()["roleDefinitions"], definitions);
+    // Storage below V13 rejects V3 role sets before writing anything.
+    let mut legacy = Fixture::new();
+    legacy.chats.default_role_settings(&mut legacy.storage, &legacy.projects, &legacy.project_id, "req_legacy_seed").unwrap();
+    assert!(legacy.chats.update_role_settings(&mut legacy.storage, &legacy.project_id, 1, roles.clone(), Some(definitions.clone()), "req_legacy_v3").is_err());
+    assert!(legacy.projects.update_app_role_defaults(&legacy.storage, 1, roles, Some(definitions)).is_err());
+}
+
+/// A V3 chat record carries its role definitions, so one chat event can be far
+/// larger than a fixed 100-row compaction step's byte budget allows. Compaction
+/// must narrow the armed step to what fits instead of failing the whole job.
+#[test]
+fn compaction_fits_large_v3_chat_records_into_bounded_steps() {
+    use crate::storage_lifetime::compaction_writer::{CompactionStepResult, CompactionTarget};
+    let mut f = Fixture::with_durable_output(true);
+    f.chats.default_role_settings(&mut f.storage, &f.projects, &f.project_id, "req_big_v3_seed").unwrap();
+    let ids = ["coordinator", "planning", "design", "coding", "review", "research", "writing", "support"];
+    let roles: Vec<Value> = ids.iter().map(|id| json!({"roleId":id,"runtime":"codex","modelSelector":"fixture-codex","reasoningEffort":"medium","permission":"readOnly"})).collect();
+    let definitions: Vec<Value> = ids.iter().map(|id| json!({"roleId":id,"name":id,"responsibility":"r".repeat(elsecrew_protocol::run_recovery_v1::G5_ROLE_RESPONSIBILITY_MAX_BYTES_V3)})).collect();
+    f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, json!(roles), Some(json!(definitions)), "req_big_v3_roles").unwrap();
+    let snapshot = f.snapshot("req_big_v3_snapshot");
+    let chat = f.chats.create_chat(&mut f.storage, &f.projects, snapshot["preparationId"].as_str().unwrap(), &f.project_id, snapshot["worktreeId"].as_str().unwrap(), snapshot["workspaceIdentity"].as_str().unwrap(), "Long V3 chat", 2, "req_big_v3_chat").unwrap().result;
+    let chat_id = chat["chatId"].as_str().unwrap().to_string();
+    let record = chat_projection_record(&f.storage, &chat_id).unwrap()["record"].clone();
+    assert!(serde_json::to_vec(&record).unwrap().len() > 16_000, "fixture must exceed the fixed-step budget");
+    for index in 0..1000 {
+        persist_chat_state(&mut f.storage, &record, &format!("op_big_v3_{index}")).unwrap();
+    }
+    let materialize = |storage: &mut Storage| {
+        while storage.materialization_requires_work().unwrap() {
+            storage.run_materialization_scheduler_step().unwrap();
+        }
+    };
+    materialize(&mut f.storage);
+    f.storage.checkpoint().unwrap();
+    let target = CompactionTarget { aggregate_type: "chat".into(), aggregate_id: chat_id.clone() };
+    let mut narrowed = false;
+    let mut finalized = false;
+    for _ in 0..5000 {
+        match f.storage.run_compaction_scheduler_step(&target).unwrap() {
+            CompactionStepResult::Finalized { .. } => {
+                finalized = true;
+                break;
+            }
+            CompactionStepResult::ArmedWorked { after_plan_ordinal, .. } => {
+                narrowed |= after_plan_ordinal % 100 != 0 && after_plan_ordinal != 1001;
+            }
+            _ => {}
+        }
+    }
+    assert!(finalized, "large V3 chat compaction did not finalize");
+    assert!(narrowed, "steps must have been narrowed below the fixed row maximum");
+    let database = f.storage.path().to_owned();
+    drop(f.storage);
+    f.storage = Storage::open_durable_output_for_test(&database).unwrap();
+    assert_eq!(f.chats.get_chat(&f.storage, &chat_id, 0, None, 10, false).unwrap()["chat"]["roleDefinitions"], json!(definitions));
+}
+
+/// Position of a role in a chat snapshot; durable fixtures now seed the V3 default team.
+fn role_index(chat: &Value, role_id: &str) -> usize {
+    chat["roleSnapshots"].as_array().unwrap().iter().position(|role| role["roleId"] == role_id).unwrap()
+}
+
+#[test]
+fn built_in_team_names_no_model_and_incomplete_teams_cannot_prepare_a_chat() {
+    let _product = crate::chat::ProductDefaultsForTest::enable();
+    let defaults = crate::chat::default_settings_v3("app_defaults", 1);
+    assert!(defaults["roles"].as_array().unwrap().iter().all(|role| role["modelSelector"] == "" && role["reasoningEffort"].is_null()));
+    assert!(crate::chat::has_unselected_model(&defaults));
+    // 2026-11-13 defaults: design and review on Codex, the rest on Claude Code;
+    // everyone but the coordinator writes in the isolated copy.
+    let pick = |id: &str| defaults["roles"].as_array().unwrap().iter().find(|role| role["roleId"] == id).unwrap().clone();
+    for (id, runtime, permission) in [("coordinator", "claude-code", "readOnly"), ("planning", "claude-code", "workspaceWrite"),
+        ("design", "codex", "workspaceWrite"), ("coding", "claude-code", "workspaceWrite"), ("review", "codex", "workspaceWrite")] {
+        assert_eq!((pick(id)["runtime"].as_str().unwrap(), pick(id)["permission"].as_str().unwrap()), (runtime, permission), "{id}");
+    }
+    elsecrew_protocol::run_recovery_v1::validate_g5_payload_v1("projectRoleSettings", &defaults).unwrap();
+    drop(_product);
+
+    // V3 settings (and so unselected models) need V13 storage.
+    let mut fixture = Fixture::with_durable_output(true);
+    let project_id = fixture.project_id.clone();
+    let settings = fixture.chats.default_role_settings(&mut fixture.storage, &fixture.projects, &project_id, "req_defaults").unwrap();
+    assert!(!crate::chat::has_unselected_model(&settings));
+    let mut roles = crate::chat::complete_default_roles_for_test();
+    roles[2]["modelSelector"] = json!("");
+    roles[2]["reasoningEffort"] = Value::Null;
+    let definitions = defaults["roleDefinitions"].clone();
+    fixture.chats.update_role_settings(&mut fixture.storage, &project_id, 1, roles, Some(definitions), "req_unselected").unwrap();
+    let before = super::prepared_workspace_records(&fixture.storage).unwrap().len();
+    let refused = fixture.chats.prepare_chat_workspace(&mut fixture.storage, &mut fixture.projects, &project_id, "req_refused").unwrap_err();
+    assert_eq!(refused.kind, "dirtyConflict");
+    assert_eq!(super::prepared_workspace_records(&fixture.storage).unwrap().len(), before, "no snapshot may be prepared for an incomplete team");
+}
+
+#[test]
+fn saved_placeholder_sol_reads_as_unselected_in_v3_only() {
+    let mut fixture = Fixture::with_durable_output(true);
+    let project_id = fixture.project_id.clone();
+    fixture.chats.default_role_settings(&mut fixture.storage, &fixture.projects, &project_id, "req_seed").unwrap();
+    // Early builds stored the fixture name `sol`; no provider lists it.
+    let mut roles = crate::chat::complete_default_roles_for_test();
+    roles[1]["modelSelector"] = json!("sol");
+    let definitions = crate::chat::default_settings_v3("app_defaults", 1)["roleDefinitions"].clone();
+    fixture.chats.update_role_settings(&mut fixture.storage, &project_id, 1, roles, Some(definitions), "req_sol").unwrap();
+    let read = fixture.chats.default_role_settings(&mut fixture.storage, &fixture.projects, &project_id, "req_read").unwrap();
+    assert_eq!(read["roles"][1]["modelSelector"], "");
+    assert!(read["roles"][1]["reasoningEffort"].is_null());
+    assert_eq!(read["roles"][0]["modelSelector"], "fixture-codex");
+    assert!(fixture.chats.prepare_chat_workspace(&mut fixture.storage, &mut fixture.projects, &project_id, "req_refused").is_err());
+    // Legacy V1/V2 fixture sets keep `sol` for the demo runtime.
+    let legacy = crate::chat::settings_value("p", 1);
+    assert_eq!(crate::chat::without_placeholder_models(legacy.clone()), legacy);
+}
+
+#[test]
+fn each_task_gets_its_own_copy_and_the_project_keeps_its_own() {
+    let mut fixture = Fixture::new();
+    // The first task arrives before any project view: it is the older shape
+    // where the project pointed at a task's copy.
+    let first = fixture.snapshot("req_first_task");
+    fixture.create_chat(&first, "first", "req_first_chat");
+    let project = fixture.storage.projection_record("project", &fixture.project_id).unwrap().unwrap();
+    assert_eq!(project["worktree_id"], first["worktreeId"]);
+    // Opening the project view never reuses that task's copy.
+    let view = fixture.projects.create_worktree(&mut fixture.storage, &fixture.project_id, "req_view").unwrap().result;
+    assert_ne!(view["worktreeId"], first["worktreeId"]);
+    // A later task gets a fresh copy; the project keeps pointing at its own.
+    let second = fixture.snapshot("req_second_task");
+    fixture.create_chat(&second, "second", "req_second_chat");
+    assert_ne!(second["worktreeId"], view["worktreeId"]);
+    let project = fixture.storage.projection_record("project", &fixture.project_id).unwrap().unwrap();
+    assert_eq!(project["worktree_id"], view["worktreeId"]);
+    assert_eq!(project["lifecycle"], "active");
+    let again = fixture.projects.create_worktree(&mut fixture.storage, &fixture.project_id, "req_view_again").unwrap().result;
+    assert_eq!(again, view);
+    // The task copy itself stays valid through its own address.
+    fixture.projects.verify_unbound_workspace(&fixture.storage, &fixture.project_id, second["worktreeId"].as_str().unwrap(), second["workspaceIdentity"].as_str().unwrap()).unwrap();
+    // The whole history replays cleanly when the app starts again.
+    let database = fixture.storage.path().to_path_buf();
+    drop(fixture.projects);
+    drop(fixture.storage);
+    fixture.storage = Storage::open(&database).unwrap();
+    fixture.projects = ProjectManager::new(&database).unwrap();
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+    assert_eq!(fixture.projects.create_worktree(&mut fixture.storage, &fixture.project_id, "req_view_after_restart").unwrap().result, view);
+}
+
+#[test]
+fn a_stuck_task_does_not_block_new_copies_but_an_update_of_the_original_does() {
+    let mut fixture = Fixture::new();
+    fixture.projects.create_worktree(&mut fixture.storage, &fixture.project_id, "req_view").unwrap();
+    let task = fixture.snapshot("req_task");
+    fixture.create_chat(&task, "stuck", "req_task_chat");
+    let lock_id = format!("lock_{}", task["worktreeId"].as_str().unwrap());
+    let mut lock = fixture.storage.projection_record("lock", &lock_id).unwrap().unwrap();
+    lock.insert("recovery_required".into(), json!(true));
+    fixture.storage.upsert_projection_record("lock", &lock_id, "op_test_stuck_task", Some("req_stuck"), lock.clone()).unwrap();
+    assert!(!fixture.storage.blocker_ids().unwrap().is_empty());
+    // The stuck task's own recovery stays inside its copy.
+    fixture.snapshot("req_next_task");
+    fixture.projects.create_worktree(&mut fixture.storage, &fixture.project_id, "req_view_again").unwrap();
+    // A lock guarding an update of the original keeps blocking.
+    lock.insert("evidence".into(), json!({"phase":"applicationPrepared","applicationId":format!("application_{}", "a".repeat(32))}));
+    fixture.storage.upsert_projection_record("lock", &lock_id, "op_test_application_lock", Some("req_app"), lock).unwrap();
+    let refused = fixture.chats.prepare_chat_workspace(&mut fixture.storage, &mut fixture.projects, &fixture.project_id, "req_refused_task").unwrap_err();
+    assert_eq!(refused.kind, "recoveryRequired");
+    assert!(refused.detail.contains("snapshot export"));
+}
+
+/// A fake Claude run that could not prove its end (so it needs recovery) with
+/// a real provider sign-in hold bound to it. No provider, account or model.
+#[cfg(target_os = "macos")]
+struct StoppedRunWithHold {
+    runtime: AgentRuntime,
+    identity: RunIdentity,
+    binding: crate::provider_run_binding::RunFenceBinding,
+    fence_path: std::path::PathBuf,
+}
+
+#[cfg(target_os = "macos")]
+impl StoppedRunWithHold {
+    fn new(fixture: &mut Fixture, tag: &str) -> Self {
+        let executable = sidecar_binary();
+        assert!(executable.is_file(), "build the sidecar binary for process gate");
+        let snapshot = fixture.snapshot(&format!("req_{tag}_snapshot"));
+        let chat = fixture.create_exact_claude_chat(&snapshot, tag, &format!("req_{tag}_chat"));
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let message_id = initial_message_id(fixture, chat_id);
+        let mut runtime = AgentRuntime::fake(executable, FakeScenario::CancelUncertain);
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
+        let started = runtime
+            .start_agent(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                AgentRunStartRequestV1 {
+                    chat_id: chat_id.into(),
+                    role_id: "coding".into(),
+                    input_message_ids: vec![message_id],
+                    expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+                },
+                &format!("req_{tag}_start"),
+            )
+            .unwrap();
+        let run_id = started.result["runId"].as_str().unwrap().to_string();
+        let identity = RunIdentity {
+            chat_id: chat_id.into(),
+            task_id: chat["taskId"].as_str().unwrap().into(),
+            project_id: chat["projectId"].as_str().unwrap().into(),
+            worktree_id: chat["worktreeId"].as_str().unwrap().into(),
+            workspace_identity: chat["workspaceIdentity"].as_str().unwrap().into(),
+            run_id: run_id.clone(),
+        };
+        let canceled = runtime.cancel(&mut fixture.storage, &mut fixture.projects, &identity).unwrap();
+        assert_eq!(canceled.result["outcome"], "recoveryRequired");
+        let profile = crate::provider_claude_profile::ClaudeProfileBinding::from_storage(&fixture.storage).unwrap();
+        let mut owner = crate::provider_login_process::LoginProcess::reserve_claude_owned(profile).unwrap();
+        owner.retain_fence_before_launch(&run_id).unwrap();
+        let binding = owner.bind_run_fence(&run_id).unwrap();
+        let fence_path = fixture.storage.path().parent().unwrap().join(binding.lease_name());
+        let mut projection = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+        {
+            use std::io::Write;
+            let mut fence = fs::OpenOptions::new().append(true).open(&fence_path).unwrap();
+            for process in projection["process_identity_internal"].as_array().unwrap() {
+                writeln!(fence, "{} {}", process["pid"], process["start_us"]).unwrap();
+            }
+            fence.sync_all().unwrap();
+        }
+        projection.remove("last_event_sequence");
+        projection.insert("provider_run_fence".into(), binding.to_value());
+        fixture.storage.upsert_projection_records_atomic(vec![crate::storage::ProjectionUpsert {
+            aggregate_type: "run", aggregate_id: run_id, operation_id: format!("test_bind_{tag}_fence"), request_id: None, payload: projection,
+        }]).unwrap();
+        owner.finish().unwrap();
+        drop(owner);
+        Self { runtime, identity, binding, fence_path }
+    }
+
+    fn resolve(&mut self, fixture: &mut Fixture, request_id: &str) {
+        let identity = &self.identity;
+        let recovery_id = fixture.storage.projection_record("run", &identity.run_id).unwrap().unwrap()["recovery"]["recoveryId"].clone();
+        let resolved = self.runtime.resolve_recovery(&mut fixture.storage, &mut fixture.projects, &json!({
+            "recoveryId":recovery_id,"chatId":identity.chat_id,"taskId":identity.task_id,"projectId":identity.project_id,
+            "worktreeId":identity.worktree_id,"workspaceIdentity":identity.workspace_identity,"runId":identity.run_id,
+            "expectedRevision":1,"resolution":"abandon",
+        }), request_id).unwrap();
+        assert_eq!(resolved["outcome"], "resolvedAbandoned");
+    }
+
+    /// Records the hold as if it had been written before a restart of the
+    /// computer under which the volume got another device number.
+    fn renumber_device(&mut self, fixture: &mut Fixture) {
+        let mut renumbered = self.binding.to_value();
+        for field in ["device", "directoryDevice"] {
+            renumbered[field] = (renumbered[field].as_u64().unwrap() + 1).into();
+        }
+        let text = fs::read_to_string(&self.fence_path).unwrap();
+        let old_line = format!("run-binding-v1 {}", serde_json::to_string(&self.binding.to_value()).unwrap());
+        let new_line = format!("run-binding-v1 {}", serde_json::to_string(&renumbered).unwrap());
+        assert!(text.contains(&old_line));
+        {
+            // Rewritten in place: the file keeps its inode.
+            use std::io::Write;
+            let mut fence = fs::OpenOptions::new().write(true).truncate(true).open(&self.fence_path).unwrap();
+            fence.write_all(text.replace(&old_line, &new_line).as_bytes()).unwrap();
+            fence.sync_all().unwrap();
+        }
+        let mut projection = fixture.storage.projection_record("run", &self.identity.run_id).unwrap().unwrap();
+        projection.remove("last_event_sequence");
+        projection.insert("provider_run_fence".into(), renumbered.clone());
+        fixture.storage.upsert_projection_records_atomic(vec![crate::storage::ProjectionUpsert {
+            aggregate_type: "run", aggregate_id: self.identity.run_id.clone(), operation_id: "test_renumber_fence_device".into(), request_id: None, payload: projection,
+        }]).unwrap();
+        self.binding = crate::provider_run_binding::RunFenceBinding::from_value(&renumbered).unwrap();
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_sign_in_hold_is_released_after_its_task_or_project_was_deleted_and_the_computer_restarted() {
+    let recover = json!({"provider":"claude","action":"recover","attemptId":"deleted-hold"});
+    for whole_project in [true, false] {
+        let mut fixture = Fixture::new();
+        // The project view has its own copy, so the task below has one of its own.
+        fixture.projects.create_worktree(&mut fixture.storage, &fixture.project_id, "req_deleted_hold_view").unwrap();
+        let mut stopped = StoppedRunWithHold::new(&mut fixture, "deleted_hold");
+        let mut login = crate::provider_login_manager::LoginManager::claude();
+        // Unsettled: nothing releases the hold, with or without a restart.
+        assert_eq!(login.request_with_projects(&fixture.storage, &recover, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired");
+        stopped.resolve(&mut fixture, "req_deleted_hold_resolve");
+        // The user then deleted the task or the whole project, and its files
+        // were removed before anything released the hold.
+        if whole_project {
+            fixture.projects.delete_project(&mut fixture.storage, &fixture.project_id, "req_deleted_hold_delete").unwrap();
+        } else {
+            fixture.projects.delete_chat(&mut fixture.storage, &fixture.project_id, &stopped.identity.chat_id, "req_deleted_hold_delete").unwrap();
+        }
+        assert_eq!(fixture.projects.finish_deletions(&mut fixture.storage, "req_deleted_hold_finish").unwrap(), 0);
+        let data = fixture.storage.path().parent().unwrap().to_path_buf();
+        let workspace = data.join("worktrees-v1").join(&stopped.identity.worktree_id);
+        let manifest = data.join("worktree-manifests-v1").join(format!("{}.json", stopped.identity.worktree_id));
+        assert!(!workspace.exists() && !manifest.exists());
+        stopped.renumber_device(&mut fixture);
+        let held = fs::read(&stopped.fence_path).unwrap();
+        // Anything of the workspace back on disk is not a finished deletion.
+        fs::create_dir(&workspace).unwrap();
+        assert_eq!(login.request_with_projects(&fixture.storage, &recover, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired", "{whole_project}");
+        assert_eq!(fs::read(&stopped.fence_path).unwrap(), held);
+        fs::remove_dir(&workspace).unwrap();
+        assert_eq!(login.request_with_projects(&fixture.storage, &recover, &fixture.projects).unwrap()["state"], "idle", "{whole_project}");
+        assert!(!stopped.fence_path.exists());
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_sign_in_hold_survives_a_device_renumbering_only_with_the_same_inodes() {
+    let recover = json!({"provider":"claude","action":"recover","attemptId":"renumbered-hold"});
+    let mut fixture = Fixture::new();
+    let mut stopped = StoppedRunWithHold::new(&mut fixture, "renumbered_hold");
+    stopped.resolve(&mut fixture, "req_renumbered_hold_resolve");
+    stopped.renumber_device(&mut fixture);
+    let mut login = crate::provider_login_manager::LoginManager::claude();
+    // A copy of the hold file is another file, whatever it says inside.
+    let copy = stopped.fence_path.with_extension("copy");
+    fs::copy(&stopped.fence_path, &copy).unwrap();
+    let original = stopped.fence_path.with_extension("original");
+    fs::rename(&stopped.fence_path, &original).unwrap();
+    fs::rename(&copy, &stopped.fence_path).unwrap();
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired");
+    assert!(stopped.fence_path.exists());
+    fs::remove_file(&stopped.fence_path).unwrap();
+    fs::rename(&original, &stopped.fence_path).unwrap();
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover, &fixture.projects).unwrap()["state"], "idle");
+    assert!(!stopped.fence_path.exists());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_deletion_cut_short_and_a_sign_in_hold_never_wait_for_each_other() {
+    let recover = json!({"provider":"claude","action":"recover","attemptId":"cut-short"});
+    let mut fixture = Fixture::new();
+    fixture.projects.create_worktree(&mut fixture.storage, &fixture.project_id, "req_cut_view").unwrap();
+    let mut stopped = StoppedRunWithHold::new(&mut fixture, "cut_short");
+    stopped.resolve(&mut fixture, "req_cut_resolve");
+    fixture.projects.delete_chat(&mut fixture.storage, &fixture.project_id, &stopped.identity.chat_id, "req_cut_delete").unwrap();
+    // The app stopped in the middle of removing the files: the manifest is
+    // gone, the ledger still says the deletion is pending.
+    let data = fixture.storage.path().parent().unwrap().to_path_buf();
+    fs::remove_file(data.join("worktree-manifests-v1").join(format!("{}.json", stopped.identity.worktree_id))).unwrap();
+    let mut login = crate::provider_login_manager::LoginManager::claude();
+    // Neither proof exists yet, so the hold stays for now ...
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired");
+    assert!(stopped.fence_path.exists());
+    // ... and the deletion does not wait for it: it finishes, and that
+    // finished deletion is then the proof the hold needs.
+    assert_eq!(fixture.projects.finish_deletions(&mut fixture.storage, "req_cut_finish").unwrap(), 0);
+    assert!(!data.join("worktrees-v1").join(&stopped.identity.worktree_id).exists());
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover, &fixture.projects).unwrap()["state"], "idle");
+    assert!(!stopped.fence_path.exists());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_sign_in_hold_left_by_a_run_that_ended_on_its_own_is_released() {
+    let recover = json!({"provider":"claude","action":"recover","attemptId":"ended-hold"});
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_ended_snapshot");
+    let chat = fixture.create_exact_claude_chat(&snapshot, "ended", "req_ended_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let message_id = initial_message_id(&fixture, chat_id);
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
+    let started = runtime
+        .start_agent(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            AgentRunStartRequestV1 {
+                chat_id: chat_id.into(),
+                role_id: "coding".into(),
+                input_message_ids: vec![message_id],
+                expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+            },
+            "req_ended_start",
+        )
+        .unwrap();
+    let run_id = started.result["runId"].as_str().unwrap().to_string();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while runtime.has_active_run(&run_id) {
+        assert!(std::time::Instant::now() < deadline, "the fake run must end on its own");
+        runtime.poll(&mut fixture.storage, &mut fixture.projects).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let ended = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    assert_eq!(ended["record"]["state"], "succeeded");
+    assert_eq!(ended["recovery"], Value::Null);
+    assert_eq!(ended["termination"]["processesProvenGone"], true);
+    // The app stopped right after the run's ending was recorded and before its
+    // owner removed the hold: bind the hold the owner would have held.
+    let profile = crate::provider_claude_profile::ClaudeProfileBinding::from_storage(&fixture.storage).unwrap();
+    let mut owner = crate::provider_login_process::LoginProcess::reserve_claude_owned(profile).unwrap();
+    owner.retain_fence_before_launch(&run_id).unwrap();
+    let binding = owner.bind_run_fence(&run_id).unwrap();
+    let fence_path = fixture.storage.path().parent().unwrap().join(binding.lease_name());
+    {
+        use std::io::Write;
+        let mut fence = fs::OpenOptions::new().append(true).open(&fence_path).unwrap();
+        for process in ended["process_identity_internal"].as_array().unwrap() {
+            writeln!(fence, "{} {}", process["pid"], process["start_us"]).unwrap();
+        }
+        fence.sync_all().unwrap();
+    }
+    let bind = |fixture: &mut Fixture, operation: &str, change: &dyn Fn(&mut Map<String, Value>)| {
+        let mut projection = ended.clone();
+        projection.remove("last_event_sequence");
+        projection.insert("provider_run_fence".into(), binding.to_value());
+        change(&mut projection);
+        fixture.storage.upsert_projection_records_atomic(vec![crate::storage::ProjectionUpsert {
+            aggregate_type: "run", aggregate_id: run_id.clone(), operation_id: operation.into(), request_id: None, payload: projection,
+        }]).unwrap();
+    };
+    owner.finish().unwrap();
+    drop(owner);
+    let mut login = crate::provider_login_manager::LoginManager::claude();
+    let held = fs::read(&fence_path).unwrap();
+    // Without the owner's proof that every process was gone, nothing is released.
+    bind(&mut fixture, "test_ended_unproven", &|projection| {
+        projection.get_mut("termination").unwrap()["processesProvenGone"] = false.into();
+    });
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired");
+    bind(&mut fixture, "test_ended_running", &|projection| {
+        projection.get_mut("record").unwrap()["state"] = "running".into();
+    });
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired");
+    assert_eq!(fs::read(&fence_path).unwrap(), held);
+    bind(&mut fixture, "test_ended_bound", &|_| {});
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover, &fixture.projects).unwrap()["state"], "idle");
+    assert!(!fence_path.exists());
+    // The task itself is untouched and stays usable.
+    assert_ne!(fixture.storage.projection_record("chat", chat_id).unwrap().unwrap()["record"]["state"], "discarded");
+}
+
+#[test]
+fn a_project_that_still_points_at_a_stopped_task_copy_opens_and_gets_its_own_copy() {
+    // Older data: the latest task's copy is also the project's current copy.
+    let mut fixture = Fixture::new();
+    let task = fixture.snapshot("req_legacy_task");
+    fixture.create_chat(&task, "legacy", "req_legacy_chat");
+    let worktree_id = task["worktreeId"].as_str().unwrap();
+    assert_eq!(fixture.storage.projection_record("project", &fixture.project_id).unwrap().unwrap()["worktree_id"], worktree_id);
+    // That task then stopped badly: its copy needs recovery.
+    let manifest_path = fixture.storage.path().parent().unwrap().join("worktree-manifests-v1").join(format!("{worktree_id}.json"));
+    let mut manifest: Value = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    manifest["lifecycle"] = json!("recoveryRequired");
+    fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    // Meanwhile the original moved on by a commit.
+    git(&fixture.source, &["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-q", "-m", "later"]);
+    let head = String::from_utf8(Command::new("/usr/bin/git").arg("-C").arg(&fixture.source).args(["rev-parse", "HEAD"]).output().unwrap().stdout).unwrap();
+    // The project still opens (the screen reopens it, then asks for its copy).
+    fixture.projects.reopen_project(&mut fixture.storage, &fixture.project_id, "req_legacy_reopen").unwrap();
+    let view = fixture.projects.create_worktree(&mut fixture.storage, &fixture.project_id, "req_legacy_view").unwrap().result;
+    assert_ne!(view["worktreeId"], worktree_id);
+    assert_eq!(view["lifecycle"], "active");
+    assert_eq!(view["baseCommit"], head.trim());
+    let project = fixture.storage.projection_record("project", &fixture.project_id).unwrap().unwrap();
+    assert_eq!(project["worktree_id"], view["worktreeId"]);
+    // From now on the ordinary path applies.
+    fixture.projects.reopen_project(&mut fixture.storage, &fixture.project_id, "req_legacy_reopen_again").unwrap();
+    assert_eq!(fixture.projects.create_worktree(&mut fixture.storage, &fixture.project_id, "req_legacy_view_again").unwrap().result, view);
+}
+
+/// After a run ends the screen keeps polling for a few beats: the listing
+/// says "nothing waiting", while accepting or declining still refuses.
+#[test]
+fn an_ended_run_lists_no_approvals_and_refuses_decisions() {
+    let mut fixture = Fixture::new();
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+    let hex = "0123456789abcdef0123456789abcdef";
+    let identity = json!({"chatId":format!("chat_{hex}"),"taskId":format!("task_{hex}"),"projectId":format!("project_{hex}{hex}"),
+        "worktreeId":format!("worktree_{hex}"),"workspaceIdentity":format!("sha256:{hex}{hex}"),"runId":format!("agent_run_{hex}")});
+    let listing = runtime.approval_request(&mut fixture.storage, &fixture.projects, &json!({"action":"list","identity":identity})).unwrap();
+    assert_eq!(listing["pending"], json!([]));
+    let viewed = runtime.approval_request(&mut fixture.storage, &fixture.projects,
+        &json!({"action":"inspect","identity":identity,"approvalId":format!("approval_{hex}")})).unwrap();
+    assert_eq!(viewed, json!({"identity":identity,"pending":[],"queued":null,"inspection":null}));
+    for action in ["acceptOnce", "decline"] {
+        let error = runtime.approval_request(&mut fixture.storage, &fixture.projects,
+            &json!({"action":action,"identity":identity,"approvalId":format!("approval_{hex}")})).unwrap_err();
+        assert_eq!(error.kind, "agentApprovalChanged", "{action}");
+    }
 }

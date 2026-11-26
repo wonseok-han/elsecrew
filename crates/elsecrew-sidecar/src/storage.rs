@@ -18,7 +18,7 @@ use elsecrew_protocol::storage_lifetime_v1::{
     validate_storage_lifetime_reopen_pair_v3, validate_storage_lifetime_reopen_pair_v4,
     FrozenOperationSourceV1, OperationReceiptV2, StorageStatusV1,
     STORAGE_LIFETIME_SCHEMA_VERSION_V1, STORAGE_LIFETIME_SCHEMA_VERSION_V10,
-    STORAGE_LIFETIME_SCHEMA_VERSION_V11, STORAGE_LIFETIME_SCHEMA_VERSION_V12,
+    STORAGE_LIFETIME_SCHEMA_VERSION_V11, STORAGE_LIFETIME_SCHEMA_VERSION_V12, STORAGE_LIFETIME_SCHEMA_VERSION_V13,
     STORAGE_LIFETIME_SCHEMA_VERSION_V3, STORAGE_LIFETIME_SCHEMA_VERSION_V4,
     STORAGE_LIFETIME_SCHEMA_VERSION_V5, STORAGE_LIFETIME_SCHEMA_VERSION_V6,
     STORAGE_LIFETIME_SCHEMA_VERSION_V7, STORAGE_LIFETIME_SCHEMA_VERSION_V8,
@@ -50,6 +50,10 @@ pub(crate) mod catalog;
 // Long-run output primitives; admission/migration integration is pending.
 #[allow(dead_code)]
 pub(crate) mod agent_output;
+
+// Selected chat content erasure (docs/proposals/m5-chat-erasure.md).
+pub(crate) mod chat_erasure;
+pub(crate) mod shutdown_seal;
 
 const MIGRATION_V1: &str = include_str!("../../../tests/fixtures/m5/storage-v1/migration.sql");
 const MIGRATION_V2: &str =
@@ -117,6 +121,33 @@ pub struct Storage {
     path: PathBuf,
     writes_admitted: bool,
     maintenance_epoch: u64,
+    /// Admitted on a clean shutdown's seal instead of the full check.
+    opened_from_seal: bool,
+    /// Projection rows already parsed, by their stored bytes.
+    projection_memo: ProjectionMemo,
+}
+
+/// Parsed projection rows remembered by their stored bytes (latency work
+/// 2026-11-26). A record lookup has to validate every row of every projection
+/// table so that a damaged row anywhere fails it; parsing all of them on each
+/// of the many lookups a request or a 100 ms loop pass makes kept the engine
+/// busy for seconds with a few hundred runs. Every lookup still reads every
+/// row and compares its bytes and sequence with the remembered ones; only a
+/// row that differs is parsed again. A row is accepted exactly when parsing it
+/// would accept it, so the result equals the full parse; nothing is trusted
+/// across a change the comparison would not see.
+#[derive(Default)]
+pub(crate) struct ProjectionMemo {
+    tables: std::cell::RefCell<BTreeMap<&'static str, BTreeMap<String, MemoRow>>>,
+    /// Rows parsed so far (tests check that unchanged rows are not parsed again).
+    #[cfg(test)]
+    parsed: std::cell::Cell<usize>,
+}
+
+struct MemoRow {
+    source: Box<str>,
+    sequence: u64,
+    value: Map<String, Value>,
 }
 
 #[derive(Clone, Copy)]
@@ -170,13 +201,18 @@ impl Storage {
         Self::open_for_durable_admission(path, &NEVER_CANCELLED)
     }
 
+    /// V3 user-defined role sets need the V13 author-format trigger.
+    pub(crate) fn custom_roles_enabled(&self) -> Result<bool, SidecarError> {
+        Ok(storage_schema_version(&self.connection)? == Some(STORAGE_LIFETIME_SCHEMA_VERSION_V13))
+    }
+
     pub(crate) fn coordinator_roles_enabled(&self) -> Result<bool, SidecarError> {
-        Ok(storage_schema_version(&self.connection)? == Some(STORAGE_LIFETIME_SCHEMA_VERSION_V12))
+        Ok(matches!(storage_schema_version(&self.connection)?, Some(STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13)))
     }
 
     pub(crate) fn uses_durable_output(&self) -> Result<bool, SidecarError> {
         self.ensure_writes_admitted()?;
-        Ok(matches!(storage_schema_version(&self.connection)?, Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12)))
+        Ok(matches!(storage_schema_version(&self.connection)?, Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13)))
     }
 
     /// Inject cancellation at migration checkpoints without admitting writes.
@@ -199,10 +235,25 @@ impl Storage {
         path: &Path,
         cancellation: &AtomicBool,
     ) -> Result<Self, SidecarError> {
+        Self::open_for_durable_admission_with_seal(path, cancellation, None)
+    }
+
+    /// `seal`: what the app says the last clean shutdown sealed. Trusted only
+    /// if the file is exactly that (`shutdown_seal`); otherwise the full check.
+    pub(crate) fn open_for_durable_admission_with_seal(
+        path: &Path,
+        cancellation: &AtomicBool,
+        seal: Option<&str>,
+    ) -> Result<Self, SidecarError> {
+        // A log left behind means the file alone is not what was sealed.
+        let seal = seal.filter(|seal| {
+            shutdown_seal::valid_seal(seal)
+                && safe_database_path(path).is_ok_and(|path| shutdown_seal::wal_is_empty(&path))
+        });
         let mut storage = Self::open_inner(path, cancellation, StorageOpenMode::DurableAdmission)?;
         storage.writes_admitted = false;
         ensure_admission_not_cancelled(cancellation)?;
-        if !matches!(storage_schema_version(&storage.connection)?, Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12)) {
+        if !matches!(storage_schema_version(&storage.connection)?, Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13)) {
             // Verify the old ledger before committing its forward-only schema upgrade.
             let mut session = reopen::snapshot::ReopenMaintenanceSession::start_for_admission(
                 &mut storage.connection,
@@ -224,10 +275,18 @@ impl Storage {
                 &mut || cancellation.load(Ordering::Acquire))?;
         }
         agent_output::schema::migrate_coordinator(&mut storage.connection, &mut || cancellation.load(Ordering::Acquire))?;
-        agent_output::schema::verify_admission(&mut storage.connection,
-            &mut || cancellation.load(Ordering::Acquire))?;
+        agent_output::schema::migrate_custom_roles(&mut storage.connection, &mut || cancellation.load(Ordering::Acquire))?;
+        let sealed = seal.is_some_and(|seal| storage.matches_shutdown_seal(seal));
+        if sealed {
+            agent_output::schema::verify_admission_after_seal(&mut storage.connection,
+                &mut || cancellation.load(Ordering::Acquire))?;
+        } else {
+            agent_output::schema::verify_admission(&mut storage.connection,
+                &mut || cancellation.load(Ordering::Acquire))?;
+        }
         ensure_admission_not_cancelled(cancellation)?;
         storage.writes_admitted = true;
+        storage.opened_from_seal = sealed;
         Ok(storage)
     }
 
@@ -241,7 +300,7 @@ impl Storage {
         connection.execute_batch("PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; PRAGMA query_only=ON;")
             .map_err(|_| SidecarError::new("storageReadFailed", "repair snapshot unavailable"))?;
         verify_projection_replay(&connection)?;
-        Ok(Self { connection, path, writes_admitted: false, maintenance_epoch: 0 })
+        Ok(Self { connection, path, writes_admitted: false, maintenance_epoch: 0, opened_from_seal: false, projection_memo: ProjectionMemo::default() })
     }
 
     pub fn open(path: &Path) -> Result<Self, SidecarError> {
@@ -424,7 +483,7 @@ impl Storage {
                 }
                 verify_schema_v10(&connection)?;
             }
-            Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12)
+            Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13)
                 if matches!(mode, StorageOpenMode::DurableAdmission) => {
                 agent_output::schema::verify(&connection)?;
             }
@@ -452,7 +511,7 @@ impl Storage {
                 storage_schema_version(&connection)?,
                 Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
                     | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10)
-                    | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12)
+                    | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13)
             );
         if !exact_plan_admission {
             verify_projection_replay(&connection)?;
@@ -462,7 +521,9 @@ impl Storage {
             connection,
             path,
             writes_admitted: true,
+            opened_from_seal: false,
             maintenance_epoch: 0,
+            projection_memo: ProjectionMemo::default(),
         })
     }
 
@@ -595,7 +656,9 @@ impl Storage {
             connection,
             path,
             writes_admitted: true,
+            opened_from_seal: false,
             maintenance_epoch: 0,
+            projection_memo: ProjectionMemo::default(),
         })
     }
 
@@ -679,7 +742,7 @@ impl Storage {
     pub fn recover_unclean_shutdown(&mut self) -> Result<(), SidecarError> {
         self.ensure_writes_admitted()?;
         let previous = latest_app_instance(&self.connection)?;
-        let projection = load_projection(&self.connection)?;
+        let projection = load_projection_memo(&self.connection, &self.projection_memo, None)?;
         let input = RecoveryInputV1 {
             previous_app_instance: previous.clone(),
             // Durable actual runs must be recovered by AgentRuntime, which
@@ -698,7 +761,7 @@ impl Storage {
         };
         let recovery_timestamp = required_string(&previous, "heartbeat_at")?.to_string();
         let previous_id = required_string(&previous, "sidecar_instance_id")?;
-        let current = load_projection(&self.connection)?;
+        let current = load_projection_memo(&self.connection, &self.projection_memo, None)?;
         let mut events = Vec::new();
 
         for record in recovered.runs {
@@ -760,6 +823,26 @@ impl Storage {
         }
     }
 
+    /// Every engine process that registered on this ledger and did not shut
+    /// down cleanly: its process ID and when it registered. All of them, not
+    /// only the latest: a copy of the app data keeps the record of the live
+    /// engine it was copied from however often the copy is opened afterwards.
+    pub(crate) fn unclean_engine_processes(&self) -> Result<Vec<(u32, String)>, SidecarError> {
+        Ok(load_projection_memo(&self.connection, &self.projection_memo, None)?
+            .app_instances
+            .values()
+            .filter_map(|row| {
+                if !row.get("clean_shutdown_at")?.is_null() {
+                    return None;
+                }
+                Some((
+                    u32::try_from(row.get("pid")?.as_u64()?).ok()?,
+                    row.get("started_at")?.as_str()?.to_string(),
+                ))
+            })
+            .collect())
+    }
+
     pub fn checkpoint(&self) -> Result<(), SidecarError> {
         self.ensure_writes_admitted()?;
         let (busy, _log, _checkpointed): (u32, i64, i64) = self
@@ -782,7 +865,7 @@ impl Storage {
         sidecar_instance_id: &str,
     ) -> Result<(), SidecarError> {
         self.ensure_writes_admitted()?;
-        let projection = load_projection(&self.connection)?;
+        let projection = load_projection_memo(&self.connection, &self.projection_memo, None)?;
         let current = projection
             .app_instances
             .get(sidecar_instance_id)
@@ -834,23 +917,47 @@ impl Storage {
     }
 
     pub fn blocker_ids(&self) -> Result<Vec<String>, SidecarError> {
-        let projection = load_projection(&self.connection)?;
-        let mut blockers = BTreeSet::new();
-        for (run_id, run) in projection.runs {
-            if run
-                .get("state")
-                .and_then(Value::as_str)
-                .is_some_and(|state| {
-                    ["preparing", "running", "cancelling", "recoveryRequired"].contains(&state)
+        let projection = load_projection_memo(&self.connection, &self.projection_memo, None)?;
+        // A deleted task or project keeps its ledger records, but its leftover
+        // recovery no longer holds up quitting or other projects. Live runs
+        // still count until they end. Re-adding the folder starts a fresh
+        // project, so deleted entries never become visible again.
+        let hidden_chat = |chat_id: &str| {
+            projection.chats.get(chat_id).is_some_and(|chat| {
+                let project = chat.get("project_id").and_then(Value::as_str).and_then(|id| projection.projects.get(id));
+                project.is_some_and(|project| {
+                    project.get("catalog_hidden").and_then(Value::as_bool) == Some(true)
+                        || project.get("catalog_hidden_chats").and_then(Value::as_array).is_some_and(|ids| ids.iter().any(|id| id == chat_id))
+                        || project.get("chat_deletion_v1").and_then(|jobs| jobs.get(chat_id)).is_some()
                 })
-            {
+            })
+        };
+        // A workspace counts as hidden only when every task using it is.
+        let hidden_worktree = |project_id: Option<&str>, worktree: Option<&str>| {
+            let users: Vec<&String> = projection.chats.iter()
+                .filter(|(_, chat)| worktree.is_some() && chat.get("worktree_id").and_then(Value::as_str) == worktree)
+                .map(|(chat_id, _)| chat_id)
+                .collect();
+            project_id.and_then(|id| projection.projects.get(id)).is_some_and(|project| project.get("catalog_hidden").and_then(Value::as_bool) == Some(true))
+                || (!users.is_empty() && users.iter().all(|chat_id| hidden_chat(chat_id)))
+        };
+        let mut blockers = BTreeSet::new();
+        for (run_id, run) in &projection.runs {
+            let Some(state) = run.get("state").and_then(Value::as_str) else { continue };
+            let live = ["preparing", "running", "cancelling"].contains(&state);
+            let leftover = state == "recoveryRequired"
+                && !run.get("chat_id").and_then(Value::as_str).is_some_and(hidden_chat);
+            if live || leftover {
                 blockers.insert(format!("run:{run_id}"));
             }
         }
-        for (lock_id, lock) in projection.locks {
-            let poisoned = required_bool(&lock, "poisoned")?;
-            let recovery_required = required_bool(&lock, "recovery_required")?;
-            if poisoned || recovery_required {
+        for (lock_id, lock) in &projection.locks {
+            let poisoned = required_bool(lock, "poisoned")?;
+            let recovery_required = required_bool(lock, "recovery_required")?;
+            let worktree = lock_id.strip_prefix("lock_");
+            if (poisoned || recovery_required)
+                && !hidden_worktree(lock.get("project_id").and_then(Value::as_str), worktree)
+            {
                 blockers.insert(format!("lock:{lock_id}"));
             }
         }
@@ -862,8 +969,9 @@ impl Storage {
         aggregate_type: &str,
         aggregate_id: &str,
     ) -> Result<Option<Map<String, Value>>, SidecarError> {
-        let projection = load_projection_selected(
+        let projection = load_projection_memo(
             &self.connection,
+            &self.projection_memo,
             Some((aggregate_type, Some(aggregate_id))),
         )?;
         let table = match aggregate_type {
@@ -885,7 +993,7 @@ impl Storage {
         &self,
         aggregate_type: &str,
     ) -> Result<Vec<Map<String, Value>>, SidecarError> {
-        let projection = load_projection_selected(&self.connection, Some((aggregate_type, None)))?;
+        let projection = load_projection_memo(&self.connection, &self.projection_memo, Some((aggregate_type, None)))?;
         let table = match aggregate_type {
             "project" => &projection.projects,
             "chat" => &projection.chats,
@@ -1069,7 +1177,7 @@ impl Storage {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sqlite_error)?;
         verify_append_runtime_state(&transaction)?;
-        let current = load_projection(&transaction)?;
+        let current = load_projection_memo(&transaction, &self.projection_memo, None)?;
         if current.chats.get(chat_id) != Some(expected) {
             return Ok(false);
         }
@@ -1547,6 +1655,17 @@ fn configure_connection(connection: &Connection) -> Result<(), SidecarError> {
         return Err(SidecarError::new(
             "foreignKeysDisabled",
             format!("PRAGMA foreign_keys verification returned {enabled}"),
+        ));
+    }
+    // Freed cells/pages are zeroed so erased or superseded content does not
+    // linger in SQLite free space (docs/proposals/m5-chat-erasure.md §6).
+    let secure_delete: i64 = connection
+        .query_row("PRAGMA secure_delete = ON;", [], |row| row.get(0))
+        .map_err(sqlite_error)?;
+    if secure_delete != 1 {
+        return Err(SidecarError::new(
+            "databaseOwnershipFailed",
+            format!("SQLite secure_delete verification returned {secure_delete}"),
         ));
     }
     let locking_mode: String = connection
@@ -3917,7 +4036,7 @@ pub(crate) fn load_v8_verified_frozen_event(
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10)
-            | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12)
+            | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13)
     ) {
         return Ok(None);
     }
@@ -3956,7 +4075,7 @@ pub(crate) fn load_v8_verified_frozen_message_event(
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10)
-            | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12)
+            | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13)
     ) {
         return Ok(None);
     }
@@ -4333,7 +4452,7 @@ fn replay_storage_ledger(
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10)
-            | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12)
+            | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13)
     ) {
         return replay_ledger_v1(events).map_err(storage_contract_error);
     }
@@ -4410,7 +4529,7 @@ fn load_verified_compaction_seeds(
     }
     let prefixes = if matches!(
         storage_schema_version(connection)?,
-        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9) | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10) | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12)
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9) | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10) | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13)
     ) {
         let mut statement = connection
             .prepare(
@@ -4496,7 +4615,7 @@ fn classify_storage_operation(
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10)
-            | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12)
+            | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13)
     ) {
         return classify_operation_v1(existing_events, incoming).map_err(storage_contract_error);
     }
@@ -4655,6 +4774,23 @@ fn load_projection_selected(
     connection: &Connection,
     selection: Option<(&str, Option<&str>)>,
 ) -> Result<ProjectionStateV1, SidecarError> {
+    load_projection_with(connection, None, selection)
+}
+
+/// `load_projection_selected` reusing the rows `memo` already parsed.
+fn load_projection_memo(
+    connection: &Connection,
+    memo: &ProjectionMemo,
+    selection: Option<(&str, Option<&str>)>,
+) -> Result<ProjectionStateV1, SidecarError> {
+    load_projection_with(connection, Some(memo), selection)
+}
+
+fn load_projection_with(
+    connection: &Connection,
+    memo: Option<&ProjectionMemo>,
+    selection: Option<(&str, Option<&str>)>,
+) -> Result<ProjectionStateV1, SidecarError> {
     let mut projection = ProjectionStateV1::default();
     let mut statement = connection
         .prepare(
@@ -4703,13 +4839,67 @@ fn load_projection_selected(
         ("run", "runs", "run_id", &mut projection.runs),
         ("lock", "locks", "lock_id", &mut projection.locks),
     ] {
-        load_json_projection(connection, table, column, target, |id| {
+        let retain = |id: &str| {
             selection.is_none_or(|(selected_kind, selected_id)| {
                 selected_kind == kind && selected_id.is_none_or(|selected| selected == id)
             })
-        })?;
+        };
+        match memo {
+            Some(memo) => load_json_projection_memo(connection, memo, table, column, target, retain)?,
+            None => load_json_projection(connection, table, column, target, retain)?,
+        }
     }
     Ok(projection)
+}
+
+/// `load_json_projection` that parses only rows whose bytes or sequence differ
+/// from what `memo` holds for the table. Every row is still read and compared.
+fn load_json_projection_memo(
+    connection: &Connection,
+    memo: &ProjectionMemo,
+    table: &'static str,
+    id_column: &str,
+    target: &mut std::collections::BTreeMap<String, Map<String, Value>>,
+    retain: impl Fn(&str) -> bool,
+) -> Result<(), SidecarError> {
+    let sql = format!("SELECT {id_column}, projection_json, last_event_sequence FROM {table};");
+    let mut statement = connection.prepare(&sql).map_err(sqlite_error)?;
+    let mut rows = statement.query([]).map_err(sqlite_error)?;
+    let mut tables = memo.tables.borrow_mut();
+    // Taken out while scanning: a failed scan leaves this table remembering
+    // nothing, and rows that are gone are not kept.
+    let mut known = std::mem::take(tables.entry(table).or_default());
+    let mut fresh = BTreeMap::new();
+    while let Some(row) = rows.next().map_err(sqlite_error)? {
+        let id: String = row.get(0).map_err(sqlite_error)?;
+        let source = row.get_ref(1).map_err(sqlite_error)?.as_str()
+            .map_err(|error| SidecarError::new("databaseFailure", format!("{table}.{id} projection_json: {error}")))?;
+        let sequence = row_u64(row, 2).map_err(sqlite_error)?;
+        let remembered = known
+            .remove(&id)
+            .filter(|row| row.sequence == sequence && *row.source == *source);
+        let entry = match remembered {
+            Some(row) => row,
+            None => {
+                #[cfg(test)]
+                memo.parsed.set(memo.parsed.get() + 1);
+                let mut value: Map<String, Value> = serde_json::from_str(source).map_err(|error| {
+                    SidecarError::new(
+                        "projectionInvalid",
+                        format!("{table}.{id} projection_json is invalid: {error}"),
+                    )
+                })?;
+                value.insert("last_event_sequence".to_string(), Value::from(sequence));
+                MemoRow { source: source.into(), sequence, value }
+            }
+        };
+        if retain(&id) {
+            target.insert(id.clone(), entry.value.clone());
+        }
+        fresh.insert(id, entry);
+    }
+    tables.insert(table, fresh);
+    Ok(())
 }
 
 fn load_json_projection(
@@ -4779,7 +4969,7 @@ fn insert_event(transaction: &Transaction<'_>, event: &LedgerEventV1) -> Result<
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9) => {
             insert_v6_source_index_and_invalidate_ready(transaction, event)?;
         }
-        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10 | STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12) => {
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10 | STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13) => {
             insert_v6_source_index_and_invalidate_ready(transaction, event)?;
         }
         None
@@ -4811,7 +5001,7 @@ fn verify_append_runtime_state(connection: &Connection) -> Result<(), SidecarErr
             verify_append_materialization_pair(connection)?;
             verify_v9_append_runtime_state(connection)
         }
-        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10 | STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12) => {
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10 | STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13) => {
             verify_append_materialization_pair(connection)?;
             verify_v9_append_runtime_state(connection)
         }

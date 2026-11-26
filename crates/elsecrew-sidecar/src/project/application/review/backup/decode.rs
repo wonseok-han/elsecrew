@@ -154,7 +154,8 @@ pub(super) fn validate_inner(
         let before = &item["before"];
         if let Some(baseline) = baseline {
             let expected = baseline.entries.get(path).map(|e| serde_json::json!({"kind":e.kind,"mode":e.mode,"size":e.size,"digest":e.digest,"identity":e.identity}));
-            if *before != serde_json::to_value(expected).map_err(|_| invalid())? {
+            let expected = serde_json::to_value(expected).map_err(|_| invalid())?;
+            if crate::project::without_device(before) != crate::project::without_device(&expected) {
                 return Err(invalid());
             }
         }

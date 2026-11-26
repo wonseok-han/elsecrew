@@ -2,7 +2,11 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 
 import "./styles.css";
+import { startTheme } from "./theme.ts";
 import { M5Workbench } from "./workbench.tsx";
+
+// Brightness before the first render, so the page never flashes the other theme.
+startTheme();
 
 const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement);
 root.render(
