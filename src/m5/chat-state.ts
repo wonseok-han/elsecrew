@@ -242,17 +242,19 @@ export class ChatUiController {
     }
   }
 
-  async updateSettings(roles: readonly RoleProfileV1[], roleDefinitions?: readonly RoleDefinitionV3[]): Promise<void> {
+  /** True only when this project's team was saved and is now shown (review PR #8 I4). */
+  async updateSettings(roles: readonly RoleProfileV1[], roleDefinitions?: readonly RoleDefinitionV3[]): Promise<boolean> {
     const settings = this.#state.settings;
-    if (!settings) return;
+    if (!settings) return false;
     const generation = this.#generation;
     try {
       const updated = await this.#bridge.updateProjectRoleSettings({ projectId: settings.projectId, expectedRevision: settings.revision, roles, ...(roleDefinitions ? { roleDefinitions } : {}) });
-      if (!this.#live(generation) || this.#state.projectId !== settings.projectId || this.#state.settings?.revision !== settings.revision) return;
+      if (!this.#live(generation) || this.#state.projectId !== settings.projectId || this.#state.settings?.revision !== settings.revision) return false;
       this.#set({ settings: updated, ...chatNotice("m5.chatNotice.settingsSaved"), error: null });
+      return true;
     } catch (error) {
-      if (!this.#live(generation) || this.#state.projectId !== settings.projectId) return;
-      this.#error("m5.chatError.settingsSave", error);
+      if (this.#live(generation) && this.#state.projectId === settings.projectId) this.#error("m5.chatError.settingsSave", error);
+      return false;
     }
   }
 

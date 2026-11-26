@@ -22,6 +22,33 @@ PR #6은 머지됐다(8493496e). 재확인(`REVIEW-pr6-2.md`)에서 B1 해결, I
 - **검증**: `npm test` 853/853, `pnpm build`, 렌더러 마운트 스모크, 격리 프로브(두 모드), UI 스모크, 기본값 확인(개발·패키지) 통과. Rust 변경 없음.
 - **다음**: Codex 검토 대응. `m5-project-ui-smoke.cjs` 공급자 선택 단계 수정은 별도 작업이다. Windows·IPv6 기기에서 프로브를 다시 돌린다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #8 독립 검토(차단 0, 중요 4, 경미 2) 반영
+검토서: `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr8.md`(대상 34b3d17a). 리뷰 재현은 `tests/m5-pr8-review.test.mts`로 막았다.
+
+- **I1 화면상 같은 이름**: 이름 비교를 화면 표시 기준으로 바꿨다. 키는 NFC 정규화 → 공백 제거 → 소문자이고, 시드 이름 그대로인 기본 역할은 번역 이름(ko·en)도 키로 가진다. Rust(`unicode-normalization =0.1.25`를 protocol에 직접 의존으로 추가, sidecar와 같은 버전)·TS가 같은 표(`role-names-v3.json`에 `legacyLabels`와 5개 사례 추가)로 시험한다. `uniqueRoleName`도 같은 키를 피해 영어 화면에서 기획 템플릿을 한 번 더 넣으면 "Planning 2"가 된다. 실행 출력 선택기에 총괄 ★(ID 기준)과 FSI/PDI 격리를 넣었다.
+- **I2 삭제 취소 누락**: `undoLastRemoval`은 같은 ID 역할이 이미 있거나(템플릿으로 되살린 기본 역할) 팀이 가득 차면 팀·기록을 그대로 두고 이유를 돌려준다. 화면은 이유를 알리고 버튼을 남긴다.
+- **I3 앱 기본값 불러오기**: 미저장 변경이 있으면 기존 폐기 확인을 거친다(`appDefaultsLoadStep`, "변경 버리고 앱 기본값 불러오기").
+- **I4 두 범위 저장**: 순서를 프로젝트 → 앱 기본값으로 바꾸고(`saveProjectThenAppDefaults`), `ChatUiController.updateSettings`·앱 기본값 저장이 성공 여부를 돌려준다. 프로젝트 실패면 앱 기본값을 건드리지 않고, 둘 다 됐을 때만 "앱 기본값에도 저장했어요", 프로젝트만 됐으면 "앱 기본값은 저장하지 못했어요"를 작업대가 보여 준다.
+- **경미**: 새 ID는 불러온 작업 목록의 팀 스냅샷 ID도 피한다(발급 기록 영속 저장은 하지 않음 — 목록 첫 페이지 밖의 옛 작업 ID는 여전히 6자리 난수에 의존). 메뉴 Esc는 메뉴를 연 요소(끼워 넣기 선 포함)로 초점을 돌린다.
+- **함께 고침**: 팀에 없는 역할로 위임한 총괄 응답을 원문 JSON 대신 "총괄이 팀에 없는 담당(…)을 골라 다시 정하게 했어요"로 보인다(`orchestratorMisdirected`, 역할 문자열은 32자로 자르고 FSI 격리).
+- **테스트**: `tests/m5-pr8-review.test.mts` 8개(I1 두 개, I2, I3, I4, m1, m2, 원문 JSON), `m5-g5-chat-ui-state`의 저장 실패/성공 반환값, `m5-team-editing`의 공용 표 시험(번역 이름이 locale과 같은지 포함). `npm test` 869·`pnpm build` 통과. `cargo test -p elsecrew-protocol` 75(공용 표 시험 포함), `cargo test -p elsecrew-sidecar --lib -- custom_roles app_role orchestration` 37 통과. Cargo.lock은 protocol 의존 한 줄만 바뀜.
+
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 팀 역할 편집 R0·R1·R2·R4 구현과 실제 앱 확인 (`orca/ade-roles`, 기준 feature/ade 12961d04)
+설계: `docs/proposals/m5-custom-roles-plan.md` 3.1절·2장, 4장 Q1~Q8은 추천안대로 결정(조정자 위임). 커밋 c56e4314(R0 기계적 이동) → c90e85de(R1·R2·R4) → bd3cd323(실제 앱 확인 중 수정).
+
+- **R0**: `RoleSettings`·`AppRoleDefaultsEditor`를 `src/m5/role-settings.tsx`로 옮겼다(화면 변화 0). 소스 검사 파일 목록에 추가.
+- **R1**: 세로 역할 목록 + 편집 영역. 끼워 넣기 선(+)·⋯ 메뉴(위/아래에 끼워 넣기·복제 ⌘D·위로 ⌥↑·아래로 ⌥↓·삭제)·끌어 놓기·화면 읽기 알림, 삭제 되돌리기, 미저장 요약, 이름 문제 ! 표시, "지금 일하는 작업 N개는 시작할 때의 팀으로 계속해요", 권한 라디오와 "권한은 여기서 고른 값만 적용돼요", 총괄 '기본값으로 되돌리기'(Q7), '앱 기본값 불러오기'·'앱 기본값으로도 저장'(Q6). 메뉴 이름 '팀 역할'. 스타일은 L0 의미 토큰과 `role-colors.ts`만 쓴다.
+- **R2**: 템플릿 메뉴(빈 역할 + 기본 제공 8개: 기존 4개 + 테스트 작성·보안 점검·문서 정리·자료 조사, Q8). 지운 기본 역할은 원래 ID로 되살림. 새 ID는 무작위 `member-xxxxxx`로 재사용하지 않음. 새 빈 역할은 읽기만(Q4).
+- **R4**: 이름 규칙(Cf 서식 문자·총괄 이름·중복)을 TS 갱신 요청·앱 기본값 요청과 Rust `projectRoleSettingsUpdate`·sidecar `update_app_role_defaults`에 같게 적용, 저장된 기록 읽기는 그대로. 위임 바로잡기 1회(`orchestration.rs`). 팀 단계 prompt 끝 `CLOSING_REMINDER`(`agent_runtime::resolve_prompt`). 맡은 일·이름의 비밀 값 모양 경고(화면만).
+- **실제 앱 확인**(개발 앱 `--remote-debugging-port=9391`, 자작 CDP 스크립트; 캡처·JSON `~/Documents/elsecrew-ade-roles-2026-11-26/screenshots/`):
+  - 편집(임시 프로필 `--user-data-dir`=scratchpad, 시험 폴더 roles-test-project): 기획 아래 '자료 조사' 끼워 넣기 → 개발 ⌥↑ 두 번(5→3번째) → 디자인 ⌘D 복제 → 검증 삭제 → 끌어 놓기로 사본을 2번째로 → 이름을 "총괄"·"기 획"으로 바꿔 사칭·중복 경고와 저장 비활성, `sk-ant-…` 비밀 값 경고 → 원래대로 → 검증 삭제 되돌리기 → '역할 추가'로 보안 점검(7/7, 추가 메뉴 비활성, Esc는 메뉴만 닫음) → 저장 → 닫고 다시 열기: 순서·이름·권한 동일(`before-save.json` = `after-reopen.json`). '앱 기본값으로도 저장' 뒤 설정의 앱 기본값 화면에 같은 팀(`08`·`09`). 임시 앱은 정상 종료(engine exit 0).
+  - 실제 위임(기본 개발 프로필, 시험 프로젝트 todo-test-1125a, Claude Code): 총괄 바로 아래에 '자료 조사'(`member-zhd1z6`, 읽기만)를 넣고 저장(설정 버전 3) → 새 작업 "데이터 저장 방법 비교·추천, 자료 조사에게 맡기고 파일은 바꾸지 마" → 총괄(28초) → 자료 조사(39초) → 총괄(28초), 약 4분, 검토 대기. 보고서는 `docs/elsecrew/member-zhd1z6.md`로 남았다(`12b`). 그 뒤 팀에서 자료 조사를 지우고 저장(버전 4, 원래 5명 그대로 `todo-team-before.json`과 같음) — 끝난 작업 카드에는 '자료 조사'가 그대로 보였다(스냅샷, `13`). 작업은 합치지 않고 검토 대기로 남겼다. 자료 조사 실행 중 목록에 잠깐 "허락을 기다려요"가 보였으나 카드는 뜨지 않은 채 끝났다(원인 미조사).
+  - 확인 중 고친 것: 편집 영역 머리말 정렬, 앱 기본값 화면이 좁을 때 칸 배치, 프로젝트 저장 뒤 다시 마운트로 "앱 기본값에도 저장했어요"가 사라지던 것(작업대가 안내를 들도록), 안내 문구의 '역할·모델 바꾸기' → '팀 역할 바꾸기'.
+- **테스트**: `npm test` 826 통과(새 `tests/m5-team-editing.test.mts` 14개, `m5-custom-roles` 갱신). `pnpm build` 통과. `cargo test -p elsecrew-protocol saved_role_names` 통과, `cargo test -p elsecrew-sidecar --lib -- orchestration custom_roles_v3` 35 통과(바로잡기·재확인·이름 규칙 포함). 렌더러 스모크(`pnpm m5:test:editor`)는 역할 화면 선택자·제목('Team roles')·미저장 표시(`.m5-team-unsaved`)를 새 화면에 맞췄다. 처음엔 "Monaco mount and reveal"(기존 결함)에서 멈췄으나 feature/ade의 PR #7 병합 뒤 68개 전부 통과(PR #8 첫 CI의 macOS 실패 "English role settings"가 이 낡은 기대값이었다). `cargo test -p elsecrew-core -p elsecrew-protocol -p elsecrew-sidecar`(`CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4`, nice 15) 전부 통과: core 242, protocol 71, sidecar lib 906(무시 43)·통합 16(무시 1). `git diff --check origin/feature/ade` 통과.
+- **PR #8**: https://github.com/wonseok-han/elsecrew/pull/8 (`--base feature/ade`). 연 직후 feature/ade에 PR #6(미리보기 백엔드)·#7이 들어와 충돌(architecture·history·렌더러 스모크)로 CI가 돌지 않아 feature/ade(8493496e)를 병합했다. 문서는 양쪽을 모두 두고, 스모크는 feature/ade의 "설정 안 안내(D4⑥)" 규칙에 새 선택자를 씌웠다. 병합 뒤 `npm test` 861·`pnpm build`·`cargo test -p elsecrew-protocol` 75 통과, `cargo test -p elsecrew-sidecar --lib -- orchestration custom_roles preview` 44 통과·1 실패(`an_app_closed_mid_run_reopens_with_the_work_kept_and_the_task_usable`, 단독 재실행 통과 — 프로세스 종료 시험의 부하 타이밍으로 판단).
+- **PR #8 CI**(4bc2775d): macOS·Windows 하네스(렌더러 스모크 포함), website, GitGuardian 모두 통과. 병합 가능(CLEAN). Codex 검토는 조정자가 붙인다.
+- **남은 것**: R3('이번 작업만' 팀, 2차), 다른 프로젝트에서 가져오기, 설정 위쪽 [이 프로젝트 | 앱 기본값] 전환, 팀에 없는 역할로 위임한 총괄 응답의 원문 JSON 표시 다듬기, 실행 중 잠깐 보인 "허락을 기다려요" 원인. history가 500줄을 넘었지만 워크로그가 모두 11-26이라 날짜 경계로 옮길 엔트리가 없다(다음 날짜 엔트리 때 11-26 묶음을 아카이브).
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #6 독립 보안 검토(차단 1·중요 5·경미 2) 전부 반영
 검토서: `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr6.md`(대상 b7eabc64). 같은 브랜치 `orca/ade-preview-backend`에서 한 번에 고쳤다.
 
@@ -103,6 +130,13 @@ PR #5 보고에 남긴 `tests/m5-renderer-mount-smoke.mts` 실패를 고쳤다. 
 - 위저드 6단계: 에이전트 선택 → 진단 → 설치 → 로그인 → 첫 프로젝트 → 졸업식
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **팀 역할 편집의 규칙(2026-11-26, custom roles R0·R1·R2·R4)**: 화면 `role-settings.tsx`, 순수 함수 `team-draft.ts`(insert/move/duplicate/restore/teamChanges/uniqueRoleName/newMemberId), 템플릿 `role-templates.ts`(TS에만). 현행 설명은 architecture "팀 역할 편집".
+  - 목록 순서는 보기 순서다. 실행 순서는 총괄이 정한다(Q1). 새 팀원 ID는 무작위 `member-xxxxxx`이고 지운 기본 역할은 원래 ID로 되살린다.
+  - 이름 규칙(서식 문자 Cf·총괄 이름·중복)은 **저장 요청에만** 적용하고 저장된 기록 읽기에는 적용하지 않는다. 이름은 화면에 보이는 대로 비교한다(NFC, 시드 이름 그대로인 기본 역할의 번역 이름 포함). 번역 이름을 바꾸면 `G5_LEGACY_ROLE_LABELS_V3`(Rust·TS)와 공용 표도 바꾼다. Rust·TS가 `tests/fixtures/m5/role-names-v3.json` 한 표를 함께 읽는다. 새 규칙을 더할 때 이 표에 줄을 넣는다.
+  - 총괄이 팀에 없는 역할로 위임하면 한 번 바로잡는다. "총괄 단계의 instruction이 비어 있지 않음 = 바로잡기 뒤"라는 표시로 쓰므로, 총괄 단계에 다른 지시를 넣게 되면 이 판단을 바꿔야 한다(`orchestration.rs` `finish`).
+  - 함정: 프로젝트 설정을 저장하면 `RoleSettings`가 revision 키로 다시 마운트돼 컴포넌트 안 상태(안내 문구 등)가 사라진다. 저장 뒤에도 보여야 할 안내는 작업대(`workbench.tsx`)가 들고 있어야 한다.
+  - 함정: sidecar 통합 시험(`orchestration_dispatch`)의 fake 에이전트는 `target/debug/elsecrew-sidecar` 실행 파일을 띄운다. `cargo test --lib`만 돌리면 "fake agent control launcher failed: No such file"로 15개가 실패하니 `cargo build -p elsecrew-sidecar`를 먼저 한다.
 
 - **결과 미리보기의 DNS 미리 찾기(2026-11-26)**: Electron 43에서 `<link rel=dns-prefetch>`는 CSP·`webRequest`·고정 프록시를 모두 거치지 않고 실제 DNS 질의를 보낸다. 미리보기가 켜지면(기본값, `ELSECREW_PREVIEW=0`으로 끔) `--blink-settings=dnsPrefetchingEnabled=false`(앱 전체)를 유지할 것. 미리보기 뷰는 앱 페이지 위에 그려지므로, 미리보기 영역을 덮는 새 화면 요소는 `previewObscured` 목록에 넣거나 적어도 무대 위에 실제로 그려져야(탭의 점 검사) 뷰가 숨는다. `pointer-events: none`인 덮개는 점 검사에 잡히지 않는다. 확인은 `pnpm m5:test:preview-isolation`의 net log 판정이며 Electron을 올릴 때 다시 돌린다. 미리보기 토큰은 renderer에 주지 않고, 작업 공간 주소는 sidecar가 채팅 바인딩에서 꺼낸다(renderer 값 불사용).
 

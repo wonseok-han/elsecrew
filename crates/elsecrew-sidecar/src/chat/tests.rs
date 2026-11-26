@@ -7262,6 +7262,14 @@ fn custom_roles_v3_seed_update_snapshot_and_legacy_gate() {
     let mut reordered = definitions.clone();
     reordered.as_array_mut().unwrap().swap(1, 2);
     assert!(f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, roles.clone(), Some(reordered), "req_v3_reordered").is_err());
+    // Saving refuses a member posing as the coordinator, a duplicate or a direction override (R4),
+    // for the project's team and for the app defaults alike.
+    for name in ["리드", "총괄", "리서치", "리\u{202e}서치"] {
+        let mut posing = definitions.clone();
+        posing[2]["name"] = json!(name);
+        assert!(f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, roles.clone(), Some(posing.clone()), "req_v3_posing").is_err(), "{name}");
+        assert!(f.projects.update_app_role_defaults(&f.storage, 1, roles.clone(), Some(posing)).is_err(), "{name}");
+    }
     let updated = f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, roles.clone(), Some(definitions.clone()), "req_v3_update").unwrap();
     assert_eq!(updated["schemaVersion"], 3);
     assert_eq!(updated["revision"], 2);

@@ -6,6 +6,7 @@ import { reduceOutputWindow, type OutputDisplayRow, type OutputWindow } from "./
 import { resolveM5Bridge } from "./bridge-boundary.ts";
 import type { AgentRunRecordV1 } from "./contracts/agent-adapter-v1.ts";
 import type { RoleDefinitionV3 } from "./contracts/run-recovery-v1.ts";
+import { isLeadRole } from "./role-colors.ts";
 import { roleLabel } from "./role-names.ts";
 import { decodeOutputPage, type OutputPage, type OutputPageRequest } from "./contracts/agent-output-pages.ts";
 import { activityLine, collapseRepeats, parseWorkActivity, WORK_OUTCOME_KEYS } from "./work-history.ts";
@@ -217,7 +218,7 @@ export function AgentOutputPanel({ runs, definitions, posted = [] }: {
   const visibleHistory = historyActive && historyPage?.request === historyRequest ? historyPage : null;
   return <section className="m5-durable-output" data-run-id={run!.runId} aria-label={t("m5.output.title")}>
     <label className="m5-output-heading"><span>{t("m5.output.title")}</span> {orderedRuns.length > 1 && <select aria-label={t("m5.output.title")} value={run!.runId} onChange={event => select(event.target.value)}>
-      {orderedRuns.map(value => <option key={value.runId} value={value.runId}>{roleLabel(value.selectedProfile.roleId, definitions, t)} · {value.selectedProfile.runtime === "codex" ? "Codex" : "Claude Code"} · {new Date(value.createdAt).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</option>)}
+      {orderedRuns.map(value => <option key={value.runId} value={value.runId}>{/* Coordinator marked by ID; a name is isolated so it cannot reorder the line (review PR #8 I1). */}{isLeadRole(value.selectedProfile.roleId) ? "★ " : ""}{`\u2068${roleLabel(value.selectedProfile.roleId, definitions, t)}\u2069`} · {value.selectedProfile.runtime === "codex" ? "Codex" : "Claude Code"} · {new Date(value.createdAt).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</option>)}
     </select>}</label>
     {state === "loading" && <p role="status">{t("m5.output.loading")}</p>}
     {state === "legacy" && <p>{t("m5.output.legacy")}</p>}
