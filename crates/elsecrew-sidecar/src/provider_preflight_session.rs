@@ -136,6 +136,7 @@ pub(crate) struct NamedProfileObservation {
     model: String,
     effort: String,
     permission: ExpectedPermission,
+    approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy,
     workspace: std::path::PathBuf,
     home: std::path::PathBuf,
     observed_at: std::time::Instant,
@@ -180,6 +181,7 @@ impl NamedProfileObservation {
         self.model == expected.model
             && self.effort == expected.reasoning_effort
             && self.permission == permission
+            && self.approval == expected.approval
             && self.workspace == workspace
             && self.home == home
             && self.observed_at.elapsed() <= Duration::from_secs(30)
@@ -190,24 +192,47 @@ impl NamedProfileObservation {
 mod named_observation_tests {
     use super::*;
 
+    /// The launch flags carry the run's approval policy, and an observation
+    /// made under one policy does not admit a run under the other (2026-11-27).
+    #[test]
+    fn codex_launch_and_observation_follow_the_approval_policy() {
+        use elsecrew_core::provider::vendor_observation::codex_preflight::{CodexApprovalPolicy, ExpectedProfile};
+        // Codex 0.171 refuses `approval_policy = "untrusted"` as a process
+        // setting, so the flags stay on-request; the thread carries the policy.
+        for approval in [CodexApprovalPolicy::OnRequest, CodexApprovalPolicy::Untrusted] {
+            let expected = ExpectedProfile { model: "test-model", reasoning_effort: "medium", approval };
+            let args = discovery_arguments(std::path::Path::new("/managed/profile"), &expected, ExpectedPermission::WorkspaceWrite).unwrap();
+            assert!(args.iter().any(|arg| arg == "approval_policy=\"on-request\""));
+            assert_eq!(args.iter().filter(|arg| arg.to_string_lossy().starts_with("approval_policy=")).count(), 1);
+        }
+        let asks = ExpectedProfile { model: "test-model", reasoning_effort: "medium", approval: CodexApprovalPolicy::Untrusted };
+        let runs = ExpectedProfile { model: "test-model", reasoning_effort: "medium", approval: CodexApprovalPolicy::OnRequest };
+        let workspace = std::path::Path::new("/managed/snapshot");
+        let home = std::path::Path::new("/managed/profile");
+        let observed = NamedProfileObservation { model: "test-model".into(), effort: "medium".into(), permission: ExpectedPermission::ReadOnly,
+            approval: CodexApprovalPolicy::Untrusted, workspace: workspace.into(), home: home.into(), observed_at: Instant::now() };
+        assert!(observed.matches(&asks, ExpectedPermission::ReadOnly, workspace, home));
+        assert!(!observed.matches(&runs, ExpectedPermission::ReadOnly, workspace, home), "the permission changed since it was observed");
+    }
+
     #[test]
     fn selected_observation_cannot_move_to_another_profile_or_workspace() {
         use elsecrew_core::provider::vendor_observation::codex_preflight::ExpectedProfile;
-        let expected = ExpectedProfile { model: "test-model", reasoning_effort: "medium" };
+        let expected = ExpectedProfile { model: "test-model", reasoning_effort: "medium", approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest };
         let workspace = std::path::Path::new("/managed/snapshot");
         let home = std::path::Path::new("/managed/profile");
         let mut observed = NamedProfileObservation {
             model: expected.model.into(), effort: expected.reasoning_effort.into(),
-            permission: ExpectedPermission::ReadOnly, workspace: workspace.into(),
+            permission: ExpectedPermission::ReadOnly, approval: expected.approval, workspace: workspace.into(),
             home: home.into(), observed_at: Instant::now(),
         };
         assert!(observed.matches(&expected, ExpectedPermission::ReadOnly, workspace, home));
         assert!(!observed.matches(&expected, ExpectedPermission::WorkspaceWrite, workspace, home));
         assert!(!observed.matches(&expected, ExpectedPermission::ReadOnly, std::path::Path::new("/other"), home));
         assert!(!observed.matches(&expected, ExpectedPermission::ReadOnly, workspace, std::path::Path::new("/other")));
-        let other = ExpectedProfile { model: "another-model", reasoning_effort: "medium" };
+        let other = ExpectedProfile { model: "another-model", reasoning_effort: "medium", approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest };
         assert!(!observed.matches(&other, ExpectedPermission::ReadOnly, workspace, home));
-        let other = ExpectedProfile { model: "test-model", reasoning_effort: "high" };
+        let other = ExpectedProfile { model: "test-model", reasoning_effort: "high", approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest };
         assert!(!observed.matches(&other, ExpectedPermission::ReadOnly, workspace, home));
         observed.observed_at = Instant::now() - Duration::from_secs(31);
         assert!(!observed.matches(&expected, ExpectedPermission::ReadOnly, workspace, home));
@@ -292,6 +317,7 @@ pub(crate) fn inspect_named_preflight_display_candidate(
             model: expected.model.into(),
             effort: expected.reasoning_effort.into(),
             permission,
+            approval: expected.approval,
             workspace: workspace.into(),
             home: home.clone(),
             observed_at: Instant::now(),
@@ -489,6 +515,7 @@ pub(crate) fn discovery_arguments(
         "-c",
         "model_provider=\"openai\"",
         "-c",
+        // Codex 0.171 refuses `untrusted` here; the thread carries the run's policy.
         "approval_policy=\"on-request\"",
         "-c",
         &sandbox,
@@ -1031,7 +1058,7 @@ mod tests {
             std::fs::write(home.join("config.toml"), &config).unwrap();
             std::fs::set_permissions(home.join("config.toml"), std::fs::Permissions::from_mode(0o600)).unwrap();
             let profile = InspectionProfile { root, home: home.clone(), config };
-            let expected = ExpectedProfile { model: "test-model", reasoning_effort: "medium" };
+            let expected = ExpectedProfile { model: "test-model", reasoning_effort: "medium", approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest };
             let mut args = if version_probe {
                 codex_version_arguments(&home).unwrap()
             } else if login_probe {
@@ -1340,6 +1367,7 @@ mod tests {
         let expected = ExpectedProfile {
             model: "test-model",
             reasoning_effort: "medium",
+            approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
         };
         let mut flow =
             PreflightExchange::configuration_only(&expected, home.to_str().unwrap()).unwrap();
@@ -1476,6 +1504,7 @@ mod tests {
                 &ExpectedProfile {
                     model: "test-model",
                     reasoning_effort: "medium",
+                    approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
                 },
                 home.to_str().unwrap(),
             )
@@ -1564,6 +1593,7 @@ mod tests {
                 &ExpectedProfile {
                     model: "test-model",
                     reasoning_effort: "medium",
+                    approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
                 },
                 &cancel,
             )
@@ -1663,6 +1693,7 @@ IFS= read -r hold
                 &ExpectedProfile {
                     model: "test-model",
                     reasoning_effort: "medium",
+                    approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
                 },
                 &cancel,
             );
@@ -1690,6 +1721,7 @@ IFS= read -r hold
         let profile = ExpectedProfile {
             model: "test-model",
             reasoning_effort: "medium",
+            approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
         };
         let command = discovery_command(
             std::path::Path::new("/verified/codex"),
@@ -1760,7 +1792,8 @@ IFS= read -r hold
                 std::path::Path::new("/private/profile"),
                 &ExpectedProfile {
                     model,
-                    reasoning_effort: "medium"
+                    reasoning_effort: "medium",
+                    approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
                 }
             )
             .is_err());
@@ -1823,6 +1856,7 @@ IFS= read -r hold
                 &ExpectedProfile {
                     model: "test-model",
                     reasoning_effort: "medium",
+                    approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
                 },
                 home.to_str().unwrap(),
             )

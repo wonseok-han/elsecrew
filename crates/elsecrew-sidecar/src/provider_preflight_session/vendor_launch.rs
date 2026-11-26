@@ -94,6 +94,7 @@ mod tests {
             elsecrew_core::provider::vendor_observation::codex_preflight::ExpectedProfile {
                 model: "test-model",
                 reasoning_effort: "medium",
+                approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
             };
         assert!(CodexCommand::new(
             Path::new("/usr/bin/true"),

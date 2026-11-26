@@ -277,6 +277,7 @@ pub(super) fn match_configuration(
             }
         }
     }
+    // The process setting stays on-request; the thread carries the run's policy.
     check_configuration_layers(&result, home, expected, &policy, "on-request")?;
     if !matches_policy(
         &result["config"]["permissions"]["elsecrew-snapshot"],

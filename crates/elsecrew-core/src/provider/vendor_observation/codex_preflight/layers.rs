@@ -174,6 +174,7 @@ mod tests {
                 let input = BoundedObservation::new(raw.into_bytes()).unwrap();
                 assert!(match_layers(&input, &ExpectedProfile {
                     model: "test-model", reasoning_effort: "medium",
+                    approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
                 }, "/app/profile", ExpectedPermission::ReadOnly).is_err());
             }
         }
@@ -181,12 +182,12 @@ mod tests {
         let mut tools_off = base.clone();
         tools_off["layers"][0]["config"]["features"]["computer_use"] = json!(false);
         let off = BoundedObservation::new(tools_off.to_string().into_bytes()).unwrap();
-        assert!(match_layers(&off, &ExpectedProfile { model: "test-model", reasoning_effort: "medium" },
+        assert!(match_layers(&off, &ExpectedProfile { model: "test-model", reasoning_effort: "medium", approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest },
             "/app/profile", ExpectedPermission::ReadOnly).is_ok());
         for duplicate in ["\"computer_use\":true,\"computer_use\":false", "\"computer_use\":false,\"computer_use\":true"] {
             let raw = tools_off.to_string().replace("\"computer_use\":false", duplicate);
             let input = BoundedObservation::new(raw.into_bytes()).unwrap();
-            assert!(match_layers(&input, &ExpectedProfile { model: "test-model", reasoning_effort: "medium" },
+            assert!(match_layers(&input, &ExpectedProfile { model: "test-model", reasoning_effort: "medium", approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest },
                 "/app/profile", ExpectedPermission::ReadOnly).is_err(), "{duplicate}");
         }
         for raw_projects in [
@@ -197,6 +198,7 @@ mod tests {
             let input = BoundedObservation::new(raw.into_bytes()).unwrap();
             assert!(match_layers(&input, &ExpectedProfile {
                 model: "test-model", reasoning_effort: "medium",
+                approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
             }, "/app/profile", ExpectedPermission::ReadOnly).is_err());
         }
         for case in [
@@ -265,7 +267,8 @@ mod tests {
                     &input,
                     &ExpectedProfile {
                         model: "test-model",
-                        reasoning_effort: "medium"
+                        reasoning_effort: "medium",
+                        approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
                     },
                     "/app/profile",
                     ExpectedPermission::ReadOnly,
@@ -294,7 +297,8 @@ mod tests {
                             &input,
                             &ExpectedProfile {
                                 model: "test-model",
-                                reasoning_effort: "medium"
+                                reasoning_effort: "medium",
+                                approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
                             },
                             "/app/profile",
                             ExpectedPermission::ReadOnly
@@ -312,7 +316,8 @@ mod tests {
                 &BoundedObservation::new(wire.into_bytes()).unwrap(),
                 &ExpectedProfile {
                     model: "test-model",
-                    reasoning_effort: "medium"
+                    reasoning_effort: "medium",
+                    approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
                 },
                 "/app/profile",
                 ExpectedPermission::ReadOnly

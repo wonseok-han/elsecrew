@@ -17,6 +17,8 @@ pub struct TurnStart {
     status_events: usize,
     status_bytes: usize,
     budget: ProviderEventBudget,
+    /// The thread started with `untrusted`; its stream reads requests so.
+    untrusted: bool,
 }
 
 /// Typed text request. No arbitrary renderer JSON can construct it.
@@ -85,7 +87,14 @@ impl TurnStart {
             status_events: 0,
             status_bytes: 0,
             budget: ProviderEventBudget::LegacyV1,
+            untrusted: false,
         })
+    }
+
+    /// The thread this turn runs in started with `untrusted`.
+    pub(super) fn in_untrusted_thread(mut self, untrusted: bool) -> Self {
+        self.untrusted = untrusted;
+        self
     }
 
     /// Select before sending the start frame. Preflight limits remain unchanged.
@@ -193,7 +202,7 @@ impl TurnStart {
         }
         if let (Some(turn), Some(started)) = (&self.reply, &self.started) {
             self.diagnostic_stage = "turn start stream binding";
-            let mut stream = TurnStream::with_budget(&self.thread, turn, self.budget)?;
+            let mut stream = TurnStream::with_budget(&self.thread, turn, self.budget)?.with_untrusted_thread(self.untrusted);
             if !matches!(stream.observe(started)?, Observed::Started) {
                 return Err(invalid());
             }

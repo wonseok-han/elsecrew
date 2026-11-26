@@ -9,7 +9,9 @@
 //! uses (what the user is shown, the approval fingerprint, the input sent back
 //! to the provider) must stay the provider's original text (PR #17 review B1):
 //! - Claude: approvals come only from `control_request` frames, which are never
-//!   shortened (the allow reply echoes their input as `updatedInput`). Only
+//!   shortened (the allow reply echoes their input as `updatedInput`). A
+//!   permission request over the bound (a large Write) is passed on whole, and
+//!   the permission parser bounds what it keeps (`claude_approval`). Only
 //!   frames the session reads for the work history are shortened: tool results
 //!   (`user`) and the private blocks of an assistant frame; public text stays.
 //! - Codex: an approval is completed from the command and working folder its
@@ -90,6 +92,14 @@ pub fn reduce_oversized_line(
     }
     // Duplicate keys are refused before anything is rewritten, as for any frame.
     let mut root = unique_json::parse(body).map_err(|_| Refusal::NotJson)?;
+    if policy == OversizedLinePolicy::ClaudeStreamJson && is_claude_permission_request(&root) {
+        // Read exactly, never shortened: what the person approves and what
+        // the allow reply echoes is the original (2026-11-26 big Write).
+        drop(root);
+        let mut bytes = body.to_vec();
+        bytes.push(b'\n');
+        return BoundedObservation::new_session_control(bytes).map_err(|_| Refusal::OverRawBound);
+    }
     let object = root.as_object_mut().ok_or(Refusal::UnknownShape)?;
     match policy {
         OversizedLinePolicy::ClaudeStreamJson => reduce_claude(object)?,
@@ -101,6 +111,16 @@ pub fn reduce_oversized_line(
     }
     bytes.push(b'\n');
     BoundedObservation::new(bytes).map_err(|_| Refusal::StillOverBound)
+}
+
+/// A tool permission request or PreToolUse hook check: the frames whose
+/// input an approval shows and echoes.
+fn is_claude_permission_request(root: &Value) -> bool {
+    root.get("type").and_then(Value::as_str) == Some("control_request")
+        && matches!(
+            root.get("request").and_then(|request| request.get("subtype")).and_then(Value::as_str),
+            Some("can_use_tool" | "hook_callback")
+        )
 }
 
 /// An upper bound on the JSON values in `body`, counted without parsing:
@@ -338,8 +358,14 @@ mod tests {
     #[test]
     fn permission_requests_handshake_and_results_are_never_shortened() {
         let big = "x".repeat(200_000);
+        // A permission request over the bound is passed on whole, byte for byte.
+        for subtype in ["can_use_tool", "hook_callback"] {
+            let request = line(&json!({"type":"control_request","request_id":"r1","request":{"subtype":subtype,"tool_name":"Write","input":{"file_path":"a","content":big}}}));
+            let observed = reduce_oversized_line(&request, OversizedLinePolicy::ClaudeStreamJson).unwrap();
+            assert_eq!(observed.bytes, request, "{subtype}");
+        }
         for frame in [
-            json!({"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"a","content":big}}}),
+            json!({"type":"control_request","request_id":"r1","request":{"subtype":"interrupt","pad":big}}),
             json!({"type":"control_cancel_request","request_id":"r1","pad":big}),
             json!({"type":"control_response","response":{"pad":big}}),
             json!({"type":"result","subtype":"success","result":big}),
@@ -537,10 +563,23 @@ mod tests {
         let reply = session.allow_once(&asked).unwrap();
         let wire: Value = serde_json::from_str(reply.as_str()).unwrap();
         assert_eq!(wire["response"]["response"]["updatedInput"]["content"].as_str(), Some(content.as_str()));
-        // The same request over the bound is refused, never shortened.
+        // The same request over the line bound is kept whole, never shortened,
+        // and its allow reply echoes the whole original (2026-11-26 big Write).
+        let _held = crate::provider::vendor_observation::claude_approval::LARGE_INPUT_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut over = request.clone();
+        over["request_id"] = json!("perm_big");
+        over["request"]["tool_use_id"] = json!("toolu_big");
         over["request"]["input"]["content"] = Value::String(content.repeat(2));
-        assert_eq!(reduce_oversized_line(&line(&over), OversizedLinePolicy::ClaudeStreamJson).unwrap_err(), OversizedLineRefusal::ProtectedFrame);
+        let raw = line(&over);
+        assert!(raw.len() > PROVIDER_OBSERVATION_LINE_MAX_BYTES);
+        let observed = reduce_oversized_line(&raw, OversizedLinePolicy::ClaudeStreamJson).unwrap();
+        let claude_session::Event::Permission(Observation::Requested(asked)) = session.observe(&observed).unwrap()
+            else { panic!("expected the large permission request") };
+        assert!(!asked.withheld());
+        let reply = session.allow_once(&asked).unwrap();
+        let wire: Value = serde_json::from_str(reply.as_str()).unwrap();
+        assert_eq!(wire["response"]["response"]["updatedInput"]["content"].as_str(), Some(content.repeat(2).as_str()));
+        assert!(reply.as_str().len() > PROVIDER_OBSERVATION_LINE_MAX_BYTES);
     }
 
     /// Review M1: a new file with too many lines to keep a count drops the

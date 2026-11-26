@@ -80,6 +80,7 @@ pub(crate) mod tests {
         let expected = ExpectedProfile {
             model: "test-model",
             reasoning_effort: "medium",
+            approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
         };
         let policy = json!({"filesystem":{":root":"deny"},"network":{"enabled":false}});
         let flags = json!({"model":"test-model","model_reasoning_effort":"medium","model_provider":"openai","approval_policy":"on-request","default_permissions":"elsecrew-snapshot","permissions":{"elsecrew-snapshot":policy},"features":{"hooks":false,"apps":false,"plugins":false}});
@@ -166,7 +167,7 @@ pub(crate) mod tests {
     #[test]
     fn a_task_worktree_may_read_the_repository_git_data_and_nothing_else_opens() {
         let (_temp, source, workspace) = real_worktree();
-        let expected = ExpectedProfile { model: "test-model", reasoning_effort: "medium" };
+        let expected = ExpectedProfile { model: "test-model", reasoning_effort: "medium", approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest };
         let profile = workspace.parent().unwrap().join("profile");
         let args = named_discovery_arguments(&profile, &workspace, &expected, ExpectedPermission::WorkspaceWrite).unwrap();
         let policy = args.last().unwrap().to_str().unwrap().to_owned();
@@ -196,6 +197,7 @@ pub(crate) mod tests {
         let expected = ExpectedProfile {
             model: "test-model",
             reasoning_effort: "medium",
+            approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
         };
         for permission in [
             ExpectedPermission::ReadOnly,

@@ -413,6 +413,7 @@ mod tests {
         let expected = ExpectedProfile {
             model: "gpt-6-astra",
             reasoning_effort: "medium",
+            approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
         };
         let cancel = AtomicBool::new(false);
         let mut inspection = if proxied {
