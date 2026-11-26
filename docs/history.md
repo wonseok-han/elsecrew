@@ -16,7 +16,8 @@
   - 측정 중 고친 결함: 머리말·카드 머리에 옛 `.m5-timeline header` 규칙이 먹어 목표가 상태 옆으로 붙던 것(`run-running.png`는 수정 전 캡처), 작업이 끝나도 오른쪽이 '파일'에 머물던 것.
   - 시험 데이터: 새 작업 "README.md 맨 아래에 '마지막 점검…'"은 검토 대기로 남겨 두었다. 합치기는 시험 폴더의 기존 미기록 변경(PR #3 사본 반영 시험이 남긴 README 한 줄)과 겹쳐 제품이 막았고, 그 폴더는 건드리지 않았다.
 - **테스트**: `npm test` 813 통과(새 `m5-task-layout`·`m5-task-story` 시험 포함, 옛 `m5-dock-layout` 삭제), `pnpm build` 통과. Rust 변경 없음(cargo는 개발 sidecar 빌드만). `tests/m5-renderer-mount-smoke.mts`는 기준선(d221832f)과 같은 지점("default suggestion remains an unsaved edit", 역할 설정)에서 실패 — 1차-가 D12로 자동 추천 모델을 미저장으로 세지 않게 된 뒤 낡은 기대값이며 이번 범위(RoleSettings 불변) 밖이다. 그 뒤의 레이아웃 검사는 새 `data-testid`로 바꿔 두었지만 실행으로 확인하지 못했다.
-- **남은 것**: 실제 권한 요청이 이번 실행에서 나오지 않아 입력칸 위 고정 확인 카드는 실제 화면으로 못 봤다(코드상 portal). 실행별 바뀐 파일 칩은 renderer에 실행별 파일 목록이 없어 넣지 않았다(2차 F4와 함께 sidecar 계약). 미리보기 탭은 자리만(P3, `data-preview-covered`로 겹침 상태 노출). 렌더러 스모크의 역할 설정 기대값 갱신(역할 편집 R0~R2 작업에서). PR(`--base feature/ade`)·Codex 검토 반영.
+- **남은 것**: 실제 권한 요청이 이번 실행에서 나오지 않아 입력칸 위 고정 확인 카드는 실제 화면으로 못 봤다(코드상 portal). 실행별 바뀐 파일 칩은 renderer에 실행별 파일 목록이 없어 넣지 않았다(2차 F4와 함께 sidecar 계약). 미리보기 탭은 자리만(P3, `data-preview-covered`로 겹침 상태 노출). 렌더러 스모크의 역할 설정 기대값 갱신(역할 편집 R0~R2 작업에서). Codex 검토 반영.
+- **PR**: https://github.com/wonseok-han/elsecrew/pull/5 (`--base feature/ade`). CI(b6948350) macOS·Windows·website·GitGuardian 모두 통과.
 
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #3 Codex 집중 검토(새 중요 1, 부분 3, 새 경미 1) 반영
 검토서: `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-codex-4.md`(대상 a5fda0c9, 차단 0). 조정자 결정: 이 다섯 가지를 리뷰 재현 순서 그대로의 회귀 테스트로 막으면 재검토 없이 머지.
