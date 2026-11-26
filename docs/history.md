@@ -2,6 +2,18 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #19 재검토(B1 미해소·중요 3) 마지막 라운드 (`orca/ade-d3-bigwrite`)
+재검토 `~/Documents/elsecrew-ade-stability-2026-11-26/REVIEW-pr19-2.md`(대상 37f9372d).
+
+| 지적 | 처리 | 시험 |
+| --- | --- | --- |
+| B1 로딩 중 상세를 닫아도 허용이 켜짐 | 요청마다 확인 상태 하나(`ApprovalReview`: 지금 펼쳐짐·검증된 전체·진행·세대)를 두고, 전이를 순수 함수로 만들었다(`reviewOpened`·`reviewReset`·`reviewProgress`·`reviewLoaded`·`reviewRetain`). 상세를 닫거나 요청 내용이 바뀌거나 다시 읽으면 처음부터 다시 확인하고 세대가 올라간다. 그 뒤 도착한 이전 세대의 로딩은 버린다. 실패 뒤 다시 펼치면 재시도한다. 허용 버튼 활성과 클릭 처리 모두 `reviewAllows` 하나를 쓴다(지금 펼쳐짐 + 모든 쪽 + 크기·해시 일치). | `PR #19 re-review B1: allowing needs the details open now…`(리뷰 재현: 펼침 → 로딩 중 닫음 → 늦게 완료 → 허용 불가) |
+| Codex 켬 상태 자동 허용 확대 | 규칙 제안은 `untrusted`로 시작한 스레드에서만 읽는다(`PendingApproval::parse_in_thread`, `TurnStart`→`TurnStream`). `on-request` 스레드에서는 예전처럼 즉시 거절한다. | core `a_trust_rule_proposal_is_an_approval_only_in_an_untrusted_thread`, `a_proposed_trust_rule_is_read_but_never_adopted`; sidecar `a_codex_command_asks_the_person_when_commands_are_off`(켬/끔 × 일반/제안/네트워크/작업 공간 밖) |
+| 실행 중 설정 변경이 진행 중 승인에 적용 | `untrusted` 스레드에서 온 명령 요청은 설정이 실행 중에 켜져도 앱이 자동 허용하지 않는다(`thread_untrusted`). | 같은 sidecar 시험 "turned on mid-run: still asks" |
+| I2 종료 이벤트 읽기 실패 시 예산 | 출력 처리 직후에도 종료가 확인되면 대기열을 비운다(`release_unanswerable`). 소유자가 버려질 때(drop)는 대기열과 함께 예산이 반환된다. | `requests_of_an_ended_run_give_back_their_budget`(종료 → 반환, 대기열 drop → 반환) |
+
+- **검증**: core 267, sidecar 관련 묶음, `npm test` 1011/1011, `pnpm build`. 전체 Rust·CI는 아래에 덧붙인다.
+
 ### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #19 검토(차단 1·중요 2·경미 1) 반영과 Codex '명령 실행 허용' 일치 (`orca/ade-d3-bigwrite`)
 검토 `~/Documents/elsecrew-ade-stability-2026-11-26/REVIEW-pr19.md`(대상 f65683fd). 조정자 지시: 큰 입력은 전체를 본 뒤에만 허용, 모든 경로에서 예산 회수 증명, 명령 허용을 끄면 Codex도 매번 묻게.
 
