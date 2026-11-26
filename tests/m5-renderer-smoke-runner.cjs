@@ -817,14 +817,14 @@ app.whenReady().then(async () => {
     const originalModel = modelInput.value;
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(modelInput, 'unsaved-model');
     modelInput.dispatchEvent(new Event('input', {bubbles: true}));
-    await ${waitFor("document.querySelector('.m5-settings [role=status]')", "role draft dirty")};
+    await ${waitFor("document.querySelector('.m5-team-unsaved')?.textContent", "role draft dirty")};
     const changeSettingsLanguage = language => {
       const select = document.querySelector('.m5-preferences-row select');
       select.value = language;
       select.dispatchEvent(new Event('change', {bubbles:true}));
     };
     changeSettingsLanguage('en');
-    await ${waitFor("document.querySelector('.m5-settings h2')?.textContent === 'Roles and models'", "English role settings")};
+    await ${waitFor("document.querySelector('.m5-settings h2')?.textContent === 'Team roles'", "English role settings")};
     if (document.querySelector('#m5-role-editor details input') !== modelInput || modelInput.value !== 'unsaved-model' || !leave.disabled) throw new Error('language switch lost or unlocked role settings draft');
     if (document.querySelector('#m5-role-editor h3').textContent !== 'Coordinator') throw new Error('role name is not translated');
     changeSettingsLanguage('ko');
@@ -842,11 +842,11 @@ app.whenReady().then(async () => {
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '저장된 설정 다시 불러오기').click();
     await ${waitFor("document.querySelector('.m5-settings [role=alertdialog]')", "role reload confirmation")};
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '설정 변경 버리고 다시 불러오기').click();
-    await ${waitFor("![...document.querySelectorAll('.m5-settings [role=status]')].some(node => node.textContent === '저장하지 않은 설정 변경이 있어요.') && !document.querySelector('.m5-settings [role=alertdialog]')", "role settings restored")};
+    await ${waitFor("!document.querySelector('.m5-team-unsaved')?.textContent && !document.querySelector('.m5-settings [role=alertdialog]')", "role settings restored")};
     if (document.querySelector('#m5-role-editor details input').value !== originalModel) throw new Error('role reload did not restore saved model');
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(document.querySelector('#m5-role-editor details input'), 'discard-this-model');
     document.querySelector('#m5-role-editor details input').dispatchEvent(new Event('input', {bubbles: true}));
-    await ${waitFor("document.querySelector('.m5-settings [role=status]')", "new role draft before explicit discard")};
+    await ${waitFor("document.querySelector('.m5-team-unsaved')?.textContent", "new role draft before explicit discard")};
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '프로젝트로 돌아가기').click();
     await ${waitFor("document.querySelector('.m5-settings [role=alertdialog]')", "explicit role discard confirmation")};
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '설정 변경 버리고 닫기').click();
