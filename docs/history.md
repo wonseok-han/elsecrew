@@ -23,6 +23,7 @@
   - 미리보기 UI 스모크 다크 2회·라이트 2회 연속 PASS.
   - 네이티브 시나리오 PASS(실제 sidecar, 임시 폴더·앱 데이터, 공급자 미연결). 캡처 `~/Documents/elsecrew-ade-screens-u2-u4-2026-11-26/review-fix/native/`, 스모크 캡처 `review-fix/smoke/{dark,light}`.
   - 개발 앱은 띄우지 않았다(네이티브 시나리오가 실제 앱 흐름을 대신함). 프로세스 종료는 각 스크립트가 스스로 끝냈다.
+- **feature/ade 병합(PR #13 9918bc22)**: 반영 커밋 810ebcb8 뒤 PR이 충돌(DIRTY)해 CI가 돌지 않았다. `origin/feature/ade`를 병합했다. 기록 충돌은 기저 쪽 `history.md`·아카이브를 그대로 두고 이 PR의 두 엔트리와 핵심 결정만 더한 뒤, 500줄을 넘어 머지된 PR #10·#13 엔트리를 아카이브 맨 위로 옮겼다(아카이브를 먼저 읽고 씀). `pnpm m5:check:history` 기저 대비 453 유지·2 추가·누락 0. 병합 뒤 `npm test` 947/947, build, 렌더러 스모크 다크·라이트(27화면 실패 0), 미리보기 UI 스모크 다크·라이트 각 2회, 네이티브 시나리오 PASS.
 
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 화면 통일 U2(홈·처음 시작·전환·삭제·폴더 확인)·U3(새 작업 창)·U4(설정) (`orca/ade-screens-u2-u4`, 기준 feature/ade 7378332a)
 설계: `docs/proposals/m5-ade-screens-plan.md` 4.1과 시안 01~07·10·11·14(원본 `~/Documents/elsecrew-ade-screens-design-2026-11-26/`). 조정자 결정: Q1 홈 카드는 마지막으로 연 때만(요약 조회 없음), Q4 알림 설정 분리(종류별 끄기·해결된 알림 정리), Q5 홈 왼쪽 레일 제거, Q6 전환은 닫기+열기 한 동작, Q7 빈 폴더 확인을 앱 안으로(업데이트는 U8), Q8 '이 프로젝트'는 설정 목록의 묶음, Q9 첫 작업의 별도 확인 체크 유지(보내기가 동의를 대신하지 않음, 모양만 바꿈). 현행 설명은 architecture "홈·처음 시작·설정(U2~U4)".
@@ -46,7 +47,6 @@
 - **주의**: 미리보기 스모크 전에 개발 앱을 닫으면서 `pkill -f "electron-forge start"`를 썼다. 같은 컴퓨터의 다른 워커가 그 순간 `electron-forge start`를 돌리고 있었다면 함께 닫혔을 수 있다(확인 불가). 다음부터는 자기 프로필 경로로만 종료한다.
 - **다음 할 일(U5~U8 전)**: 홈 카드의 상태 배지·작업 요약(시안의 '확인 필요 1' 등)은 Q1에 따라 넣지 않았다. 필요하면 엔진에 프로젝트별 요약 조회를 새로 만들어야 한다. 홈 검색칸·전환 팝오버의 '이 프로젝트 설정' 줄도 아직 없다. 알림 정리는 앱 시작 때만 돈다.
 
-
 ## 프로젝트 요약 (고정)
 터미널을 한 번도 안 열어본 비개발자를 **코딩 에이전트(Claude Code·Codex)가 굴러가는 상태까지** 데려다주는 데스크톱 GUI 앱. 현재 배포 경로는 Tauri 2 + React 19이고, M5는 Electron + React/TypeScript + Monaco와 Rust sidecar의 별도 작업대 골격으로 전환 중이다.
 - 기획 원본: `~/Library/CloudStorage/OneDrive-개인/ObsidianVault/오픈소스/아이디어/후보/에이전트-스타터.md`
@@ -54,6 +54,12 @@
 - 위저드 6단계: 에이전트 선택 → 진단 → 설치 → 로그인 → 첫 프로젝트 → 졸업식
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+- **실제 앱 시험의 함정(2026-11-26, ADE V)**
+  - 앱 전용 로그인은 프로필 안에 있다(Codex `…/m5/codex-profile-v1/auth.json`, Claude는 설정 폴더 경로 해시로 구분된 Keychain 항목). 그래서 임시 `--user-data-dir`로는 실제 실행이 안 된다.
+  - 개발 앱 창이 다른 창에 완전히 가려지면 macOS Electron이 `hide`를 보내 미리보기가 숨고, rAF도 멈춘다. CDP 측정 중 "뷰가 안 보임"은 이것부터 의심한다(창을 앞으로 가져오면 다시 보인다).
+  - main 디버거(`--inspect=<port>`)에서는 `require.cache[".../.vite/build/main.cjs"].exports.previewManager`로 미리보기 상태(`currentLayout`·`visibility`·`refusedMeasurements`)를 읽을 수 있다.
+  - 큰 도구 결과(이미지)가 Claude 출력 한 줄 128KiB를 넘으면 실행이 멈춘다(D2).
+  - 동시 스트림 16개를 넘으면 엔진이 재시작된다(D1).
 
 - **색은 토큰 블록 두 곳에만(2026-11-26, 화면 통일 U0·U1)**: `styles.css`의 다크 `:root`와 라이트 `:root[data-theme="light"]` 밖에는 hex·`rgb()`를 쓰지 않는다. 화면 코드에도 색 리터럴을 쓰지 않는다(Monaco는 `theme.ts`가 토큰에서 읽음). `tests/m5-style-tokens.test.mts`가 대비(다크·라이트 각 95쌍)·블록 밖 색 0·정의되지 않은 토큰 0을 막는다. 라이트 값은 1단 `--p-*`만 바꾼다. 새 화면은 공용 컴포넌트 클래스(`.m5-btn-*`·`.m5-badge`·`.m5-banner`·`.m5-card`·`.m5-group`·`.m5-empty-state`·`.m5-steps`·`.m5-recover`)를 쓴다.
   - 화면 밝기 기록의 기준은 main의 `userData/appearance.json`이다(PR #10 검토 I1로 바꿈). 렌더러 `localStorage`(`elsecrew.theme.v1`)는 첫 페인트용 사본이다. 렌더러는 시작 때 `m5Appearance.get()`으로 기록을 받아 따르고, main에 읽을 수 있는 기록이 없을 때만 올바른 사본으로 복구한다(손상 사본은 보내지 않음). 기록은 `.tmp` + rename으로 바꾸며 실패는 `saved: false`로 화면에 알린다. 시스템 밝기 변경은 `nativeTheme.updated`가 창 배경을, `prefers-color-scheme`이 CSS·Monaco를 바꾼다.
@@ -425,4 +431,6 @@
 
 2026-11-26 워크로그 중 `feature/ade`에 머지된 PR #5(레이아웃)·#6(미리보기 백엔드)·#7(스모크 복구)·#8(팀 역할) 엔트리는 같은 날 두 번째 롤오버로 `docs/archive/history-2026-11.md` 맨 위로 옮겼다(머지된 PR 단위).
 
-2026-11-26 워크로그 중 `feature/ade`에 머지된 PR #9(미리보기 화면)·#10(토큰·화면 밝기) 엔트리는 같은 날 세 번째 롤오버로 `docs/archive/history-2026-11.md` 맨 위로 옮겼다(머지된 PR 단위).
+2026-11-26 워크로그 중 `feature/ade`에 머지된 PR #9(미리보기 화면·검토 반영 두 라운드) 엔트리는 같은 날 세 번째 롤오버로 `docs/archive/history-2026-11.md` 맨 위로 옮겼다(머지된 PR 단위).
+
+2026-11-26 워크로그 중 `feature/ade`에 머지된 PR #10(토큰·화면 밝기, 검토 반영 포함)·#13(ADE 1차 통합 검증 V, 검토 반영 포함) 엔트리는 같은 날 네 번째 롤오버로 `docs/archive/history-2026-11.md` 맨 위로 옮겼다(머지된 PR 단위).

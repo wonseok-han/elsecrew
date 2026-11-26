@@ -1,3 +1,47 @@
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #13 검토(차단 1·중요 2·경미 2) 반영 (`orca/ade-v-check`)
+검토 `~/Documents/elsecrew-ade-v-2026-11-26/REVIEW-pr13.md`(대상 4fa7db56) 반영. 사용량 한도로 멈췄다가 19:10 이후 이어서 마쳤다.
+
+- **B1(아카이브 유실)**
+  - 원인: 롤오버 스크립트가 아카이브를 쓰기 모드로 먼저 열고 나서 읽었다. 그래서 파일이 비워졌고 11월 엔트리 446개가 사라졌다(검토는 11-02~26 제목 74개로 셈).
+  - 복구: `feature/ade` 7378332a의 아카이브 원문 그대로 되살리고, 그 위에 PR #9 엔트리 3개를 얹었다.
+  - 검사 추가: `scripts/m5-history-entries.mjs`(`pnpm m5:check:history`). 기준의 모든 `### YYYY-MM-DD` 엔트리가 원문 그대로 history.md나 archive에 있는지 본다. 결과는 기준 451 → 현재 451 보존, 새 엔트리 2이다. 옛 PR 머리(`--tree 4fa7db56`)에는 446 유실을 보고한다.
+  - CLAUDE.md·AGENTS.md 롤오버 규칙에 이 검사와 "읽은 뒤 쓴다"를 넣었다.
+  - 날짜 경계와 고정 섹션 분량(366줄)이 충돌하는 문제는 문서 관리 합의가 필요해 남긴다.
+- **I1(표시 순서)**: 0.5초 타이머(`settleLimitMs`)를 없앴다. 띠 변경은 `PreviewBands`(preview-tab-model)를 거친다. 숨김 응답 뒤에 띠를 바꾸고, 페이지 배치 보고(`rendered`) 뒤에만 다시 보인다. 결과가 화면과 같으면 그 자리에서 `settled`를 알린다.
+- **I2(새 결과 알림)**: 띠를 넣을지 뺄지는 화면값이 아니라 목표값(`target`)으로 정한다. 그래서 다시 불러오는 동안 띠를 내리라는 변경이 대기 중이어도 새 결과 신호가 사라지지 않는다.
+- **M1**: 보고서의 스모크 집계를 바로잡았다. `ui-smoke/`는 병합본 1회차 34/35로 덮어쓰인 결과였다.
+- **M2**: 출력 조회 실패 중이거나 이미 활동을 보인 실행에는 시작 문장을 내지 않는다.
+- **기준 6 판정 정정**: 정상 흐름은 충족이다. 오류·예외 경로(합치기 차단·충돌·다른 브랜치 안내, 설정 도움말)에는 '브랜치'·'(커밋)'이 남아 미충족이다.
+- **시험**
+  - `tests/m5-preview-layout-loop.test.mts`: "a band the page lays out late keeps the view hidden until it is laid out — no timer shows it at the old place", "a new result while taking the band down for a reload keeps the band", "a band change that would change nothing hides nothing"
+  - `tests/m5-preview-tab.test.mts`: 구조 검사, 타이머 없음
+  - `tests/m5-ade-v-check.test.mts`: M2
+  - UI 스모크: "I1 the view is never shown between the hide and the band laid out", "I2 a new result while the band goes for a reload keeps the band, and the view returns". 응답 900ms 지연 상태에서 시험했다. 실행 종료 신호만 띠 모델에 직접 넣었다.
+- **검증**: `npm test` 925/925, `pnpm build`, 렌더러 마운트 스모크 69, UI 스모크 37/37(`~/Documents/elsecrew-ade-v-2026-11-26/ui-smoke-pr13-review/`), 기록 엔트리 검사 통과.
+- **다음**: 노예 재검토·머지. 기준 6의 오류 경로 문구, 롤오버 날짜 경계 규칙 합의, D1~D3는 별도로 진행한다.
+
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — ADE 1차 통합 검증(V): 완료 기준 6개 실제 todo 측정 (`orca/ade-v-check`, 기준 feature/ade 613dafde)
+진단 보고서 4장의 1차 완료 기준을 실제 앱으로 측정했다. 대상은 개발 앱·기본 프로필이다. 임시 프로필에는 공급자 로그인이 없어 실제 실행이 안 되므로 노예 승인 (A)로 기본 프로필을 썼다. 시나리오는 실제 유료 todo 실행 두 가지다. git 모드는 `todo-test-1126g`, 사본 모드는 `todo-test-1126c`(`ELSECREW_GIT_WORKTREES=0`)이고, 역할은 기획 Codex·나머지 Claude Code다. 보고서는 `~/Documents/elsecrew-ade-v-2026-11-26/REPORT.md`(캡처 207개, 1초 표본·분석·앱 로그 `data/`)에 있다.
+
+- **판정(613dafde 기준)**
+  - 충족 4: 1 폭 50.0%·640×699(경계), 3 다섯 상태 네 곳 일치, 4 마크다운 원문 0, 5 미리보기 넓게 623·좁게 390 실제 입력.
+  - 미충족 2: 2 매 실행 시작 11~31초 문장 공백, 6 반영 확인 문구의 "커밋".
+  - 둘 다 이 브랜치에서 고쳤다. 기준 2는 수정 뒤 짧은 실제 실행에서 공백 0이었다.
+- **함께 확인**
+  - 사용자 정의 역할 '접근성 점검'에 총괄이 위임했고, 확인 뒤 팀을 되돌렸다.
+  - 재시작 3번 모두 마지막 프로젝트·작업이 복원됐다.
+  - 권한 카드 29번이 모두 2~4초 만에 에이전트 쪽에서 거둬졌고, 그동안 '이번만 허용'은 한 번도 켜지지 않았다.
+- **고친 것(8cba9ad3)**
+  - 실행 시작 문장: `startingSentence`, "받은 일을 읽고 시작하는 중이에요".
+  - 미리보기 '다시 불러오기'(띠 없음) 뒤 뷰가 영원히 숨는 결함: PR #9 배치 순서. 변화 없는 띠는 숨김 순서를 타지 않고, `settleLimitMs` 0.5초 뒤 다시 놓는다.
+  - 반영 확인 문구에서 "커밋" 제거.
+- **남긴 큰 결함**
+  - D1: main sidecar 클라이언트의 동시 스트림 16개 한도를 넘으면 늦게 온 `blob.chunk`가 `protocolInvalid`가 되어 엔진이 재시작되고, 실행 중인 에이전트가 '중단됨'이 된다(사본 세션 로그).
+  - D2: 에이전트가 55KB PNG를 읽으면 Claude stream-json 한 줄(약 148KB)이 관측 한도 128KiB를 넘어 `sessionChannel/unknown`으로 실행이 멈춘다.
+  - D3: 권한 카드 깜박임.
+- **실수 기록**: 프로젝트 ID 조회 필드를 잘못 써(`path` → 실제 `canonicalPath`) 기존 `todo-test-1118a`의 팀 배정을 바꿨다. 1분 안에 원래 값으로 되돌렸다(설정 버전 2→4, 내용 동일, 브리지 사용·DB 직접 수정 없음).
+- **검증**: `npm test` 900/900, `pnpm build`, 렌더러 마운트 스모크 68, 실제 앱 미리보기 UI 스모크 35/35(새 검사: 띠 없이 다시 불러오기).
+- **다음**: D1(스트림 한도와 프로토콜 오류 처리)·D2(큰 도구 결과 줄 처리)를 따로 설계한다. 권한 카드 깜박임(D3)과 기준 3 주의(누른 직후 잠깐 섞이는 문구, git 작업의 '내 폴더에 넣기' 상위 표현)를 정리한다.
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #10 독립 검토(차단 0·중요 4·경미 3) 전부 반영 (`orca/ade-theme-tokens`)
 검토 `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr10.md`(대상 db5009d6). 재현 시험은 `tests/m5-pr10-review.test.mts`(13개)에 모았다.
 
