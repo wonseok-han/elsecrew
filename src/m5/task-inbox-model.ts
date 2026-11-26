@@ -1,5 +1,5 @@
 // Every project's tasks in one place (ADE multi-project P4): the pure rules.
-import type { TaskInboxItem } from "./contracts/project-catalog-v1.ts";
+import type { TaskInboxItem, TaskInboxWorking } from "./contracts/project-catalog-v1.ts";
 
 export type InboxGroup = "attention" | "working" | "review";
 
@@ -15,13 +15,11 @@ export function groupInbox(items: readonly TaskInboxItem[]): Record<InboxGroup, 
   return groups;
 }
 
-/** Tasks of a project the engine reports at work (for the project badges). */
-export function workingByProject(items: readonly TaskInboxItem[]): Map<string, string[]> {
+/** Tasks of a project the engine reports at work (for the project badges):
+ * from the engine's full list of work, not the shortened inbox list (PR #20
+ * review I4). */
+export function workingByProject(tasks: readonly TaskInboxWorking[]): Map<string, string[]> {
   const projects = new Map<string, string[]>();
-  for (const item of items) {
-    if (inboxGroup(item) !== "working") continue;
-    projects.set(item.projectId, [...(projects.get(item.projectId) ?? []), item.chatId]);
-  }
+  for (const task of tasks) projects.set(task.projectId, [...(projects.get(task.projectId) ?? []), task.chatId]);
   return projects;
 }
-

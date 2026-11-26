@@ -611,7 +611,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         const result = validateProjectCatalogResult(raw, input);
         if (!live || result.action !== "taskInbox") return;
         setInboxItems(result.items);
-        activity.reconcileFromEngine(workingByProject(result.items));
+        activity.reconcileFromEngine(workingByProject(result.workingTasks));
       }).catch(() => undefined);
     };
     // Run notices come in bursts: read once shortly after.

@@ -678,12 +678,21 @@ struct Sidecar {
     workflow_outbound: Vec<EventV1>,
     workflow_roots: BTreeMap<String, String>,
     workflow_announcements: Vec<EventV1>,
-    /// A team step whose provider was briefly busy with another check (model
-    /// list, sign-in check): when it was first refused and when to ask again.
-    workflow_busy: BTreeMap<String, (Instant, Instant, u32)>,
+    /// A team step that asks again later: since when its provider was busy
+    /// with another check (model list, sign-in check; `None` while it only
+    /// waits its turn, which is not a provider error, PR #20 review I2),
+    /// when to ask again, and how many times it asked.
+    workflow_busy: BTreeMap<String, (Option<Instant>, Instant, u32)>,
     /// Team steps waiting their turn: their provider already runs as many as
-    /// allowed (ADE multi-project P3′). Told once per wait.
-    workflow_waiting: std::collections::BTreeSet<String>,
+    /// allowed (ADE multi-project P3′). Told once per wait. Each holds its
+    /// place in line for its provider (`workflow_turn`): a slot that frees
+    /// goes to the earliest, never to a later step or a new start (review I2).
+    workflow_waiting: BTreeMap<String, (u64, String)>,
+    workflow_turn: u64,
+    /// Teams put in line at their very start: their first accepted run is
+    /// their own root (P3′). A later team of the same task never borrows an
+    /// earlier team's root (PR #20 review B3).
+    workflow_queued_roots: std::collections::BTreeSet<String>,
 }
 
 struct PendingAgentStart {
@@ -1137,7 +1146,9 @@ impl Sidecar {
             workflow_roots: Default::default(),
             workflow_announcements: Vec::new(),
             workflow_busy: BTreeMap::new(),
-            workflow_waiting: std::collections::BTreeSet::new(),
+            workflow_waiting: BTreeMap::new(),
+            workflow_turn: 0,
+            workflow_queued_roots: Default::default(),
             maintenance_scheduler: storage_lifetime::scheduler::CooperativeScheduler::default(),
             maintenance_poisoned: false,
             background_check: background_check::BackgroundCheck::new(from_seal),
@@ -1336,6 +1347,7 @@ impl Sidecar {
                     orchestration::pause_after_restart(&mut self.storage).map_err(orchestration_dispatch::failure)?;
                     self.workflow_chats.clear();
                     self.workflow_waiting.clear();
+                    self.workflow_queued_roots.clear();
                     self.prepared_to_quit = true;
                 }
                 self.agent_runtime
@@ -1745,11 +1757,20 @@ impl Sidecar {
                     self.g5.task_inbox(&self.storage).map(|items| {
                         let items: Vec<Value> = items.into_iter().map(|mut item| {
                             let chat = item["chatId"].as_str().unwrap_or_default().to_owned();
-                            item["waiting"] = serde_json::json!(self.workflow_waiting.contains(&chat));
+                            item["waiting"] = serde_json::json!(self.workflow_waiting.contains_key(&chat));
                             item["working"] = serde_json::json!(busy.contains(&chat) && !matches!(busy, work_scope::BusyChats::Unknown));
                             item
                         }).collect();
-                        project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"taskInbox","items":items}), ..Default::default() }
+                        // The project badges count every task at work, not only
+                        // those the shortened list shows (PR #20 review I4).
+                        let working_tasks: Vec<Value> = items.iter()
+                            .filter(|item| item["state"] != "reviewReady" && !matches!(item["state"].as_str(), Some("needsAttention" | "recoveryRequired" | "waitingForUser"))
+                                || item["state"] == "reviewReady" && (item["working"] == true || item["waiting"] == true))
+                            .take(chat::TASK_INBOX_WORKING_MAX)
+                            .map(|item| serde_json::json!({"projectId":item["projectId"],"chatId":item["chatId"]}))
+                            .collect();
+                        let items = chat::order_task_inbox(items);
+                        project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"taskInbox","items":items,"workingTasks":working_tasks}), ..Default::default() }
                     })
                 }
                 Some("workStatus") => {
@@ -2452,6 +2473,9 @@ impl Sidecar {
             return self.login.blocks_installation(&self.storage)
                 || self.claude_login.blocks_installation(&self.storage)
                 || !self.agent_runtime.owned_run_ids().is_empty()
+                // A team between steps, waiting its turn or a busy provider,
+                // starts a run on its own later (PR #20 review B1).
+                || !self.workflow_chats.is_empty()
                 || !self.pending_agent_starts.is_empty()
                 || !self.pending_agent_capabilities.is_empty()
                 || !self.pending_agent_cancels.is_empty();
@@ -2490,12 +2514,45 @@ impl Sidecar {
         self.live_runs_of(runtime) >= self.projects.run_limit(runtime)
     }
 
+    /// Whether a start of this task must wait: no slot is free, or another
+    /// task waits for this provider from earlier (PR #20 review I2).
+    pub(crate) fn must_wait_turn(&self, chat: &str, runtime: &str) -> bool {
+        self.run_capacity_full(runtime) || self.ahead_in_line(chat, runtime)
+    }
+
+    /// Another task waits for this provider from before this one (or at all,
+    /// when this one is not in line).
+    pub(crate) fn ahead_in_line(&self, chat: &str, runtime: &str) -> bool {
+        let own = self.workflow_waiting.get(chat).map(|(turn, _)| *turn);
+        self.workflow_waiting.iter().any(|(other, (turn, waits_for))| other != chat
+            && waits_for == runtime && own.is_none_or(|own| *turn < own))
+    }
+
+    /// Puts a task in line for a provider; true the first time (to tell it once).
+    pub(crate) fn wait_turn(&mut self, chat: &str, runtime: &str) -> bool {
+        if self.workflow_waiting.contains_key(chat) { return false; }
+        self.workflow_turn += 1;
+        self.workflow_waiting.insert(chat.to_owned(), (self.workflow_turn, runtime.to_owned()));
+        true
+    }
+
     fn handle_agent_request_inner(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
         use elsecrew_protocol::agent_adapter_v1::AgentRunStartRequestV1;
         self.require_provider_connection(&request)?;
+        // The team loop sends its checks and starts here directly, past the
+        // outer admission: an installation in progress holds them as well
+        // (PR #20 review B1).
+        #[cfg(target_os = "macos")]
+        if matches!(request.method.as_str(), "agent.getCapabilities" | "agent.getModelChoices" | "run.startAgent")
+            && self.install.blocks_provider_launch(&self.storage)
+        {
+            return Ok(HandledRequest::response(error_response(&request, "providerBusy", "requestBlocked",
+                "installation and provider work cannot overlap; check status or request cancellation")));
+        }
         if request.method == "run.startAgent" {
             if let Some(runtime) = self.start_runtime(&request) {
-                if self.run_capacity_full(&runtime) {
+                let chat = request.params["chatId"].as_str().unwrap_or_default().to_owned();
+                if self.must_wait_turn(&chat, &runtime) {
                     return Ok(HandledRequest::response(error_response(&request, "providerCapacity", "requestBlocked",
                         "as many runs of this provider as allowed are working; this one waits its turn")));
                 }
@@ -2566,6 +2623,7 @@ impl Sidecar {
                 orchestration::stop(&mut self.storage, &identity.chat_id, &identity.run_id).map_err(|e| ProjectFailure::manifest(e.detail))?;
                 self.workflow_chats.remove(&identity.chat_id);
                 self.workflow_waiting.remove(&identity.chat_id);
+                self.workflow_queued_roots.remove(&identity.chat_id);
                 Ok(identity)
             })();
             return match queued {

@@ -381,10 +381,18 @@ pub(crate) fn recover_run_holds(profile: &dyn crate::provider_profile::LoginProf
     projects: Option<&crate::project::ProjectManager>) -> Result<(), SidecarError> {
     let mut result = Ok(());
     for name in crate::provider_login_process::profile_run_holds(profile)? {
-        let Some(projects) = projects else { return Err(SidecarError::new("providerLoginRecoveryRequired", "a run hold needs its run's record")); };
-        let outcome = crate::provider_login_process::recover_bound_run(profile, &name, |binding, identities| {
-            crate::agent_runtime::verify_resolved_provider_fence(storage, projects, binding, identities)
-        });
+        // A model list, a check, or a run that died before it was bound: the
+        // hold's own proof, no run record needed (PR #20 review B2).
+        let outcome = match crate::provider_login_process::recover_unbound_run(profile, &name) {
+            Ok(true) => Ok(()),
+            Ok(false) => match projects {
+                Some(projects) => crate::provider_login_process::recover_bound_run(profile, &name, |binding, identities| {
+                    crate::agent_runtime::verify_resolved_provider_fence(storage, projects, binding, identities)
+                }),
+                None => Err(SidecarError::new("providerLoginRecoveryRequired", "a run hold needs its run's record")),
+            },
+            Err(error) => Err(error),
+        };
         match outcome {
             Ok(()) => {}
             Err(error) if error.kind() == "providerBusy" => {}

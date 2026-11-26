@@ -114,11 +114,14 @@ pub(crate) fn recover_bound_run(
     verify_terminal: impl FnOnce(&RunFenceBinding, &BTreeSet<ProcIdentity>) -> Result<(), SidecarError>,
 ) -> Result<(), SidecarError> {
     let (binding, reservation, home) = read_bound(profile, name)?;
-    // Empty/unlaunched reservations need their live owner; do not infer closure.
-    if reservation.recorded.is_empty() {
-        return Err(failure());
+    // Nothing recorded: the engine died before it launched anything. The
+    // provider only ever starts once its root is recorded here (the gate
+    // waits for the release line, written after the record, and ends on its
+    // own when the engine's pipe closes), and the lock is ours, so no owner
+    // lives: nothing to settle (PR #20 review B2).
+    if !reservation.recorded.is_empty() {
+        verify_terminal(&binding, &reservation.recorded)?;
     }
-    verify_terminal(&binding, &reservation.recorded)?;
     // The hold's lock is ours, so its owner is gone: a reused process ID
     // proves the recorded process ended.
     for identity in &reservation.recorded {
@@ -138,6 +141,81 @@ pub(crate) fn recover_bound_run(
         return Err(failure());
     }
     reservation.release()
+}
+
+/// A run hold bound to no run: a model list, a capability or sign-in check,
+/// or a run whose engine died before it wrote its binding (PR #20 review B2).
+/// The proof from the moment it was published: the provider only ever
+/// starts once its root process is recorded in the hold (the gate releases
+/// it after the record; a gate whose engine died ends on its pipe's close),
+/// so with the hold's lock ours (no owner lives) and every recorded process
+/// gone, nothing of it runs. A termination marker may end it. Anything
+/// malformed stays fenced. `Ok(false)`: the hold is bound to a run, and only
+/// `recover_bound_run` may settle it.
+pub(crate) fn recover_unbound_run(profile: &dyn LoginProfile, name: &str) -> Result<bool, SidecarError> {
+    use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
+    use std::io::Read;
+    let home = profile.revalidate()?;
+    let directory = profile.login_lease_directory()?;
+    let prefix = super::hold_prefix(profile).ok_or_else(failure)?;
+    if !crate::provider_run_binding::is_run_lease_name(name, prefix) {
+        return Err(failure());
+    }
+    let mut options = OpenOptions::new();
+    options.read(true).follow(FollowSymlinks::No).custom_flags(libc::O_NONBLOCK);
+    let mut file = directory.open_with(name, &options).map_err(|_| failure())?;
+    let meta = file.metadata().map_err(|_| failure())?;
+    if !meta.is_file() || meta.len() > super::HOLD_MAX_BYTES {
+        return Err(failure());
+    }
+    lock_exclusive(&file)?;
+    let mut bytes = Vec::new();
+    (&mut file).take(super::HOLD_MAX_BYTES + 1).read_to_end(&mut bytes).map_err(|_| failure())?;
+    if bytes.len() as u64 != meta.len() || bytes.contains(&b'\r') {
+        return Err(failure());
+    }
+    let body = bytes.strip_suffix(LOGIN_TERMINATED).unwrap_or(&bytes);
+    let text = std::str::from_utf8(body).map_err(|_| failure())?;
+    if !text.ends_with('\n') {
+        return Err(failure());
+    }
+    let mut lines = text.lines();
+    if lines.next() != Some("elsecrew provider login pending v1") {
+        return Err(failure());
+    }
+    let mut recorded = BTreeSet::new();
+    for line in lines {
+        if line.starts_with("run-binding-v1 ") {
+            return Ok(false);
+        }
+        let (pid, start) = line.split_once(' ').ok_or_else(failure)?;
+        let identity = ProcIdentity {
+            pid: pid.parse().map_err(|_| failure())?,
+            start_us: start.parse().map_err(|_| failure())?,
+        };
+        if identity.pid <= 1 || identity.start_us <= 0
+            || line != format!("{} {}", identity.pid, identity.start_us)
+            || !recorded.insert(identity) || recorded.len() > MAX_TRACKED
+        {
+            return Err(failure());
+        }
+    }
+    let reservation = Reservation { name: name.to_owned(), directory, file, recorded, failed: false };
+    reservation.verify()?;
+    // The lock is ours, so the owner is gone: a reused process ID proves the
+    // recorded process ended.
+    for identity in &reservation.recorded {
+        if !matches!(elsecrew_core::proctree::SettledProcTable.probe(*identity), elsecrew_core::proctree::ProbeResult::Gone) {
+            return Err(failure());
+        }
+    }
+    if profile.revalidate()? != home
+        || !crate::provider_profile::same_directory(&reservation.directory, &profile.login_lease_directory()?)?
+    {
+        return Err(failure());
+    }
+    reservation.release()?;
+    Ok(true)
 }
 
 impl LoginProcess<'_> {

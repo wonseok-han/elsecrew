@@ -60,6 +60,11 @@ export interface TaskInboxItem {
   /** A run, a start or stop, or a team step is in flight. */ working: boolean;
 }
 
+/** A task of any project at work, for the project badges: every one, not
+ * only those the shortened inbox list shows (PR #20 review I4). */
+export interface TaskInboxWorking { projectId: string; chatId: string }
+export const TASK_INBOX_WORKING_MAX = 1000;
+
 export type ProjectCatalogRequest =
   | { action: "workspaceCleanupList" }
   | { action: "cleanupWorkspace"; chatId: string; confirmed: true }
@@ -197,7 +202,7 @@ export type ProjectCatalogResult =
   | { schemaVersion: 1; action: "deleteChat"; projectId: string; chatId: string; projectClosed: boolean }
   | { schemaVersion: 1; action: "finishDeletions"; pending: number }
   | { schemaVersion: 1; action: "workStatus"; working: boolean }
-  | { schemaVersion: 1; action: "taskInbox"; items: TaskInboxItem[] }
+  | { schemaVersion: 1; action: "taskInbox"; items: TaskInboxItem[]; workingTasks: TaskInboxWorking[] }
   | { schemaVersion: 1; action: "getRunLimits" | "setRunLimit"; limits: RunLimits }
   | { schemaVersion: 1; action: "releaseView"; projectId: string }
   | { schemaVersion: 1; action: "reopen"; project: ProjectIdentityV1 };
@@ -602,8 +607,10 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
     keys(limits, ["codex", "claude-code"]); runLimit(limits.codex); runLimit(limits["claude-code"]);
     if (request.action === "setRunLimit" && limits[request.runtime] !== request.limit) throw new Error("run limit not saved");
   } else if (request.action === "taskInbox") {
-    keys(result, ["schemaVersion", "action", "items"]);
+    keys(result, ["schemaVersion", "action", "items", "workingTasks"]);
     if (!Array.isArray(result.items) || result.items.length > 200) throw new Error("invalid task inbox");
+    if (!Array.isArray(result.workingTasks) || result.workingTasks.length > TASK_INBOX_WORKING_MAX) throw new Error("invalid task inbox work");
+    for (const task of result.workingTasks as Record<string, unknown>[]) { keys(task, ["projectId", "chatId"]); id(task.projectId); id(task.chatId); }
     for (const item of result.items as Record<string, unknown>[]) {
       keys(item, ["projectId", "chatId", "goal", "state", "updatedAt", "waiting", "working"]);
       id(item.projectId); id(item.chatId);

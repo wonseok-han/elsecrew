@@ -2,6 +2,21 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #20 검토(차단 3·중요 4) 반영 (`orca/ade-multiproject-b`)
+검토 `~/Documents/elsecrew-ade-multiproject-2026-11-26/REVIEW-pr20.md`(대상 5bcc7859).
+
+- **B1 설치와 대기 팀**: 설치 시작 검사에 '진행 중인 팀'(`workflow_chats`, 단계 사이·차례·바쁨 대기 포함)을 넣었다. 팀 루프가 직접 보내는 확인·시작도 설치 중이면 `providerBusy`로 막고(`handle_agent_request_inner`), 루프는 설치 중에 확인을 보내지 않고 멈추지 않은 채 기다린다(`poll_workflows`). 시험 `an_installation_and_a_waiting_team_never_overlap`.
+- **B2 실행에 묶이지 않은 실행 잠금의 복구**: `recover_unbound_run`. 근거는 게시 때부터 있다. 공급자 프로그램은 잠금에 뿌리 프로세스가 기록된 뒤에만 관문에서 풀려나고, 엔진이 죽으면 관문은 파이프가 닫혀 그냥 끝난다. 파일 잠금을 잡을 수 있고(주인 없음) 기록이 비었거나 기록된 프로세스가 모두 끝났으면 회수한다(종료 표시는 있어도 된다). 묶인 잠금도 기록이 비었으면 같은 근거로 회수한다. 앱 시작(`release_settled_fences`)과 연결 확인 복구(`recover`)에서 돈다. 시험 `a_checks_or_model_lists_hold_left_by_a_crash_is_recovered_by_its_own_proof`(실제 예약: 모델 목록형·확인형을 비정상 종료), `a_crashed_checks_hold_is_freed_when_the_app_starts`(Codex·Claude, 빈 잠금·끝난 프로세스·종료 표시, 살아 있는 프로세스는 남음).
+- **B3 같은 작업의 후속 팀**: 새 팀이 시작되면 이전 팀의 루트를 지우고, 대기열에 넣은 시작은 `workflow_queued_roots`로 짝지어 첫 실행을 새 루트로 알린다. 실행 ID는 실행마다 새 UUID라 재사용되지 않는다. 문제는 ID 재사용이 아니라 이전 팀의 루트를 빌려 쓴 것이었다. 시험 `follow_up_teams_of_one_task_that_wait_their_turn_each_get_their_own_root`(같은 작업 후속 팀 두 번이 대기열을 거침), Node `later queued teams of one task each start as a new root; a spent root stays refused`.
+- **I1 형제 소켓**: 잠금을 지금 살아 있는 엔진이 쥐고 있어야 하고(우리가 잡을 수 있으면 거절), 프로그램을 아는 경로에서는 같은 서명된 Claude 프로그램이어야 한다(`proc_pidpath`). 시험 `another_live_runs_mux_is_admitted_only_while_its_engine_holds_its_hold`.
+- **I2 대기 순서**: 공급자별 도착 순서 대기열. 앞에 기다리는 작업이 있으면 새 시작·나중 단계도 줄을 선다. 자리 대기는 `providerBusy` 60초 시계를 쓰지 않는다. 시험 `a_freed_slot_goes_to_the_earliest_waiting_task`(C·B·D 순서, 자리가 비어도 D는 줄 섬, B의 바쁨 시계 비어 있음).
+- **I3 Codex 계정 확인**: 실행 잠금(`reserve_shared`)을 쓴다. 시험 `an_account_check_and_runs_go_side_by_side_and_signing_in_waits`.
+- **I4 수신함**: 목록은 확인 필요·진행 중을 검토 대기보다 앞에(`order_task_inbox`), 배지는 자르기 전 전체에서 센 `workingTasks`로. 시험 `work_and_questions_come_before_many_recent_reviews`, Node 수신함 두 시험 갱신.
+- **경미**: `task-inbox-model.ts` 끝 빈 줄 제거.
+- **검증**: `cargo test --workspace` core 267·protocol 75·sidecar 961·통합 16 실패 0, `npm test` 1016/1016, `pnpm build`, `git diff --check`, 네이티브 스모크 PASS(25·재시작 10, `pr-b/native-review`).
+  - 실제 동시 실행 재시험(`pr-b/real-review/real-run.json`, ps로 다른 Elsecrew 앱 없음 확인, 시험 프로젝트 삭제, 자기 PID만): Claude 2 + Codex 2 모두 성공, 최고 동시 4, Claude 54초·Codex 304초 겹침, 도중·뒤 Claude 확인 `connected`, 모델 목록 5·10.
+  - 함정: 수신함 결과 계약이 바뀌면 Electron 메인 번들(`.vite/build/main.cjs`)도 다시 빌드해야 한다. 예전 번들은 `workingTasks`를 모르는 필드로 거절했다(`invalid project catalog fields`). `pnpm build`는 렌더러만 빌드하므로 `m5:smoke:multiproject`(`--build`)로 메인·프리로드를 함께 빌드했다.
+
 ### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — ADE multi-project PR-B: 한 에이전트의 여러 실행·차례 기다리기·전체 수신함 (`orca/ade-multiproject-b`)
 PR #18 머지(68503092) 뒤 WIP(afaaa370)를 그 위로 옮겨 이어 갔다. 설계 요약은 `docs/architecture.md` "한 에이전트의 여러 실행·차례 기다리기·전체 작업 수신함".
 

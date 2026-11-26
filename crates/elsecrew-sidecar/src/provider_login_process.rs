@@ -34,7 +34,7 @@ const OBSERVE_INTERVAL: Duration = Duration::from_millis(100);
 mod run_binding;
 #[cfg(test)]
 mod approved_legacy_repair;
-pub(crate) use run_binding::{bound_run_identities, recover_bound_run};
+pub(crate) use run_binding::{bound_run_identities, recover_bound_run, recover_unbound_run};
 #[cfg(test)]
 use crate::provider_run_binding::RunFenceBinding;
 
@@ -1713,6 +1713,57 @@ mod tests {
         std::fs::remove_file(temp.path().join(PENDING)).unwrap();
         std::fs::write(temp.path().join("claude-run-0123456789abcdef0123456789abcdef.pending"), b"x").unwrap();
         LoginProcess::reserve(&profile(&temp)).unwrap().finish().unwrap();
+    }
+
+    /// PR #20 review B2: a model list's or a check's hold (a run hold bound
+    /// to no run) whose engine died is recovered by its own proof: its lock
+    /// is free and what it recorded has ended, or it recorded nothing (the
+    /// gate never starts the provider before its record). A live owner's
+    /// hold is busy; a run's bound hold is left to the run's own proof.
+    #[test]
+    fn a_checks_or_model_lists_hold_left_by_a_crash_is_recovered_by_its_own_proof() {
+        let temp = tempfile::tempdir().unwrap();
+        let directory = Dir::open_ambient_dir(temp.path(), cap_std::ambient_authority()).unwrap();
+        let names = || run_hold_names(&directory, "codex").unwrap();
+        // A model list (an owned run hold) that launched its program, which
+        // ended; the engine died before its cleanup (dropped, not finished).
+        let mut listing = LoginProcess::reserve_codex_owned(profile(&temp)).unwrap();
+        listing.launch_gated_command(std::path::Path::new("/bin/sh"), &["-c".as_ref(), "exit 0".as_ref()], temp.path()).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while listing.exit_status().unwrap().is_none() {
+            listing.tick().unwrap();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let listed = names();
+        drop(listing);
+        assert_eq!(names(), listed, "a dropped owner leaves its hold");
+        // A check (a shared hold) whose engine died before it launched anything.
+        let borrowed = profile(&temp);
+        drop(LoginProcess::reserve_shared(&borrowed).unwrap());
+        let crashed = names();
+        assert_eq!(crashed.len(), 2);
+        // Signing in is blocked by them until they are recovered.
+        assert_eq!(LoginProcess::reserve(&profile(&temp)).err().unwrap().kind(), "providerBusy");
+        // A live owner's hold is busy and stays; a bound run's is not ours to settle.
+        let live = LoginProcess::reserve_codex_owned(profile(&temp)).unwrap();
+        let live_name = names().into_iter().find(|name| !crashed.contains(name)).unwrap();
+        let mut bound = LoginProcess::reserve_codex_owned(profile(&temp)).unwrap();
+        bound.retain_fence_before_launch("run-bound").unwrap();
+        let binding = bound.bind_run_fence("run-bound").unwrap();
+        bound.finish().unwrap();
+        drop(bound);
+        for name in &crashed {
+            assert!(matches!(recover_unbound_run(&profile(&temp), name), Ok(true)), "{name}: recovered");
+        }
+        assert_eq!(recover_unbound_run(&profile(&temp), &live_name).err().unwrap().kind(), "providerBusy");
+        assert!(matches!(recover_unbound_run(&profile(&temp), &binding.lease_name()), Ok(false)));
+        let mut left = names();
+        left.sort();
+        let mut expected = vec![live_name, binding.lease_name()];
+        expected.sort();
+        assert_eq!(left, expected, "the live owner's and the bound run's stay");
+        drop(live);
     }
 
     /// A run's hold receipt names its own file (schema 2), and that file is

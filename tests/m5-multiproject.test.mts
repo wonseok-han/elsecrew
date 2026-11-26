@@ -169,24 +169,33 @@ test("the inbox groups every project's tasks: to check, working (or waiting its 
   const items = [item("a", "p1", "running"), item("b", "p1", "reviewReady"), item("c", "p2", "running", { waiting: true }), item("d", "p2", "needsAttention")];
   const groups = groupInbox(items);
   assert.deepEqual([groups.attention.length, groups.working.length, groups.review.length], [1, 2, 1]);
-  assert.deepEqual([...workingByProject(items)], [["p1", ["a"]], ["p2", ["c"]]]);
+  // Badges come from the engine's full list of work (PR #20 review I4): a
+  // task at work that the shortened list does not show still counts.
+  const working = [{ projectId: "p1", chatId: "a" }, { projectId: "p2", chatId: "c" }, { projectId: "p4", chatId: "not-in-the-list" }];
+  assert.deepEqual([...workingByProject(working)], [["p1", ["a"]], ["p2", ["c"]], ["p4", ["not-in-the-list"]]]);
   // The engine's list replaces the project lists' guesses for badges.
   const tracker = new ProjectActivityTracker(() => now);
   tracker.reconcileProject("p3", ["stale"]);
-  tracker.reconcileFromEngine(workingByProject(items));
-  assert.deepEqual(tracker.workingProjects().sort(), ["p1", "p2"]);
+  tracker.reconcileFromEngine(workingByProject(working));
+  assert.deepEqual(tracker.workingProjects().sort(), ["p1", "p2", "p4"]);
   tracker.dispose();
+  assert.match(source("workbench.tsx"), /reconcileFromEngine\(workingByProject\(result\.workingTasks\)\)/, "badges never read the shortened list");
 });
 
 test("the inbox answer is checked: exact fields, known states, at most 200", async () => {
   const { validateProjectCatalogResult } = await import("../src/m5/contracts/project-catalog-v1.ts");
   const input = { action: "taskInbox" as const };
   const good = { projectId: "project_1", chatId: "chat_1", goal: "goal", state: "running", updatedAt: "2026-11-27T00:00:00Z", waiting: false, working: true };
-  assert.equal((validateProjectCatalogResult({ schemaVersion: 1, action: "taskInbox", items: [good] }, input) as { items: unknown[] }).items.length, 1);
+  const work = [{ projectId: "project_1", chatId: "chat_1" }];
+  assert.equal((validateProjectCatalogResult({ schemaVersion: 1, action: "taskInbox", items: [good], workingTasks: work }, input) as { items: unknown[] }).items.length, 1);
   for (const bad of [{ ...good, state: "draft" }, { ...good, extra: 1 }, { ...good, working: "yes" }, { ...good, chatId: "../x" }]) {
-    assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "taskInbox", items: [bad] }, input), JSON.stringify(bad));
+    assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "taskInbox", items: [bad], workingTasks: work }, input), JSON.stringify(bad));
   }
-  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "taskInbox", items: Array(201).fill(good) }, input));
+  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "taskInbox", items: Array(201).fill(good), workingTasks: work }, input));
+  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "taskInbox", items: [good] }, input), "the work list is required");
+  for (const bad of [[{ projectId: "project_1" }], [{ projectId: "project_1", chatId: "../x" }], Array(1001).fill(work[0])]) {
+    assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "taskInbox", items: [good], workingTasks: bad }, input));
+  }
 });
 
 test("a team over its agent's limit shows 'waiting its turn', not a failure", async () => {

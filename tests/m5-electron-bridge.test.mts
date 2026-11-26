@@ -2407,6 +2407,53 @@ test("the preview is on by default on macOS only, off with ELSECREW_PREVIEW=0, a
   assert.equal(readFileSync("src/m5/index.html", "utf8").includes("elsecrew-preview"), false, "the app CSP is not widened");
 });
 
+// PR #20 review B3: later teams of the same task that wait their turn are
+// each accepted as their own new root, even after an earlier team used its
+// whole call budget; an announcement under that spent root still fails.
+test("later queued teams of one task each start as a new root; a spent root stays refused", async () => {
+  for (const reuseSpentRoot of [false, true]) {
+    const { client, child } = createClient();
+    const starting = client.start(); child.stdout.write(`${g5aReadyLine()}\n`); await starting;
+    await hydrateActualAgentRun(client, child);
+    const fp = measuredCapability().fingerprint;
+    const announce = (stream: string, runId: string, rootRunId: string, roleId: string) => {
+      const accepted = acceptedAgentRun(fp, { runId, roleId });
+      child.stdout.write(JSON.stringify({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01",
+        streamId: stream, seq: 1, event: "agent.teamRunAccepted", chatId: "chat_01", taskId: "task_01", runId,
+        payload: { rootRunId, accepted } }) + "\n");
+    };
+    const queue = async () => {
+      const start = client.startAgentRun({ chatId: "chat_01", roleId: "coordinator", inputMessageIds: ["message_01"], expectedCapabilityFingerprint: fp });
+      const req = JSON.parse(child.writes.at(-1)!);
+      child.stdout.write(`${JSON.stringify({ protocolVersion: 1, kind: "response", sidecarInstanceId: "sidecar_test_01", requestId: req.requestId, ok: false,
+        error: { code: "providerCapacity", kind: "requestBlocked", detail: "the team waits its turn; it starts when a run of this provider ends", retryable: false } })}\n`);
+      await assert.rejects(start, /waits its turn/);
+    };
+    // The first team waits, starts as its own root and spends its whole budget.
+    await queue();
+    announce("team_first_root", "agent_run_team_one", "agent_run_team_one", "coordinator");
+    for (let n = 0; n < 11; n++) announce(`team_first_member_${n}`, `agent_run_team_one_m${n}`, "agent_run_team_one", n % 2 ? "coding" : "coordinator");
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(child.terminations, 0);
+    // A later team of the same task waits too, and starts as a new root.
+    await queue();
+    if (reuseSpentRoot) {
+      announce("team_second_old_root", "agent_run_team_two", "agent_run_team_one", "coordinator");
+      await new Promise(resolve => setTimeout(resolve, 10));
+      assert.equal(child.terminations, 1, "an earlier team's spent root is refused");
+      continue;
+    }
+    announce("team_second_root", "agent_run_team_two", "agent_run_team_two", "coordinator");
+    announce("team_second_member", "agent_run_team_two_m0", "agent_run_team_two", "coding");
+    // And once more.
+    await queue();
+    announce("team_third_root", "agent_run_team_three", "agent_run_team_three", "coordinator");
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(client.failure, undefined);
+    assert.equal(child.terminations, 0);
+  }
+});
+
 // ADE multi-project P3′: a coordinator start the engine put in line
 // (`providerCapacity`) is accepted later as its own root, only for that chat
 // and only as its coordinator; any other self-rooted announcement still fails.

@@ -4,25 +4,38 @@
 use super::*;
 use elsecrew_core::proctree::{identity_of, ProcIdentity};
 
+/// `executable`: the signed Claude program this run launched; another run's
+/// socket is admitted only for a process running that very program.
 pub(crate) fn verify_claude_runtime_files(
     home: &Path,
     owner: ProcIdentity,
+    executable: Option<&Path>,
 ) -> Result<(), SidecarError> {
-    verify_with(home, Some(owner))
+    verify_with(home, Some(owner), executable)
 }
 
 /// The profile before (or without) a Claude parent of its own: only the mux
 /// sockets of this profile's other live runs are admitted.
-pub(crate) fn verify_claude_home_files(home: &Path) -> Result<(), SidecarError> {
-    verify_with(home, None)
+pub(crate) fn verify_claude_home_files(home: &Path, executable: Option<&Path>) -> Result<(), SidecarError> {
+    verify_with(home, None, executable)
 }
 
-fn verify_with(home: &Path, owner: Option<ProcIdentity>) -> Result<(), SidecarError> {
+fn verify_with(home: &Path, owner: Option<ProcIdentity>, executable: Option<&Path>) -> Result<(), SidecarError> {
     let live = |identity: &ProcIdentity| identity_of(identity.pid).is_ok_and(|current| current == *identity);
     // Runs of one agent go on side by side in one profile (ADE multi-project
     // P5), so its `tmp` also holds the mux sockets of the other live runs'
-    // Claude parents: those recorded in this profile's run holds.
-    let admitted: Vec<ProcIdentity> = owner.into_iter().chain(sibling_runs(home)).filter(live).collect();
+    // Claude parents: those recorded in this profile's run holds whose engine
+    // holds them now, and (when this run knows its program) running the same
+    // signed Claude program (PR #20 review I1).
+    let program = executable.and_then(|path| std::fs::canonicalize(path).ok());
+    if executable.is_some() && program.is_none() {
+        return Err(failure());
+    }
+    let same_program = |identity: &ProcIdentity| program.as_ref()
+        .is_none_or(|program| process_program(identity.pid).is_some_and(|path| &path == program));
+    let admitted: Vec<ProcIdentity> = owner.into_iter()
+        .chain(sibling_runs(home).into_iter().filter(same_program))
+        .filter(live).collect();
     let root = open_absolute_directory(home)?;
     let mut remaining = elsecrew_protocol::project_v1::SNAPSHOT_ENTRIES_MAX_V1;
     let mut seen = Vec::new();
@@ -34,9 +47,21 @@ fn verify_with(home: &Path, owner: Option<ProcIdentity>) -> Result<(), SidecarEr
     Ok(())
 }
 
+/// The program a process runs, resolved (macOS `proc_pidpath`).
+fn process_program(pid: u32) -> Option<std::path::PathBuf> {
+    let mut buffer = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    let length = unsafe { libc::proc_pidpath(pid as libc::c_int, buffer.as_mut_ptr().cast(), buffer.len() as u32) };
+    if length <= 0 { return None; }
+    buffer.truncate(length as usize);
+    let path = std::path::PathBuf::from(<std::ffi::OsString as std::os::unix::ffi::OsStringExt>::from_vec(buffer));
+    std::fs::canonicalize(path).ok()
+}
+
 /// Process identities recorded in the Claude run holds next to the profile
-/// (`claude-run-<id>.pending`, one per live run, model list or check). A hold
-/// that cannot be read admits nothing.
+/// (`claude-run-<id>.pending`, one per live run, model list or check) whose
+/// owner holds them now: a hold whose lock is free belongs to no live engine
+/// and admits nothing (PR #20 review I1). A hold that cannot be read admits
+/// nothing.
 fn sibling_runs(home: &Path) -> Vec<ProcIdentity> {
     let Some(parent) = home.parent() else { return Vec::new() };
     let Ok(directory) = open_absolute_directory(parent) else { return Vec::new() };
@@ -49,6 +74,14 @@ fn sibling_runs(home: &Path) -> Vec<ProcIdentity> {
         let Ok(meta) = file.metadata() else { continue };
         if !meta.is_file() || meta.uid() != unsafe { libc::geteuid() }
             || meta.len() > crate::provider_login_process::HOLD_MAX_BYTES { continue; }
+        // Its engine holds the hold's lock while it lives. A lock we can take
+        // has no owner (closing the file below lets it go again).
+        use std::os::fd::AsRawFd;
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) } == 0
+            || std::io::Error::last_os_error().raw_os_error() != Some(libc::EWOULDBLOCK)
+        {
+            continue;
+        }
         let mut text = String::new();
         if std::io::Read::read_to_string(&mut file.into_std(), &mut text).is_err() { continue; }
         let mut lines = text.lines();
@@ -149,22 +182,29 @@ mod tests {
         let socket = home.join(format!("tmp/srt-mux-{}-0.sock", owner.pid));
         let _listener = UnixListener::bind(&socket).unwrap();
         std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o700)).unwrap();
-        verify_claude_runtime_files(&home, owner).unwrap();
+        verify_claude_runtime_files(&home, owner, None).unwrap();
         assert!(verify_runtime_files(&home).is_err());
         assert!(verify_claude_runtime_files(
             &home,
             ProcIdentity {
                 start_us: owner.start_us + 1,
                 ..owner
-            }
+            },
+            None,
         )
         .is_err());
         std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o722)).unwrap();
-        assert!(verify_claude_runtime_files(&home, owner).is_err());
+        assert!(verify_claude_runtime_files(&home, owner, None).is_err());
     }
 
+    /// Another live run's mux socket (P5) is admitted only while that run's
+    /// engine holds its hold (lock taken) and records the very process, and,
+    /// when this run knows its program, only for a process running it (PR #20
+    /// review I1). A hold written without its lock, a stale identity, another
+    /// agent's hold or another program admits nothing.
     #[test]
-    fn another_live_runs_mux_is_admitted_only_while_its_hold_records_it() {
+    fn another_live_runs_mux_is_admitted_only_while_its_engine_holds_its_hold() {
+        use std::os::fd::AsRawFd;
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().canonicalize().unwrap();
         let home = root.join("p");
@@ -176,19 +216,37 @@ mod tests {
         let socket = home.join(format!("tmp/srt-mux-{}-0.sock", other.pid));
         let _listener = UnixListener::bind(&socket).unwrap();
         std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o700)).unwrap();
-        assert!(verify_claude_runtime_files(&home, owner).is_err());
-        assert!(verify_claude_home_files(&home).is_err());
+        assert!(verify_claude_runtime_files(&home, owner, None).is_err());
+        assert!(verify_claude_home_files(&home, None).is_err());
         let hold = root.join(format!("claude-run-{}.pending", "a".repeat(32)));
-        std::fs::write(&hold, format!("elsecrew provider login pending v1\n{} {}\n", other.pid, other.start_us)).unwrap();
-        verify_claude_runtime_files(&home, owner).unwrap();
-        verify_claude_home_files(&home).unwrap();
+        let record = |start: i64| std::fs::write(&hold, format!("elsecrew provider login pending v1\n{} {}\n", other.pid, start)).unwrap();
+        // Written, but no engine holds it: nothing admitted.
+        record(other.start_us);
+        assert!(verify_claude_home_files(&home, None).is_err(), "a hold without its owner's lock");
+        // Its engine holds it now.
+        let held = std::fs::File::open(&hold).unwrap();
+        assert_eq!(unsafe { libc::flock(held.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) }, 0);
+        verify_claude_runtime_files(&home, owner, None).unwrap();
+        verify_claude_home_files(&home, None).unwrap();
+        // The same program as this run's: admitted; another program: not.
+        let this_program = std::env::current_exe().unwrap();
+        verify_claude_home_files(&home, Some(&this_program)).unwrap();
+        verify_claude_runtime_files(&home, owner, Some(&this_program)).unwrap();
+        assert!(verify_claude_home_files(&home, Some(std::path::Path::new("/bin/sleep"))).is_err(), "another program");
         // A recorded identity that is not the live process admits nothing.
-        std::fs::write(&hold, format!("elsecrew provider login pending v1\n{} {}\n", other.pid, other.start_us + 1)).unwrap();
-        assert!(verify_claude_home_files(&home).is_err());
-        // Nor does a hold of another agent.
+        record(other.start_us + 1);
+        assert!(verify_claude_home_files(&home, None).is_err());
+        // The engine let go: nothing admitted again.
+        record(other.start_us);
+        drop(held);
+        assert!(verify_claude_home_files(&home, None).is_err(), "the owner let go");
+        // Nor does another agent's hold.
         std::fs::remove_file(&hold).unwrap();
-        std::fs::write(root.join(format!("codex-run-{}.pending", "a".repeat(32))), format!("elsecrew provider login pending v1\n{} {}\n", other.pid, other.start_us)).unwrap();
-        assert!(verify_claude_home_files(&home).is_err());
+        let codex = root.join(format!("codex-run-{}.pending", "a".repeat(32)));
+        std::fs::write(&codex, format!("elsecrew provider login pending v1\n{} {}\n", other.pid, other.start_us)).unwrap();
+        let held = std::fs::File::open(&codex).unwrap();
+        assert_eq!(unsafe { libc::flock(held.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) }, 0);
+        assert!(verify_claude_home_files(&home, None).is_err());
         let _ = child.kill();
         let _ = child.wait();
     }
@@ -208,7 +266,7 @@ mod tests {
             let socket = home.join(name);
             std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
             let _listener = UnixListener::bind(&socket).unwrap();
-            assert!(verify_claude_runtime_files(&home, owner).is_err());
+            assert!(verify_claude_runtime_files(&home, owner, None).is_err());
         }
         let temp = tempfile::tempdir().unwrap();
         let home = temp.path().canonicalize().unwrap();
@@ -216,10 +274,10 @@ mod tests {
         std::fs::write(home.join("original"), b"unchanged").unwrap();
         let path = home.join(format!("tmp/srt-mux-{}-0.sock", owner.pid));
         std::os::unix::fs::symlink(home.join("original"), &path).unwrap();
-        assert!(verify_claude_runtime_files(&home, owner).is_err());
+        assert!(verify_claude_runtime_files(&home, owner, None).is_err());
         std::fs::remove_file(&path).unwrap();
         std::fs::hard_link(home.join("original"), &path).unwrap();
-        assert!(verify_claude_runtime_files(&home, owner).is_err());
+        assert!(verify_claude_runtime_files(&home, owner, None).is_err());
         assert_eq!(std::fs::read(home.join("original")).unwrap(), b"unchanged");
     }
 }
