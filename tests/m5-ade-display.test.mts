@@ -16,6 +16,7 @@ import { NotificationCenter } from "../src/m5/notifications.ts";
 import { startNotificationFeed } from "../src/m5/notification-feed.ts";
 import { validateExternalLink } from "../src/m5/contracts/external-link-v1.ts";
 import { ko } from "../src/locales/ko.ts";
+import { workbenchSource } from "./m5-workbench-source.mts";
 
 const require = createRequire(import.meta.url);
 
@@ -128,7 +129,7 @@ test("opening settings and closing them is not an unsaved change; the person's e
 });
 
 test("the role editor uses the shared draft rule, not its own comparison", () => {
-  const source = readFileSync(new URL("../src/m5/workbench.tsx", import.meta.url), "utf8");
+  const source = workbenchSource();
   const editor = source.slice(source.indexOf("function RoleSettings("), source.indexOf("function FollowupComposer("));
   assert.ok(editor.includes("settingsDraftDirty(draft, sameTeam)"));
   assert.ok(editor.includes("correctTeam(old =>"), "model defaults are corrections");
@@ -326,7 +327,7 @@ test("a recommended model the screen filled in can be saved without counting as 
   assert.equal(settingsDraftSavable(draft, same), true, "but saving keeps the recommendation");
   const untouched = loadSettingsDraft<Team>({ model: "opus" });
   assert.equal(settingsDraftSavable(correctSettingsDraft(untouched, team => team), same), false);
-  const source = readFileSync(new URL("../src/m5/workbench.tsx", import.meta.url), "utf8");
+  const source = workbenchSource();
   assert.ok(source.includes("disabled={editing || !valid || !savable}"));
 });
 
