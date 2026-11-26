@@ -704,7 +704,12 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   /** Close what covers the story and go to the waiting request (or the composer) (review #1). */
   const revealStory = () => {
     setSheetOpen(false); setAllChanges(null); setDrawerOpen(false);
-    window.setTimeout(() => document.querySelector<HTMLElement>("[data-testid=pinned-approval] button:not(:disabled), [data-testid=layout-center] #m5-followup-text")?.focus(), 80);
+    // Focus the request card itself, never its first button ("stop run" would be one Enter away).
+    window.setTimeout(() => {
+      const card = document.querySelector<HTMLElement>("[data-testid=pinned-approval] .m5-approval-card");
+      if (card) { card.tabIndex = -1; card.focus(); card.scrollIntoView({ block: "nearest" }); }
+      else document.querySelector<HTMLElement>("[data-testid=layout-center] #m5-followup-text")?.focus();
+    }, 80);
   };
   revealStoryRef.current = revealStory;
   const previewCovered = previewObscured({ sheetOpen, drawerUsed: bandUsesDrawer(layoutBandNow), drawerOpen, dialogOpen: newChatOpen || Boolean(removal) || preferencesOpen || settingsOpen, popoverOpen: false, rightTab });

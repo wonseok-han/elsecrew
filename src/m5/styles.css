@@ -1871,3 +1871,4 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-workbench .m5-approval-covered button { background: var(--action-bg); border-color: var(--action-bg); color: var(--action-text); font-weight: 600; white-space: nowrap; word-break: keep-all; }
 .m5-layout-right .m5-result-box.m5-result-attention { border-color: color-mix(in srgb, var(--status-attention) 40%, var(--line-default)); }
 .m5-role-lead { flex: none; color: var(--role-1); font-size: var(--text-xs); line-height: 1; }
+.m5-pinned-slot .m5-approval-card:focus-visible, .m5-pinned-slot .m5-approval-card:focus { outline: 2px solid var(--status-attention); outline-offset: 2px; }

@@ -28,7 +28,8 @@ test("review #1: a waiting permission request is announced over the sheet and th
   const workbench = source("workbench.tsx");
   assert.ok(workbench.includes("approvalCovered({ waiting: approvalWaitingNow, sheetOpen, drawerOpen: bandUsesDrawer(layoutBandNow) && drawerOpen })"));
   assert.match(workbench, /const revealStory = \(\) => \{\n    setSheetOpen\(false\); setAllChanges\(null\); setDrawerOpen\(false\);/, "the notice closes the sheet and the drawer");
-  assert.ok(workbench.includes("[data-testid=pinned-approval] button:not(:disabled)"), "and moves focus to the request");
+  assert.ok(workbench.includes('document.querySelector<HTMLElement>("[data-testid=pinned-approval] .m5-approval-card")'), "and moves focus to the request card");
+  assert.ok(workbench.includes("if (card) { card.tabIndex = -1; card.focus();"), "the card itself, not its stop button");
   // The open task's permission notification no longer returns without doing anything.
   assert.match(workbench, /if \(chat\.activeChat\?\.chatId !== item\.chatId\) void switchChat\(item\.chatId\);\n      else revealStoryRef\.current\(\);/);
 });
