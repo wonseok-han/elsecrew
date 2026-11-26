@@ -8,7 +8,7 @@
 - **바뀐 것**: 명령 행 필드가 `program`·`subcommand`·`hiddenArgs`로 바뀌었다(`command`·명령 행 `target`·`argsHidden`은 더 저장하지 않음). 규칙은 architecture "명령 행은 요약만 저장한다". 여러 줄·대입 시작·경로 실행·애매한 따옴표나 이스케이프는 아무것도 남기지 않는다. Codex `commandActions`로 만들던 읽기·검색 줄을 없앴다(경로는 파일 이벤트에서만). 화면: "명령 실행 · npm test", "명령 실행 · git diff (인수 2개 가림)", "명령 실행". 예전 행의 줄은 화면에서 같은 요약으로 바꾼다. 펼친 내용의 '전체 명령' 칸을 없앴다.
 - **증명**: 공용 `summary` 82개 = 2차까지의 명령 사례 43 + 3차 반례 12 + 추가 합성 27. Rust `commands_keep_only_a_summary_like_the_screen`와 TS `a command keeps only its program, one listed subcommand and a hidden count…`가 같은 요약을 내고, 저장 행·화면 결과에 "fake" 잔존 0, 기존 `mask` 표 전체도 잔존 0. `every_stored_field_is_sanitized`가 줄 글자 필드 폐기와 program·subcommand 재검사를 확인한다.
 - **저장 시험(SQLite 바이트)**: Claude auto-read에 `summary` 82개 전부를 실제 승인·저장 경로로 보내, 각 행이 기대 요약과 같고(`claude_project_consent_auto_approves_and_still_rejects_outside_files`) DB·WAL 바이트에 합성 비밀 57종이 없음을 확인했다(`assert_store_lacks`). Codex `codex_durable_native_delivery_and_cancel`도 새 모양으로 통과.
-- **검증**: `npm test` 953/953, `pnpm build`, Rust 영향 묶음 16개. sidecar 전체는 다음 줄.
+- **검증**: `npm test` 953/953, `pnpm build`, Rust 영향 묶음 16개, `cargo test -p elsecrew-sidecar` 전체 920 통과·0 실패. GitGuardian이 새 합성 사례 `--token=…`·`--secret …` 2건을 형태로 탐지해 `{eq}`·`{sp}` 자리표시로 바꾸고 해당 커밋(9bcf7e32→3e863aaa)을 고쳐 강제 푸시했다.
 - **남은 것**: 노예의 시험 표 확인, 머지.
 
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #11 재확인 B2: 명령 줄 가림을 fail-closed로 (`orca/ade-activity-detail`)
