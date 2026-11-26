@@ -885,3 +885,49 @@ fn tool_inspection(id: &str, request: &elsecrew_core::provider::vendor_observati
     }
     inspection
 }
+
+#[cfg(test)]
+mod tool_inspection_tests {
+    use super::*;
+    use elsecrew_core::provider::vendor_observation::claude_approval::{Observation, Permissions};
+    use elsecrew_core::provider::BoundedObservation;
+
+    fn request(content: &str) -> elsecrew_core::provider::vendor_observation::claude_approval::Request {
+        let frame = json!({"type":"control_request","request_id":"r","request":{"subtype":"can_use_tool","tool_name":"Write",
+            "input":{"file_path":"big.txt","content":content},"tool_use_id":"t"}});
+        let mut bytes = frame.to_string().into_bytes();
+        bytes.push(b'\n');
+        let observed = if bytes.len() <= elsecrew_core::provider::PROVIDER_OBSERVATION_LINE_MAX_BYTES {
+            BoundedObservation::new(bytes).unwrap()
+        } else {
+            elsecrew_core::provider::oversized_line::reduce_oversized_line(&bytes, elsecrew_core::provider::oversized_line::OversizedLinePolicy::ClaudeStreamJson).unwrap()
+        };
+        match Permissions::default().observe(&observed).unwrap() {
+            Observation::Requested(request) => request,
+            _ => panic!("expected a request"),
+        }
+    }
+
+    /// 2026-11-26 big Write: the card gets a small input whole, and a large
+    /// one in part with the size and SHA-256 of the exact input the allow
+    /// reply echoes; the view stays under the renderer's 128 KiB bound.
+    #[test]
+    fn a_large_tool_input_is_shown_in_part_with_its_size_and_hash() {
+        let small = request("hello");
+        let view = tool_inspection("approval_1", &small);
+        assert_eq!(view["toolInput"], json!(small.inspect_input()));
+        assert!(view.get("toolInputBytes").is_none() && view.get("toolInputSha256").is_none());
+
+        let content = "line of a large file\n".repeat(15_000);
+        let large = request(&content);
+        let view = tool_inspection("approval_2", &large);
+        let original = large.inspect_input();
+        assert_eq!(view["toolInputBytes"], json!(original.len()));
+        assert_eq!(view["toolInputSha256"], json!(format!("{:x}", Sha256::digest(original.as_bytes()))));
+        let shown = view["toolInput"].as_str().unwrap();
+        assert!(shown.len() <= TOOL_INSPECTION_WHOLE_MAX_BYTES);
+        let shown: Value = serde_json::from_str(shown).unwrap();
+        assert_eq!(shown["file_path"], "big.txt");
+        assert!(content.starts_with(shown["content"].as_str().unwrap().split('…').next().unwrap()));
+    }
+}

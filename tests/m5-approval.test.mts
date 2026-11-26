@@ -64,6 +64,29 @@ test("Claude tool input is bounded and only available in explicit inspection", (
   }
   assert.throws(()=>validateApprovalResult({...response,pending:[{approvalId,kind:"tool",toolInput:inspection.toolInput}]},request));
 });
+test("a large Claude tool input arrives in part, with its full size and SHA-256 (2026-11-26 big Write)", () => {
+  const request = validateApprovalRequest({action:"inspect",identity,approvalId});
+  const sha = "a".repeat(64);
+  const preview = JSON.stringify({file_path:"big.txt",content:"x".repeat(2048) + "…[298000 more bytes]"});
+  const inspection = {approvalId,kind:"tool",command:null,cwd:null,reason:"Write",grantRoot:null,host:null,protocol:null,toolInput:preview,toolInputBytes:300_100,toolInputSha256:sha};
+  const response = {identity,pending:[{approvalId,kind:"tool"}],queued:null,inspection};
+  const checked = validateApprovalResult(response,request).inspection;
+  assert.equal(checked?.toolInputBytes, 300_100);
+  assert.equal(checked?.toolInputSha256, sha);
+  // Idempotent: the same result passes again in main, preload and the screen.
+  assert.deepEqual(validateApprovalResult(validateApprovalResult(response,request),request).inspection, checked);
+  for (const changed of [
+    {toolInputBytes:undefined}, {toolInputSha256:undefined}, {toolInputSha256:"A".repeat(64)}, {toolInputSha256:"a".repeat(63)},
+    {toolInputBytes:10}, {toolInputBytes:4 * 1024 * 1024 + 1}, {toolInputBytes:1.5}, {toolInputBytes:"300100"},
+  ]) {
+    const broken = {...inspection, ...changed} as Record<string, unknown>;
+    for (const [key, value] of Object.entries(changed)) if (value === undefined) delete broken[key];
+    assert.throws(()=>validateApprovalResult({...response,inspection:broken},request), JSON.stringify(changed));
+  }
+  // Only a tool request may carry them.
+  const command = {approvalId,kind:"command",command:"ls",cwd:"/w",reason:null,grantRoot:null,host:null,protocol:null,toolInputBytes:300_100,toolInputSha256:sha};
+  assert.throws(()=>validateApprovalResult({identity,pending:[{approvalId,kind:"command"}],queued:null,inspection:command},request));
+});
 test("approval contract only admits exact list/decline and binds the receipt", () => {
   const request = validateApprovalRequest({action:"decline",identity,approvalId});
   assert.equal(validateApprovalResult({identity,pending:[],queued:approvalId},request).queued,approvalId);
