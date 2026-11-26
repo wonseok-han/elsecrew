@@ -40,6 +40,11 @@ for (const args of [['init', '-q', '--template='], ['add', '.'], ['-c', 'core.ho
 }
 if (process.env.ELSECREW_GIT_WORKTREES !== '0') throw new Error('run with ELSECREW_GIT_WORKTREES=0 (snapshot workspaces inside the isolated app data)');
 app.setPath('userData', path.join(root, 'userdata'));
+// PREVIEW_UI_THEME=light|dark starts the app with that brightness choice (main reads appearance.json).
+if (process.env.PREVIEW_UI_THEME) {
+  fs.mkdirSync(path.join(root, 'userdata'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'userdata', 'appearance.json'), JSON.stringify({ theme: process.env.PREVIEW_UI_THEME }));
+}
 dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [source] });
 
 const result = { steps: [], checks: {}, captures: [], errors: [] };
@@ -404,6 +409,14 @@ async function run(window) {
     // and the dialog shows only once main has answered that close (400 ms late).
     await sleep(700);
     since = Date.now();
+    // When the view really leaves the window (PR #10 review): the dialog may show
+    // only after that. main sends 'closed' right after removing it, before the
+    // (artificially delayed) close answer, so the answer time is not the bound.
+    let detachedAt = 0;
+    const watched = manager.currentWebContents;
+    const contentView = window.contentView;
+    const removeChildView = contentView.removeChildView.bind(contentView);
+    contentView.removeChildView = child => { if (watched && child?.webContents === watched && !detachedAt) detachedAt = Date.now(); return removeChildView(child); };
     delays.hang = true;
     delays.close = 400;
     closeAnsweredAt = 0;
@@ -411,9 +424,10 @@ async function run(window) {
     samples = await watch('.m5-new-chat-dialog', 1300);
     const released = await waitFor(() => look('.m5-new-chat-dialog').then(sample => sample && !sample.held && sample), 6_000, 'dialog after detach').catch(() => null);
     order = await ordering(since);
-    check('I1 with no answer the preview is detached and the dialog shows only after main answered the close',
-      samples.every(sealed) && released && closeAnsweredAt > 0 && released.at >= closeAnsweredAt && order.releasedAt >= closeAnsweredAt - 5 && order.releasedAt - since >= 1500,
-      { released, closeAnsweredAt, order, since });
+    contentView.removeChildView = removeChildView;
+    check('I1 with no answer the preview is detached and the dialog shows only after the view left the window',
+      samples.every(sealed) && released && closeAnsweredAt > 0 && detachedAt > 0 && released.at >= detachedAt && order.releasedAt >= detachedAt && order.releasedAt - since >= 1500,
+      { released, closeAnsweredAt, detachedAt, order, since });
     delays.hang = false;
     delays.close = 0;
     await page(`document.querySelector('.m5-new-chat-dialog header button').click()`);

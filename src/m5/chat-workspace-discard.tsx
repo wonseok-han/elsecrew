@@ -66,7 +66,7 @@ export function ChatWorkspaceDiscard({ chat, disabled, onCompleted, compact = fa
       <div className="m5-discard-actions">
         <button type="button" disabled={busy} onClick={close}>{t("m5.discard.cancel")}</button>
         {!inspection && error && <button type="button" disabled={busy || disabled} onClick={() => void inspect()}>{t("m5.discard.retry")}</button>}
-        {inspection && <button type="button" disabled={busy || disabled || !confirmed} onClick={() => void discard()}>{t(error ? "m5.discard.retry" : "m5.discard.open")}</button>}
+        {inspection && <button type="button" className="m5-btn-danger-solid" disabled={busy || disabled || !confirmed} onClick={() => void discard()}>{t(error ? "m5.discard.retry" : "m5.discard.open")}</button>}
       </div>
     </dialog>
   </section>;

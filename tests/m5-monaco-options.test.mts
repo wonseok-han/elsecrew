@@ -77,7 +77,7 @@ for (const delayedGate of [null, "admission", "saving"]) test(`Monaco keeps curr
       dependencies[index] = deps;
     },
     React: { createElement: (_type: unknown, props: { ref?: { current: unknown } } | null) => { if (props?.ref) props.ref.current = {}; return null; } },
-    languageFor: () => "plaintext",
+    languageFor: () => "plaintext", defineElsecrewTheme: () => undefined,
     requestEditorSave,
     loadMonaco: () => loader,
   };
@@ -182,7 +182,7 @@ for (const failure of ["load", "editor", "action"]) test(`Monaco preserves draft
       if (type === "textarea") drafts.push(props);
       return null;
     } },
-    languageFor: () => "plaintext", requestEditorSave,
+    languageFor: () => "plaintext", defineElsecrewTheme: () => undefined, requestEditorSave,
     loadMonaco: async () => {
       loads++;
       if (fail && failure === "load") throw new Error("chunk unavailable");
