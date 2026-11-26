@@ -141,8 +141,6 @@ pub struct ToolDetail {
     pub actions: Vec<CommandAction>,
     pub exit_code: Option<i64>,
     pub duration_ms: Option<u64>,
-    /// The first lines of the command's output.
-    pub output: Option<String>,
     pub changes: Vec<FileChange>,
 }
 
@@ -163,7 +161,6 @@ pub struct FileChange {
 }
 
 const DETAIL_TEXT_MAX: usize = 4 * 1024;
-const DETAIL_OUTPUT_LINES: usize = 40;
 const DETAIL_ITEMS_MAX: usize = 64;
 
 fn detail_text(value: Option<&serde_json::Value>) -> Option<String> {
@@ -171,33 +168,27 @@ fn detail_text(value: Option<&serde_json::Value>) -> Option<String> {
     (!text.is_empty() && text.len() <= DETAIL_TEXT_MAX && !text.contains('\0')).then(|| text.to_string())
 }
 
-/// The first lines of a command's output, cut on a character boundary.
-fn output_head(text: &str) -> Option<String> {
-    if text.is_empty() { return None; }
-    let end = text.match_indices('\n').nth(DETAIL_OUTPUT_LINES - 1).map_or(text.len(), |(index, _)| index);
-    let mut head = &text[..end];
-    if head.len() > DETAIL_TEXT_MAX {
-        let mut cut = DETAIL_TEXT_MAX;
-        while !head.is_char_boundary(cut) { cut -= 1; }
-        head = &head[..cut];
-    }
-    let head = head.replace('\0', "");
-    Some(if head.len() < text.len() { format!("{head}\n…") } else { head })
-}
 
 /// Added and removed lines of one patch. An added file's diff is its
 /// content, a deleted file's is what it held, an update is a unified diff.
 fn diff_counts(kind: &str, diff: &str) -> (u64, u64) {
+    let unified = diff.starts_with("@@") || diff.starts_with("---") || diff.starts_with("diff ");
     let lines = diff.lines().count() as u64;
     match kind {
-        "add" if !diff.starts_with("@@") && !diff.starts_with("---") => (lines, 0),
-        "delete" if !diff.starts_with("@@") && !diff.starts_with("---") => (0, lines),
-        _ => diff.lines().fold((0, 0), |(added, removed), line| {
-            if line.starts_with("+++") || line.starts_with("---") { (added, removed) }
-            else if line.starts_with('+') { (added + 1, removed) }
-            else if line.starts_with('-') { (added, removed + 1) }
-            else { (added, removed) }
-        }),
+        "add" if !unified => (lines, 0),
+        "delete" if !unified => (0, lines),
+        // Inside a hunk every `+`/`-` line counts, `+++`/`---` content too;
+        // only the file headers before a hunk are skipped (review PR #11 M2).
+        _ => {
+            let (mut added, mut removed, mut in_hunk) = (0, 0, !unified);
+            for line in diff.lines() {
+                if line.starts_with("diff ") { in_hunk = false; continue; }
+                if line.starts_with("@@") { in_hunk = true; continue; }
+                if !in_hunk { continue; }
+                if line.starts_with('+') { added += 1; } else if line.starts_with('-') { removed += 1; }
+            }
+            (added, removed)
+        }
     }
 }
 
@@ -220,7 +211,6 @@ fn tool_detail(raw: &str) -> ToolDetail {
         actions,
         exit_code: item.get("exitCode").and_then(|v| v.as_i64()),
         duration_ms: item.get("durationMs").and_then(|v| v.as_u64()),
-        output: item.get("aggregatedOutput").and_then(|v| v.as_str()).and_then(output_head),
         changes,
     }
 }
@@ -866,9 +856,8 @@ mod tests {
         assert_eq!(detail.cwd.as_deref(), Some("/w"));
         assert_eq!(detail.actions, vec![CommandAction { kind: "read".into(), path: Some("/w/a".into()), query: None }]);
         assert_eq!((detail.exit_code, detail.duration_ms), (Some(2), Some(40)));
-        let output = detail.output.unwrap();
-        assert_eq!(output.lines().count(), DETAIL_OUTPUT_LINES + 1);
-        assert!(output.ends_with('…'));
+        // What a command printed is never kept (review PR #11 B3).
+        assert!(!format!("{detail:?}").contains("99"));
         let change = tool_detail(&json!({"id":"i","type":"fileChange","status":"completed","changes":[
             {"path":"/w/a.ts","kind":{"type":"update","move_path":null},"diff":"@@ -1,2 +1,3 @@\n a\n-b\n+c\n+d"},
             {"path":"/w/new.md","kind":{"type":"add"},"diff":"one\ntwo"},
@@ -877,6 +866,9 @@ mod tests {
         ]}).to_string());
         assert_eq!(change.changes.iter().map(|c| (c.path.as_str(), c.kind.as_str(), c.added, c.removed)).collect::<Vec<_>>(),
             vec![("/w/a.ts", "update", 2, 1), ("/w/new.md", "add", 2, 0), ("/w/old.md", "delete", 0, 1)]);
+        // Content lines that start with `++`/`--` inside a hunk still count (M2).
+        assert_eq!(diff_counts("update", "--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n---removed\n+++added\n ctx"), (1, 1));
+        assert_eq!(diff_counts("update", "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\ndiff --git a/y b/y\n--- a/y\n+++ b/y\n@@ -0,0 +1 @@\n+c"), (2, 1));
         assert_eq!(tool_detail("not json"), ToolDetail::default());
         assert_eq!(tool_detail(&json!({"cwd":42,"exitCode":"0","changes":"x"}).to_string()), ToolDetail::default());
     }

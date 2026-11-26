@@ -2,6 +2,7 @@
 use super::*;
 use elsecrew_core::provider::vendor_observation::codex_preflight::ExpectedPermission;
 mod activity;
+mod secret_mask;
 #[cfg(target_os = "macos")]
 mod terminal;
 #[allow(dead_code)] // Claude launch admission/owner will call this output bridge.
@@ -79,6 +80,8 @@ pub(crate) struct RunTextState {
     run_id: String,
     /// The workspace folder, so work history rows name files relative to it.
     cwd: std::path::PathBuf,
+    /// Codex tool uses between start and end, for the work history.
+    tools: activity::CodexTools,
     finished: bool,
 }
 
@@ -751,6 +754,7 @@ impl RunReservation {
         )?;
         Ok(RunTextState {
             cwd,
+            tools: Default::default(),
             transport,
             pending_answer: None,
             pending_item: None,
@@ -793,6 +797,7 @@ impl RunReservation {
         state.finished = true;
         if state.completion.is_none() {
             let state_cwd = state.cwd.clone();
+            let tools = &mut state.tools;
             let outcome = state.transport.advance(
                 process,
                 cancel,
@@ -830,7 +835,7 @@ impl RunReservation {
                         TextAction::Tool(tool) => {
                             self.validate_text_input_streaming(storage, projects)
                                 .map_err(|_| failure())?;
-                            for row in activity::codex(&tool, &state_cwd) { self.record_activity(storage, row); }
+                            for row in activity::codex(tools, &tool, &state_cwd) { self.record_activity(storage, row); }
                             return on_action(storage, TextAction::Tool(tool));
                         }
                         action => {

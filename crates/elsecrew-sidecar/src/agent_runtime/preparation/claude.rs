@@ -26,6 +26,8 @@ pub(crate) struct ClaudeOutputState {
     /// Work history rows of tool uses that were let through, by tool use id,
     /// until their result says how they ended (bounded).
     tool_rows: std::collections::BTreeMap<String, (Value, std::time::Instant)>,
+    /// The app's own ids for tool uses (`t1`, `t2`…), never the provider's.
+    next_tool: u64,
 }
 
 const TOOL_ROWS_MAX: usize = 128;
@@ -386,8 +388,9 @@ impl OwnedClaudeRun {
                     })
                 };
                 reply?;
-                let row = super::activity::claude(&entry.request, &cwd, !allow);
-                if allow {
+                let key = (allow && entry.request.tool_use_id.is_some()).then(|| { self.output.next_tool += 1; format!("t{}", self.output.next_tool) });
+                let row = super::activity::claude(&entry.request, &cwd, !allow, key.as_deref());
+                if key.is_some() {
                     if let Some(id) = &entry.request.tool_use_id {
                         if self.output.tool_rows.len() >= TOOL_ROWS_MAX {
                             let oldest = self.output.tool_rows.iter().min_by_key(|(_, (_, at))| *at).map(|(id, _)| id.clone());
@@ -613,6 +616,7 @@ impl RunReservation {
             finished: false,
             denied_by_app: Default::default(),
             tool_rows: Default::default(),
+            next_tool: 0,
         })
     }
 
@@ -708,7 +712,7 @@ impl RunReservation {
                         // Display only: how let-through tool uses ended.
                         for result in results {
                             if let Some((row, started)) = state.tool_rows.remove(&result.tool_use_id) {
-                                self.record_activity(storage, super::activity::claude_done(&row, &result, started.elapsed()));
+                                if let Some(done) = super::activity::claude_done(&row, &result, started.elapsed()) { self.record_activity(storage, done); }
                             }
                         }
                     }

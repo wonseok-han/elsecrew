@@ -195,6 +195,32 @@ fn project_application_fence_blocks_other_chat_runs_before_reservation() {
     assert!(RunPreparation::resolve(&f.storage, &f.projects, &request).is_ok());
 }
 
+/// A command carrying a synthetic token (it says FAKE): the work history must
+/// store it masked, never as written (review PR #11 B1/B2).
+const FAKE_TOKEN_COMMAND: &str = "GITHUB_TOKEN=ghp_FAKEexample0FAKEexample0FAKEexample0 echo test";
+const FAKE_TOKEN_COMMAND_MASKED: &str = "GITHUB_TOKEN=•••• echo test";
+
+/// Reads every file of the app's store as bytes (the database and its
+/// write-ahead log included) and fails if any `needle` is in it: what the
+/// work history must never keep (review PR #11).
+fn assert_store_lacks(root: &std::path::Path, needles: &[&str]) {
+    fn walk(path: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+        for entry in fs::read_dir(path).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() { walk(&path, files); } else { files.push(path); }
+        }
+    }
+    let mut files = Vec::new();
+    walk(&root.join("data"), &mut files);
+    assert!(files.iter().any(|file| file.to_string_lossy().ends_with("elsecrew.sqlite3")), "store not found: {files:?}");
+    for file in files {
+        let bytes = fs::read(&file).unwrap();
+        for needle in needles {
+            assert!(!bytes.windows(needle.len()).any(|window| window == needle.as_bytes()), "{needle} stored in {}", file.display());
+        }
+    }
+}
+
 struct Fixture {
     _root: TempDir,
     source: std::path::PathBuf,
@@ -1037,7 +1063,7 @@ fn text_candidate_cases_with_output(
         let handler = failure.starts_with("bound-handler") || accepting;
         if handler {
             let lines: Vec<_> = replies[5].lines().map(str::to_owned).collect();
-            let tool = json!({"type":"commandExecution","id":"c1","command":"echo test","cwd":snapshot["worktreePath"],"status":"inProgress"});
+            let tool = json!({"type":"commandExecution","id":"c1","command":FAKE_TOKEN_COMMAND,"cwd":snapshot["worktreePath"],"status":"inProgress"});
             replies[5] = format!(
                 "{}\n{}\n{}\n{}",
                 lines[0],
@@ -1047,6 +1073,8 @@ fn text_candidate_cases_with_output(
             );
             let mut completed = tool;
             completed["status"] = json!("declined");
+            // What a command printed is never stored (review PR #11 B3).
+            completed["aggregatedOutput"] = json!("FAKE-OUTPUT-MARKER printed");
             if accepting {
                 completed["status"] = json!("completed");
                 completed["exitCode"] = json!(0);
@@ -1746,7 +1774,7 @@ fn text_candidate_cases_with_output(
                                     }
                                     let detail = runtime.approval_request(&mut fixture.storage, &fixture.projects, &json!({"action":"inspect","identity":public_identity,"approvalId":id})).unwrap();
                                     assert_eq!(detail["inspection"]["approvalId"], id);
-                                    assert_eq!(detail["inspection"]["command"], "echo test");
+                                    assert_eq!(detail["inspection"]["command"], FAKE_TOKEN_COMMAND);
                                     if failure == "bound-handler-runtime" {
                                         let error = runtime
                                             .accept_native_approval_once(
@@ -1876,6 +1904,7 @@ fn text_candidate_cases_with_output(
                         }
                         assert_eq!(intents[0]["state"], "intentRecorded");
                         assert!(!intents[0].to_string().contains("echo test"));
+                        assert!(!intents[0].to_string().contains("FAKEexample0"));
                     }
                     if accepting && canceled {
                         assert!(!fs::read_to_string(&captured)
@@ -1902,15 +1931,18 @@ fn text_candidate_cases_with_output(
                         assert_eq!(output.last().unwrap()["kind"], "final");
                         assert_eq!(output.last().unwrap()["text"], "hello");
                         // The declined command leaves its start (naming the command, user
-                        // request 2026-11-18) and a closing row with the same id saying
-                        // it was refused (2026-11-26).
+                        // request 2026-11-18, the token masked) and a closing row with
+                        // the app's own id saying it was refused (2026-11-26).
                         let history: Vec<Value> = output.iter().filter(|event| event["kind"] == "status")
                             .filter_map(|event| serde_json::from_str::<Value>(event["text"].as_str()?).ok())
                             .filter(|row| row.get("action").is_some()).collect();
                         assert_eq!(history, vec![
-                            json!({"action":"command","target":"echo test","command":"echo test","cwd":".","id":"c1"}),
-                            json!({"action":"command","target":"echo test","command":"echo test","cwd":".","id":"c1","outcome":"refused","phase":"done"}),
+                            json!({"action":"command","target":FAKE_TOKEN_COMMAND_MASKED,"command":FAKE_TOKEN_COMMAND_MASKED,"cwd":".","id":"c1"}),
+                            json!({"action":"command","target":FAKE_TOKEN_COMMAND_MASKED,"command":FAKE_TOKEN_COMMAND_MASKED,"cwd":".","id":"c1","outcome":"refused","phase":"done"}),
                         ], "{failure}");
+                        // Read back from the files themselves: neither the token nor
+                        // the output is anywhere in the store.
+                        assert_store_lacks(fixture._root.path(), &["FAKEexample0FAKEexample0", "FAKE-OUTPUT-MARKER"]);
                     } else {
                         assert!(emitted
                             .iter()

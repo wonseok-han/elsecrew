@@ -1,54 +1,35 @@
 //! Work history rows for the team chat: one compact line per tool use, so a
 //! long run visibly moves. A row says what kind of work (read, edit,
 //! command…) and on what: the file inside the workspace, the search, or the
-//! command line. When the tool use ends a second row with the same `id`
-//! carries how it ended (exit code, time, changed lines, the first lines of
-//! a command's output); the screen shows it in place of the first.
+//! command line. When the tool use ends a second row with the same `id` says
+//! how it ended (exit code when known, time, changed lines); the screen shows
+//! it in place of the first.
 //!
-//! What is stored is display text, never authority: one bounded line for the
-//! target, control and direction marks neutralised, and anything that looks
-//! like a secret replaced by •••• before it is written (`mask_secrets`; the
-//! screen masks again with the same rules, `src/m5/secret-shape.ts`). File
-//! contents are never stored; only a command's own output is, and only its
-//! first lines. A row that cannot be stored never stops the run.
+//! What is stored is display text, never authority. Every row passes
+//! `sanitize` right before it is written (the only way into the store):
+//! known fields only, control and direction marks neutralised, anything that
+//! looks like a secret replaced by •••• (`secret_mask`), then cut to length.
+//! Ids are the app's own (`c3`, `t7`), never the provider's. Nothing a tool
+//! printed or read is stored: no command output, no file contents
+//! (review PR #11 B3). A row that cannot be stored never stops the run.
+use super::secret_mask::mask_secrets;
 use super::*;
 use elsecrew_protocol::agent_adapter_v1::output_pages::{
     OutputItemChannel, OutputItemOperation, OutputItemUpdate,
 };
+use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
 const TARGET_MAX_CHARS: usize = 160;
 const BLOCK_MAX_CHARS: usize = 4000;
 const NOTE_MAX_CHARS: usize = 300;
-const MASK: &str = "••••";
+/// Open tool uses remembered until their end (per run).
+const OPEN_TOOLS_MAX: usize = 256;
 
-/// A workspace-relative path, or None when it leaves the workspace.
-fn relative(path: &str, cwd: &Path) -> Option<String> {
-    let path = Path::new(path);
-    let inside = if path.is_absolute() { path.strip_prefix(cwd).ok()? } else { path };
-    if inside.components().any(|part| !matches!(part, Component::Normal(_) | Component::CurDir)) {
-        return None;
-    }
-    let text = inside.to_str()?.trim_start_matches("./");
-    Some(if text.is_empty() { ".".into() } else { bounded(text)? })
-}
-
-/// Where a path is, as the screen shows it: inside the workspace relative to
-/// it; elsewhere under the home folder as `~/…`; otherwise as given.
-fn display_path(path: &str, cwd: &Path) -> Option<String> {
-    relative(path, cwd).or_else(|| {
-        let home = std::env::var_os("HOME").map(PathBuf::from).filter(|home| home.is_absolute() && home != Path::new("/"));
-        match home.and_then(|home| Path::new(path).strip_prefix(home).ok().map(Path::to_path_buf)) {
-            Some(rest) if rest.as_os_str().is_empty() => Some("~".into()),
-            Some(rest) => bounded(&format!("~/{}", rest.to_string_lossy())),
-            None => bounded(path),
-        }
-    })
-}
-
-/// Invisible format marks that can reorder or hide what the row shows.
+/// Invisible format marks and line/paragraph separators that can reorder or
+/// hide what the row shows (the screen's `MARKS` is the same set).
 fn hidden_format(c: char) -> bool {
-    matches!(c, '\u{061c}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2069}' | '\u{feff}')
+    matches!(c, '\u{061c}' | '\u{200b}'..='\u{200f}' | '\u{2028}'..='\u{202e}' | '\u{2060}'..='\u{2069}' | '\u{feff}')
 }
 
 /// Control and direction marks become a visible replacement mark, so text
@@ -67,249 +48,60 @@ fn cut(text: &str, max: usize) -> String {
     if text.chars().count() > max { format!("{}…", text.chars().take(max).collect::<String>()) } else { text.into() }
 }
 
-/// One line: the first, trimmed, neutralised and bounded.
-fn bounded(text: &str) -> Option<String> {
-    let line = text.split(['\n', '\r']).find(|line| !line.trim().is_empty())?.trim();
-    Some(cut(&neutralise(line, false), TARGET_MAX_CHARS))
+/// One line as stored: neutralised, masked, then cut (masking first, so a cut
+/// never leaves part of a secret masking would have caught). Same as the
+/// screen's `displayLine` (shared cases).
+fn display_line(text: &str) -> String {
+    cut(&mask_secrets(&neutralise(text, false)), TARGET_MAX_CHARS)
 }
 
-/// Several lines (a whole command, an output head), masked and bounded.
+/// The first non-empty line of `text`, as stored.
+fn bounded(text: &str) -> Option<String> {
+    let line = text.split(['\n', '\r']).find(|line| !line.trim().is_empty())?.trim();
+    Some(display_line(line))
+}
+
+/// Several lines (a whole command), masked as a whole, then cut.
 fn block(text: &str, max: usize) -> Option<String> {
     let text = text.trim_matches('\n').trim_end();
     if text.trim().is_empty() { return None; }
     Some(cut(&mask_secrets(&neutralise(text, true)), max))
 }
 
-// ---- Secrets: the same rules as `maskSecrets` in src/m5/secret-shape.ts ----
-
-fn secret_name(name: &str) -> bool {
-    const WORDS: &[&str] = &["token", "secret", "password", "passwd", "pwd", "pass", "passphrase", "apikey", "auth", "credential", "credentials", "cookie", "privatekey", "accesskey", "authorization"];
-    const KEY_PARTS: &[&str] = &["api", "access", "private", "secret", "signing", "encryption"];
-    const ENDINGS: &[&str] = &["token", "secret", "password", "apikey"];
-    let name = name.trim_start_matches('-');
-    let mut words = String::new();
-    let mut previous: Option<char> = None;
-    for c in name.chars() {
-        if c.is_ascii_uppercase() && previous.is_some_and(|p| p.is_ascii_lowercase() || p.is_ascii_digit()) { words.push('_'); }
-        words.push(c.to_ascii_lowercase());
-        previous = Some(c);
+/// A workspace-relative path, or None when it leaves the workspace.
+fn relative(path: &str, cwd: &Path) -> Option<String> {
+    let path = Path::new(path);
+    let inside = if path.is_absolute() { path.strip_prefix(cwd).ok()? } else { path };
+    if inside.components().any(|part| !matches!(part, Component::Normal(_) | Component::CurDir)) {
+        return None;
     }
-    let segments: Vec<&str> = words.split(|c: char| !c.is_ascii_lowercase() && !c.is_ascii_digit()).filter(|s| !s.is_empty()).collect();
-    let flat = segments.concat();
-    segments.iter().any(|segment| WORDS.contains(segment))
-        || segments.windows(2).any(|pair| pair[1] == "key" && KEY_PARTS.contains(&pair[0]))
-        || ENDINGS.iter().any(|ending| flat.ends_with(ending))
+    let text = inside.to_str()?.trim_start_matches("./");
+    Some(if text.is_empty() { ".".into() } else { bounded(text)? })
 }
 
-fn identifier(name: &str) -> bool {
-    let mut chars = name.chars();
-    chars.next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+/// The last `keep` parts of a path, with `…/` when more came before.
+fn tail(path: &Path, keep: usize) -> String {
+    let parts: Vec<String> = path.components().filter_map(|part| match part {
+        Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
+        _ => None,
+    }).collect();
+    let start = parts.len().saturating_sub(keep);
+    format!("{}{}", if start > 0 { "…/" } else { "" }, parts[start..].join("/"))
 }
 
-fn mask_shapes(word: &str) -> String {
-    struct Shape { prefix: &'static str, min: usize, chars: fn(char) -> bool, exact: bool }
-    fn token(c: char) -> bool { c.is_ascii_alphanumeric() || c == '_' || c == '-' }
-    fn alnum(c: char) -> bool { c.is_ascii_alphanumeric() }
-    let shapes = [
-        Shape { prefix: "github_pat_", min: 20, chars: |c| c.is_ascii_alphanumeric() || c == '_', exact: false },
-        Shape { prefix: "sk-", min: 16, chars: token, exact: false },
-        Shape { prefix: "ghp_", min: 20, chars: alnum, exact: false },
-        Shape { prefix: "gho_", min: 20, chars: alnum, exact: false },
-        Shape { prefix: "ghu_", min: 20, chars: alnum, exact: false },
-        Shape { prefix: "ghs_", min: 20, chars: alnum, exact: false },
-        Shape { prefix: "ghr_", min: 20, chars: alnum, exact: false },
-        Shape { prefix: "xoxa-", min: 10, chars: |c| c.is_ascii_alphanumeric() || c == '-', exact: false },
-        Shape { prefix: "xoxb-", min: 10, chars: |c| c.is_ascii_alphanumeric() || c == '-', exact: false },
-        Shape { prefix: "xoxp-", min: 10, chars: |c| c.is_ascii_alphanumeric() || c == '-', exact: false },
-        Shape { prefix: "xoxo-", min: 10, chars: |c| c.is_ascii_alphanumeric() || c == '-', exact: false },
-        Shape { prefix: "xoxs-", min: 10, chars: |c| c.is_ascii_alphanumeric() || c == '-', exact: false },
-        Shape { prefix: "xoxr-", min: 10, chars: |c| c.is_ascii_alphanumeric() || c == '-', exact: false },
-        Shape { prefix: "glpat-", min: 20, chars: token, exact: false },
-        Shape { prefix: "AIza", min: 30, chars: token, exact: false },
-        Shape { prefix: "AKIA", min: 16, chars: |c| c.is_ascii_digit() || c.is_ascii_uppercase(), exact: true },
-        Shape { prefix: "ASIA", min: 16, chars: |c| c.is_ascii_digit() || c.is_ascii_uppercase(), exact: true },
-        Shape { prefix: "eyJ", min: 30, chars: |c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'), exact: false },
-    ];
-    let mut out = String::new();
-    let mut index = 0;
-    let mut previous: Option<char> = None;
-    'outer: while index < word.len() {
-        if !previous.is_some_and(|p| p.is_ascii_alphanumeric()) {
-            for shape in &shapes {
-                if !word[index..].starts_with(shape.prefix) { continue; }
-                let start = index + shape.prefix.len();
-                let run: String = word[start..].chars().take_while(|c| (shape.chars)(*c)).collect();
-                let end = start + run.len();
-                let shaped = if shape.exact {
-                    run.len() == shape.min && !word[end..].chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
-                } else {
-                    run.len() >= shape.min && (shape.prefix != "eyJ" || run.split('.').count() >= 3)
-                };
-                if !shaped { continue; }
-                out.push_str(shape.prefix);
-                out.push_str(MASK);
-                previous = run.chars().last();
-                index = end;
-                continue 'outer;
-            }
+/// Where a path is, as stored: inside the workspace relative to it. Outside
+/// it only its last two parts: under the home folder `~/…/a/b`, elsewhere
+/// `…/a/b` (review PR #11 B1: a path outside says no more than that).
+fn display_path(path: &str, cwd: &Path) -> Option<String> {
+    relative(path, cwd).or_else(|| {
+        let home = std::env::var_os("HOME").map(PathBuf::from).filter(|home| home.is_absolute() && home != Path::new("/"));
+        match home.and_then(|home| Path::new(path).strip_prefix(home).ok().map(Path::to_path_buf)) {
+            Some(rest) if rest.as_os_str().is_empty() => Some("~".into()),
+            Some(rest) => bounded(&format!("~/{}", tail(&rest, 2))),
+            // Never reads like a workspace path: always `…/` first.
+            None => bounded(&format!("…/{}", tail(Path::new(path), 2).trim_start_matches("…/"))),
         }
-        let c = word[index..].chars().next().unwrap();
-        out.push(c);
-        previous = Some(c);
-        index += c.len_utf8();
-    }
-    out
-}
-
-fn mask_url(word: &str) -> String {
-    let Some(scheme) = word.find("://") else { return word.into() };
-    let start = scheme + 3;
-    let Some(at) = word[start..].find('@').map(|i| i + start) else { return word.into() };
-    if word[start..].find('/').map(|i| i + start).is_some_and(|slash| slash < at) { return word.into(); }
-    match word[start..].find(':').map(|i| i + start) {
-        Some(colon) if colon < at && colon + 1 != at => format!("{}{MASK}{}", &word[..=colon], &word[at..]),
-        _ => word.into(),
-    }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum Expect { Value, Long }
-#[derive(Default)]
-struct MaskState { expect: Option<Expect>, quote: Option<char>, line: bool }
-
-fn mask_value(value: &str, state: &mut MaskState) -> String {
-    match value.chars().next() {
-        Some(quote @ ('"' | '\'')) => match value[1..].find(quote) {
-            None => { state.quote = Some(quote); format!("{quote}{MASK}") }
-            Some(close) => format!("{quote}{MASK}{}", &value[1 + close..]),
-        },
-        _ => {
-            let body = value.trim_end_matches([',', ';', ')', '}', ']']);
-            format!("{MASK}{}", &value[body.len()..])
-        }
-    }
-}
-
-fn strip_name(text: &str) -> &str {
-    text.trim_start_matches(['-', '{', '(', '[', '"', '\'']).trim_end_matches(['"', '\''])
-}
-
-fn mask_word(word: &str, state: &mut MaskState) -> String {
-    let core = word.trim_start_matches(['{', '(', '[', '"', '\'']);
-    let opening = &word[..word.len() - core.len()];
-    let lower = core.to_ascii_lowercase();
-    if lower.starts_with("authorization:") || lower.starts_with("authorization=") {
-        let head = &core[.."authorization:".len()];
-        let rest = &core["authorization:".len()..];
-        state.line = true;
-        if rest.is_empty() { return word.into(); }
-        let quote = rest.chars().last().filter(|c| matches!(c, '"' | '\''));
-        if quote.is_some() { state.line = false; }
-        return format!("{opening}{head}{MASK}{}", quote.map(String::from).unwrap_or_default());
-    }
-    if let Some(equals) = word.find('=').filter(|&i| i > 0) {
-        let name = strip_name(&word[..equals]);
-        if identifier(name) && secret_name(name) {
-            let value = &word[equals + 1..];
-            if value.is_empty() { state.expect = Some(Expect::Value); return word.into(); }
-            return format!("{}{}", &word[..=equals], mask_value(value, state));
-        }
-    }
-    if let Some(colon) = word.find(':').filter(|&i| i > 0 && !word[i..].starts_with("://")) {
-        let name = strip_name(&word[..colon]);
-        if identifier(name) && secret_name(name) {
-            let value = &word[colon + 1..];
-            if value.is_empty() { state.expect = Some(Expect::Value); return word.into(); }
-            return format!("{}{}", &word[..=colon], mask_value(value, state));
-        }
-    }
-    let flag = word.trim_start_matches('-');
-    if word.starts_with('-') && word.len() - flag.len() <= 2 && flag.starts_with(|c: char| c.is_ascii_alphabetic())
-        && identifier(flag) && secret_name(word) {
-        state.expect = Some(Expect::Value);
-        return word.into();
-    }
-    if word == "Bearer" || word == "Basic" { state.expect = Some(Expect::Long); return word.into(); }
-    mask_url(&mask_shapes(word))
-}
-
-fn mask_private_keys(text: &str) -> String {
-    let mut out = String::new();
-    let mut rest = text;
-    while let Some(begin) = rest.find("-----BEGIN ") {
-        let after = &rest[begin + "-----BEGIN ".len()..];
-        let label_len = after.chars().take_while(|c| c.is_ascii_uppercase() || *c == ' ').map(char::len_utf8).sum::<usize>();
-        let label = &after[..label_len];
-        if !(label.ends_with("PRIVATE KEY") && after[label_len..].starts_with("-----")) {
-            out.push_str(&rest[..begin + "-----BEGIN ".len()]);
-            rest = after;
-            continue;
-        }
-        out.push_str(&rest[..begin]);
-        // Not a BEGIN line itself, so masking twice changes nothing.
-        out.push_str("PRIVATE KEY ");
-        out.push_str(MASK);
-        let body = &after[label_len + 5..];
-        rest = match find_key_end(body) { Some(end) => &body[end..], None => "" };
-    }
-    out.push_str(rest);
-    out
-}
-
-/// The end of `-----END … PRIVATE KEY-----` in `body`, if it is there.
-fn find_key_end(body: &str) -> Option<usize> {
-    let mut from = 0;
-    while let Some(found) = body[from..].find("-----END ") {
-        let start = from + found + "-----END ".len();
-        let label_len = body[start..].chars().take_while(|c| c.is_ascii_uppercase() || *c == ' ').map(char::len_utf8).sum::<usize>();
-        if body[start..start + label_len].ends_with("PRIVATE KEY") && body[start + label_len..].starts_with("-----") {
-            return Some(start + label_len + 5);
-        }
-        from = start;
-    }
-    None
-}
-
-/// Text with the parts that look like secrets replaced by ••••.
-pub(super) fn mask_secrets(text: &str) -> String {
-    let text = mask_private_keys(text);
-    let mut state = MaskState::default();
-    let mut out = String::new();
-    let mut rest = text.as_str();
-    while let Some(first) = rest.chars().next() {
-        let space = first.is_whitespace();
-        let len = rest.find(|c: char| c.is_whitespace() != space).unwrap_or(rest.len());
-        let piece = &rest[..len];
-        rest = &rest[len..];
-        if space {
-            if piece.contains('\n') { state = MaskState::default(); }
-            out.push_str(piece);
-            continue;
-        }
-        if state.line {
-            let quote = piece.chars().last().filter(|c| matches!(c, '"' | '\''));
-            if quote.is_some() { state.line = false; }
-            out.push_str(MASK);
-            if let Some(quote) = quote { out.push(quote); }
-            continue;
-        }
-        if let Some(quote) = state.quote {
-            match piece.find(quote) {
-                None => out.push_str(MASK),
-                Some(close) => { out.push_str(MASK); out.push_str(&piece[close..]); state.quote = None; }
-            }
-            continue;
-        }
-        if let Some(expect) = state.expect.take() {
-            if (expect == Expect::Value && !piece.starts_with('-')) || (expect == Expect::Long && piece.encode_utf16().count() >= 8) {
-                out.push_str(&mask_value(piece, &mut state));
-                continue;
-            }
-        }
-        out.push_str(&mask_word(piece, &mut state));
-    }
-    out
+    })
 }
 
 // ---- Rows ----
@@ -322,15 +114,40 @@ fn row(action: &str, target: Option<String>, tool: Option<&str>, outcome: Option
     value
 }
 
-fn with_id(mut value: Value, id: Option<&str>) -> Value {
-    if let Some(id) = id.filter(|id| !id.is_empty() && id.len() <= 128 && !id.chars().any(|c| c.is_control() || hidden_format(c))) {
-        value["id"] = json!(id);
-    }
-    value
+fn id_shape(id: &str) -> bool {
+    (1..=64).contains(&id.len()) && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | ':' | '-'))
 }
 
-/// A command as a row: the first line as the target, the whole (masked)
-/// command and where it ran for the detail.
+/// The row as it may be stored: known fields only, every string through the
+/// same masking and length rules, enum values and the app's id checked.
+/// Every write goes through here (review PR #11 B1). None: not a row.
+pub(super) fn sanitize(value: &Value) -> Option<Value> {
+    const ACTIONS: &[&str] = &["read", "edit", "write", "delete", "search", "command", "other"];
+    const OUTCOMES: &[&str] = &["refused", "failed", "stopped"];
+    let object = value.as_object()?;
+    let action = object.get("action")?.as_str().filter(|action| ACTIONS.contains(action))?;
+    let mut out = serde_json::Map::new();
+    out.insert("action".into(), json!(action));
+    for (key, field) in object {
+        let stored = match key.as_str() {
+            "action" => continue,
+            "outcome" => field.as_str().filter(|outcome| OUTCOMES.contains(outcome)).map(|outcome| json!(outcome)),
+            "phase" => (field.as_str() == Some("done")).then(|| json!("done")),
+            "id" => field.as_str().filter(|id| id_shape(id)).map(|id| json!(id)),
+            "target" | "tool" | "cwd" => field.as_str().and_then(bounded).map(|text| json!(text)),
+            "command" => field.as_str().and_then(|text| block(text, BLOCK_MAX_CHARS)).map(|text| json!(text)),
+            "note" => field.as_str().and_then(|text| block(text, NOTE_MAX_CHARS)).map(|text| json!(text)),
+            "exit" => field.as_i64().map(|code| json!(code)),
+            "ms" | "added" | "removed" => field.as_u64().map(|number| json!(number)),
+            _ => None,
+        };
+        if let Some(stored) = stored { out.insert(key.clone(), stored); }
+    }
+    Some(Value::Object(out))
+}
+
+/// A command as a row: the first line as the target, the whole command and
+/// where it ran for the detail (masked as a whole first).
 fn command_row(command: &str, cwd: Option<String>) -> Value {
     let masked = mask_secrets(&neutralise(command, true));
     let mut value = row("command", bounded(&masked), None, None);
@@ -342,7 +159,7 @@ fn command_row(command: &str, cwd: Option<String>) -> Value {
 /// "pattern · folder" for a search: the model's own pattern (never file
 /// contents), and the folder only when it is not the whole workspace.
 fn search_target(pattern: Option<&str>, path: Option<&str>, cwd: &Path) -> Option<String> {
-    let pattern = pattern.and_then(bounded).map(|pattern| mask_secrets(&pattern));
+    let pattern = pattern.and_then(bounded);
     let place = path.and_then(|path| display_path(path, cwd)).filter(|path| path != ".");
     match (pattern, place) {
         (Some(pattern), Some(place)) => bounded(&format!("{pattern} · {place}")),
@@ -358,21 +175,23 @@ fn domain(url: &str) -> Option<String> {
     bounded(host).filter(|host| !host.is_empty())
 }
 
-/// Claude asks before every tool use; record the app's answer.
+/// Claude asks before every tool use; record the app's answer. `id` is the
+/// app's own key for this tool use (none when it was refused).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(super) fn claude(
     request: &elsecrew_core::provider::vendor_observation::claude_approval::Request,
     cwd: &Path,
     refused: bool,
+    id: Option<&str>,
 ) -> Value {
-    claude_row(&request.tool_name, request.target(), request.inspect_input(), request.tool_use_id.as_deref(), cwd, refused)
+    claude_row(&request.tool_name, request.target(), request.inspect_input(), id, cwd, refused)
 }
 
 fn claude_row(
     tool_name: &str,
     target: &elsecrew_core::provider::vendor_observation::claude_approval::ToolTarget,
     input: &str,
-    tool_use_id: Option<&str>,
+    id: Option<&str>,
     cwd: &Path,
     refused: bool,
 ) -> Value {
@@ -380,7 +199,7 @@ fn claude_row(
     let outcome = refused.then_some("refused");
     let input = serde_json::from_str::<Value>(input).unwrap_or(Value::Null);
     let text = |key: &str| input.get(key).and_then(Value::as_str);
-    let value = match target {
+    let mut value = match target {
         ToolTarget::File { path, .. } => {
             let action = match tool_name { "Read" => "read", "Write" => "write", _ => "edit" };
             row(action, display_path(path, cwd), None, outcome)
@@ -403,58 +222,75 @@ fn claude_row(
         ToolTarget::Unsupported => {
             let target = match tool_name {
                 "WebFetch" => text("url").and_then(domain),
-                "WebSearch" => text("query").and_then(bounded).map(|query| mask_secrets(&query)),
+                "WebSearch" => text("query").and_then(bounded),
                 _ => None,
             };
-            row("other", target, Some(tool_name), outcome)
+            row("other", target, bounded(tool_name).as_deref(), outcome)
         }
     };
-    with_id(value, tool_use_id)
+    if let Some(id) = id { value["id"] = json!(id); }
+    value
 }
 
-/// How a Claude tool use ended, as the row that replaces its first row.
+/// How a Claude tool use ended, as the row that replaces its first row; None
+/// when the result does not say whether it worked (review PR #11 I3). An exit
+/// code is kept only when the result states one.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(super) fn claude_done(
     started: &Value,
     result: &elsecrew_core::provider::vendor_observation::claude_events::ToolResult,
     elapsed: std::time::Duration,
-) -> Value {
+) -> Option<Value> {
+    let is_error = result.is_error?;
     let mut value = started.clone();
     value["phase"] = json!("done");
     value["ms"] = json!(u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX));
-    let action = started["action"].as_str().unwrap_or("other");
-    if result.is_error && value.get("outcome").is_none() { value["outcome"] = json!("failed"); }
-    if action == "command" {
-        // A failed command says its exit code; a clean one ended with 0.
-        match (result.exit_code, result.is_error) {
-            (Some(code), _) => value["exit"] = json!(code),
-            (None, false) => value["exit"] = json!(0),
-            (None, true) => {}
-        }
-        if let Some(output) = result.output.as_deref().and_then(|output| block(output, BLOCK_MAX_CHARS)) { value["output"] = json!(output); }
+    if value.get("outcome").is_none() {
+        if result.interrupted { value["outcome"] = json!("stopped"); }
+        else if is_error { value["outcome"] = json!("failed"); }
     }
-    if matches!(action, "edit" | "write") {
+    let action = started["action"].as_str().unwrap_or("other");
+    if action == "command" {
+        if let Some(code) = result.exit_code { value["exit"] = json!(code); }
+    }
+    if matches!(action, "edit" | "write") && !is_error {
         if let Some((added, removed)) = result.lines { value["added"] = json!(added); value["removed"] = json!(removed); }
     }
-    value
+    Some(value)
 }
 
-/// Codex reports each command and file change when it starts and ends.
-pub(super) fn codex(tool: &elsecrew_core::provider::vendor_observation::codex_events::stream::ToolEvent, cwd: &Path) -> Vec<Value> {
-    use elsecrew_core::provider::vendor_observation::codex_events::stream::{ToolKind, ToolPhase};
-    let outcome = match tool.phase {
-        ToolPhase::Started | ToolPhase::Completed => None,
-        ToolPhase::Failed => Some("failed"),
-        ToolPhase::Declined => Some("refused"),
-        ToolPhase::Output => return Vec::new(),
-    };
-    let done = tool.phase != ToolPhase::Started;
+/// A Codex tool use between its start and end: its rows as first stored, and
+/// for a file change the files in order, so the end row keeps the start's
+/// place and verb even when the end frame leaves fields out (review I4).
+pub(super) struct CodexTool {
+    sequence: u64,
+    rows: Vec<Value>,
+    paths: Vec<String>,
+}
+
+/// Open Codex tool uses of one run, by provider item id, and the counter for
+/// the app's own ids.
+#[derive(Default)]
+pub(crate) struct CodexTools {
+    open: BTreeMap<String, CodexTool>,
+    next: u64,
+}
+
+impl CodexTools {
+    fn new_id(&mut self) -> (u64, String) {
+        self.next += 1;
+        (self.next, format!("c{}", self.next))
+    }
+}
+
+/// The rows a Codex tool use starts with.
+fn codex_start(
+    tool: &elsecrew_core::provider::vendor_observation::codex_events::stream::ToolEvent,
+    cwd: &Path,
+    id: &str,
+) -> (Vec<Value>, Vec<String>) {
+    use elsecrew_core::provider::vendor_observation::codex_events::stream::ToolKind;
     let detail = &tool.detail;
-    let finish = |mut value: Value, id: &str| {
-        if let Some(outcome) = outcome { value["outcome"] = json!(outcome); }
-        if done { value["phase"] = json!("done"); }
-        with_id(value, Some(id))
-    };
     match tool.kind {
         ToolKind::Command => {
             // Which command ran, so a list of commands is readable (user
@@ -476,25 +312,95 @@ pub(super) fn codex(tool: &elsecrew_core::provider::vendor_observation::codex_ev
                 if kind != "command" {
                     value["action"] = json!(kind);
                     if let Some(tool) = tool { value["tool"] = json!(tool); }
-                    // Without a place (a bare `ls`), the command line stays the target.
+                    // Without a place the command line stays the target.
                     if let Some(target) = target { value["target"] = json!(target); }
                 }
             }
-            if done {
-                if let Some(exit) = detail.exit_code { value["exit"] = json!(exit); }
-                if let Some(ms) = detail.duration_ms { value["ms"] = json!(ms); }
-                if let Some(output) = detail.output.as_deref().and_then(|output| block(output, BLOCK_MAX_CHARS)) { value["output"] = json!(output); }
-            }
-            vec![finish(value, &tool.item_id)]
+            value["id"] = json!(id);
+            (vec![value], Vec::new())
         }
         ToolKind::FileChange => {
-            if detail.changes.is_empty() { return vec![finish(row("edit", None, None, None), &tool.item_id)]; }
+            if detail.changes.is_empty() {
+                let mut value = row("edit", None, None, None);
+                value["id"] = json!(id);
+                return (vec![value], Vec::new());
+            }
             detail.changes.iter().enumerate().map(|(index, change)| {
-                let action = match change.kind.as_str() { "add" => "write", "delete" => "delete", _ => "edit" };
-                let mut value = row(action, display_path(&change.path, cwd), None, None);
-                if done && outcome.is_none() { value["added"] = json!(change.added); value["removed"] = json!(change.removed); }
-                finish(value, &format!("{}:{index}", tool.item_id))
-            }).collect()
+                let mut value = row(file_action(&change.kind), display_path(&change.path, cwd), None, None);
+                value["id"] = json!(format!("{id}:{index}"));
+                (value, change.path.clone())
+            }).unzip()
+        }
+    }
+}
+
+fn file_action(kind: &str) -> &'static str {
+    match kind { "add" => "write", "delete" => "delete", _ => "edit" }
+}
+
+/// Codex reports each command and file change when it starts and ends. The
+/// app keeps the start (`tools`) and builds the end from it.
+pub(super) fn codex(
+    tools: &mut CodexTools,
+    tool: &elsecrew_core::provider::vendor_observation::codex_events::stream::ToolEvent,
+    cwd: &Path,
+) -> Vec<Value> {
+    use elsecrew_core::provider::vendor_observation::codex_events::stream::{ToolKind, ToolPhase};
+    let outcome = match tool.phase {
+        ToolPhase::Output => return Vec::new(),
+        ToolPhase::Started => {
+            let (sequence, id) = tools.new_id();
+            let (rows, paths) = codex_start(tool, cwd, &id);
+            if tools.open.len() >= OPEN_TOOLS_MAX {
+                let oldest = tools.open.iter().min_by_key(|(_, open)| open.sequence).map(|(key, _)| key.clone());
+                if let Some(oldest) = oldest { tools.open.remove(&oldest); }
+            }
+            tools.open.insert(tool.item_id.clone(), CodexTool { sequence, rows: rows.clone(), paths });
+            return rows;
+        }
+        ToolPhase::Completed => None,
+        ToolPhase::Failed => Some("failed"),
+        ToolPhase::Declined => Some("refused"),
+    };
+    // The start as stored; an end seen without its start starts here.
+    let start = tools.open.remove(&tool.item_id).unwrap_or_else(|| {
+        let (sequence, id) = tools.new_id();
+        let (rows, paths) = codex_start(tool, cwd, &id);
+        CodexTool { sequence, rows, paths }
+    });
+    let detail = &tool.detail;
+    let finish = |mut value: Value| {
+        value["phase"] = json!("done");
+        if let Some(outcome) = outcome { value["outcome"] = json!(outcome); }
+        value
+    };
+    match tool.kind {
+        ToolKind::Command => start.rows.into_iter().map(|mut value| {
+            if let Some(exit) = detail.exit_code { value["exit"] = json!(exit); }
+            if let Some(ms) = detail.duration_ms { value["ms"] = json!(ms); }
+            finish(value)
+        }).collect(),
+        ToolKind::FileChange => {
+            let base = start.rows.first().and_then(|row| row["id"].as_str()).map(|id| id.split(':').next().unwrap_or(id).to_string())
+                .unwrap_or_else(|| tools.new_id().1);
+            let mut rows: Vec<Value> = Vec::new();
+            for (index, mut value) in start.rows.into_iter().enumerate() {
+                // The same file by its path, not by its place in the list.
+                let change = start.paths.get(index).and_then(|path| detail.changes.iter().find(|change| &change.path == path));
+                if let (Some(change), None) = (change, outcome) { value["added"] = json!(change.added); value["removed"] = json!(change.removed); }
+                rows.push(finish(value));
+            }
+            // Files the end names that the start did not.
+            let mut next = start.paths.len();
+            for change in detail.changes.iter().filter(|change| !start.paths.contains(&change.path)) {
+                let mut value = row(file_action(&change.kind), display_path(&change.path, cwd), None, None);
+                value["id"] = json!(format!("{base}:{next}"));
+                next += 1;
+                if outcome.is_none() { value["added"] = json!(change.added); value["removed"] = json!(change.removed); }
+                rows.push(finish(value));
+            }
+            // A start that named no file is replaced by the files the end names.
+            if !start.paths.is_empty() || rows.len() == 1 { rows } else { rows.into_iter().skip(1).collect() }
         }
     }
 }
@@ -517,7 +423,9 @@ fn unwrap_shell(command: &str) -> &str {
 
 impl RunReservation {
     /// Best effort: the history is a view of the run, not part of its result.
+    /// The only way a work history row is stored; it is sanitized here.
     pub(super) fn record_activity(&self, storage: &mut Storage, activity: Value) {
+        let Some(activity) = sanitize(&activity) else { return };
         let update = OutputItemUpdate {
             item_id: format!("activity_{}", Uuid::new_v4().simple()),
             operation: OutputItemOperation::Complete,
@@ -533,8 +441,13 @@ impl RunReservation {
 mod tests {
     use super::*;
 
+    /// Inputs are synthetic; fake values say so (FAKE/example).
+    fn cases() -> Value {
+        serde_json::from_str(include_str!("../../../../../tests/fixtures/m5/secret-mask-cases.json")).unwrap()
+    }
+
     #[test]
-    fn paths_stay_inside_the_workspace_or_read_from_home() {
+    fn paths_stay_inside_the_workspace_or_say_little_outside() {
         let cwd = Path::new("/work/copy");
         assert_eq!(relative("/work/copy/src/app.ts", cwd).as_deref(), Some("src/app.ts"));
         assert_eq!(relative("src/app.ts", cwd).as_deref(), Some("src/app.ts"));
@@ -542,19 +455,24 @@ mod tests {
         assert_eq!(relative("/elsewhere/secret.txt", cwd), None);
         assert_eq!(relative("/work/copy/../secret.txt", cwd), None);
         assert_eq!(relative("../secret.txt", cwd), None);
-        assert_eq!(display_path("/elsewhere/notes.txt", cwd).as_deref(), Some("/elsewhere/notes.txt"));
+        assert_eq!(display_path("/elsewhere/deep/folder/notes.txt", cwd).as_deref(), Some("…/folder/notes.txt"));
+        assert_eq!(display_path("../up/x.txt", cwd).as_deref(), Some("…/up/x.txt"));
         if let Some(home) = std::env::var_os("HOME").map(PathBuf::from).filter(|home| home.is_absolute() && home != Path::new("/")) {
-            let inside = home.join(".ssh/config");
-            assert_eq!(display_path(inside.to_str().unwrap(), cwd).as_deref(), Some("~/.ssh/config"));
+            assert_eq!(display_path(home.join(".ssh/config").to_str().unwrap(), cwd).as_deref(), Some("~/.ssh/config"));
+            assert_eq!(display_path(home.join("a/b/c/d.txt").to_str().unwrap(), cwd).as_deref(), Some("~/…/c/d.txt"));
         }
+        // A key-shaped part of a path is masked like any other text (B1).
+        let key = format!("sk-{}", "FAKEexample".repeat(2));
+        assert_eq!(display_path(&format!("/work/copy/keys/{key}.txt"), cwd).as_deref(), Some("keys/sk-••••.txt"));
+        assert_eq!(display_path(&format!("/srv/{key}/x"), cwd).as_deref(), Some("…/sk-••••/x"));
     }
 
     #[test]
-    fn lines_are_one_bounded_line_with_marks_neutralised() {
+    fn lines_are_masked_then_cut_with_marks_neutralised() {
         assert_eq!(bounded("Run tests\nrm -rf /").as_deref(), Some("Run tests"));
         assert_eq!(bounded("  ").as_deref(), None);
         assert_eq!(bounded("file\u{202e}txt.exe").as_deref(), Some("file\u{fffd}txt.exe"));
-        assert_eq!(bounded("a\u{1b}[31mb").as_deref(), Some("a\u{fffd}[31mb"));
+        assert_eq!(bounded("a\u{1b}[31mb\u{2028}c").as_deref(), Some("a\u{fffd}[31mb\u{fffd}c"));
         assert_eq!(bounded(&"a".repeat(400)).map(|text| text.chars().count()), Some(TARGET_MAX_CHARS + 1));
         assert_eq!(block(&format!("{}\n", "x".repeat(9000)), BLOCK_MAX_CHARS).map(|text| text.chars().count()), Some(BLOCK_MAX_CHARS + 1));
         assert_eq!(block("one\r\ntwo\u{7}", 100).as_deref(), Some("one\ntwo\u{fffd}"));
@@ -562,13 +480,33 @@ mod tests {
 
     #[test]
     fn secrets_are_masked_like_the_screen_does() {
-        let cases: Vec<Value> = serde_json::from_str(include_str!("../../../../../tests/fixtures/m5/secret-mask-cases.json")).unwrap();
-        // Inputs that look like secrets are stored as hex so secret scanners do not flag the fixture.
-        let hex = |text: &str| String::from_utf8((0..text.len()).step_by(2).map(|i| u8::from_str_radix(&text[i..i + 2], 16).unwrap()).collect()).unwrap();
-        for case in cases {
-            let text = case["text"].as_str().map(String::from).unwrap_or_else(|| hex(case["textHex"].as_str().unwrap()));
-            assert_eq!(mask_secrets(&text), case["masked"].as_str().unwrap(), "{text}");
+        for case in cases()["mask"].as_array().unwrap() {
+            // Shapes a secret scanner reads as real are stored with {colon}/{dot}.
+            let text = &case["text"].as_str().unwrap().replace("{colon}", ":").replace("{dot}", ".");
+            let masked = mask_secrets(text);
+            assert_eq!(masked, case["masked"].as_str().unwrap(), "{text:?}");
+            assert_eq!(mask_secrets(&masked), masked, "masking twice changes nothing: {text:?}");
         }
+        for case in cases()["line"].as_array().unwrap() {
+            let text = case["text"].as_str().unwrap();
+            assert_eq!(display_line(text), case["shown"].as_str().unwrap(), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn every_stored_field_is_sanitized() {
+        let key = format!("ghp_{}", "FAKEexample0".repeat(2));
+        let row = json!({"action":"command","target":format!("echo {key}"),"command":format!("TOKEN=FAKEexample echo\n{key}"),
+            "cwd":format!("x/{key}"),"tool":key.clone(),"note":format!("uses {key}"),"id":"c1","exit":0,"ms":5,
+            "output":"never stored","extra":"x","phase":"done","outcome":"failed"});
+        let stored = sanitize(&row).unwrap();
+        let text = stored.to_string();
+        assert!(!text.contains("FAKEexample0FAKE"), "{text}");
+        assert!(!text.contains("never stored") && !text.contains("extra"), "{text}");
+        assert_eq!(stored["command"], "TOKEN=•••• echo\nghp_••••");
+        assert_eq!(sanitize(&json!({"action":"command","id":"toolu_01ABC/../x"})).unwrap().get("id"), None, "provider-shaped ids are not keys");
+        assert_eq!(sanitize(&json!({"action":"move"})), None);
+        assert_eq!(sanitize(&json!({"action":"read","outcome":"maybe","phase":"later"})).unwrap(), json!({"action":"read"}));
     }
 
     #[test]
@@ -579,6 +517,10 @@ mod tests {
         assert_eq!(search_target(Some("a\nrm -rf /"), Some("/work/copy"), cwd).as_deref(), Some("a"));
         assert_eq!(search_target(None, Some("/work/copy/docs"), cwd).as_deref(), Some("docs"));
         assert_eq!(domain("https://user:pw@docs.example.com/a?b").as_deref(), Some("docs.example.com"));
+        // Masked before the cut: a key at the cut boundary leaves nothing (B2).
+        let pattern = format!("{} sk-{}", "p".repeat(150), "FAKEexample".repeat(3));
+        let shown = search_target(Some(&pattern), None, cwd).unwrap();
+        assert!(!shown.contains("FAKE"), "{shown}");
     }
 
     fn event(kind: elsecrew_core::provider::vendor_observation::codex_events::stream::ToolKind,
@@ -593,69 +535,81 @@ mod tests {
     fn codex_commands_show_the_command_and_how_it_ended() {
         use elsecrew_core::provider::vendor_observation::codex_events::stream::{CommandAction, ToolDetail, ToolKind, ToolPhase};
         let cwd = Path::new("/work/copy");
-        let started = |command: &str| codex(&event(ToolKind::Command, ToolPhase::Started, Some(command), ToolDetail { cwd: Some("/work/copy".into()), ..Default::default() }), cwd);
-        assert_eq!(started(r#"/bin/zsh -lc "npm test""#), vec![json!({"action":"command","target":"npm test","command":"npm test","cwd":".","id":"i"})]);
-        assert_eq!(started("/bin/bash -lc 'node tests/check.js'")[0]["target"], "node tests/check.js");
-        assert_eq!(started("echo one\nrm -rf /")[0]["target"], "echo one");
-        assert_eq!(started("echo one\nrm -rf /")[0]["command"], "echo one\nrm -rf /");
-        assert_eq!(started("GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz gh pr list")[0]["target"], "GITHUB_TOKEN=•••• gh pr list");
-        assert_eq!(codex(&event(ToolKind::Command, ToolPhase::Output, None, ToolDetail::default()), cwd), Vec::<Value>::new());
-        assert_eq!(codex(&event(ToolKind::Command, ToolPhase::Declined, None, ToolDetail::default()), cwd), vec![json!({"action":"command","outcome":"refused","phase":"done","id":"i"})]);
-        let done = codex(&event(ToolKind::Command, ToolPhase::Completed, Some("/bin/zsh -lc 'cat .env'"), ToolDetail {
-            cwd: Some("/work/copy/web".into()), exit_code: Some(0), duration_ms: Some(1200), output: Some("API_KEY=abc123\nPORT=3000".into()), ..Default::default()
+        let mut tools = CodexTools::default();
+        let started = |tools: &mut CodexTools, command: &str| codex(tools, &event(ToolKind::Command, ToolPhase::Started, Some(command), ToolDetail { cwd: Some("/work/copy".into()), ..Default::default() }), cwd);
+        assert_eq!(started(&mut tools, r#"/bin/zsh -lc "npm test""#), vec![json!({"action":"command","target":"npm test","command":"npm test","cwd":".","id":"c1"})]);
+        let done = codex(&mut tools, &event(ToolKind::Command, ToolPhase::Completed, Some("/bin/zsh -lc \"npm test\""), ToolDetail {
+            cwd: Some("/work/copy".into()), exit_code: Some(0), duration_ms: Some(1200), ..Default::default()
         }), cwd);
-        assert_eq!(done, vec![json!({"action":"command","target":"cat .env","command":"cat .env","cwd":"web","exit":0,"ms":1200,"output":"API_KEY=••••\nPORT=3000","phase":"done","id":"i"})]);
-        let failed = codex(&event(ToolKind::Command, ToolPhase::Failed, Some("false"), ToolDetail { exit_code: Some(1), ..Default::default() }), cwd);
-        assert_eq!(failed[0]["outcome"], "failed");
-        assert_eq!(failed[0]["exit"], 1);
-        let read = codex(&event(ToolKind::Command, ToolPhase::Started, Some("/bin/zsh -lc 'sed -n 1,80p src/app.js'"), ToolDetail {
+        assert_eq!(done, vec![json!({"action":"command","target":"npm test","command":"npm test","cwd":".","id":"c1","exit":0,"ms":1200,"phase":"done"})]);
+        assert_eq!(started(&mut tools, "echo one\nrm -rf /")[0]["command"], "echo one\nrm -rf /");
+        let token = format!("GITHUB_TOKEN=ghp_{} gh pr list", "FAKEexample0".repeat(2));
+        assert_eq!(started(&mut tools, &token)[0]["target"], "GITHUB_TOKEN=•••• gh pr list");
+        assert_eq!(codex(&mut tools, &event(ToolKind::Command, ToolPhase::Output, None, ToolDetail::default()), cwd), Vec::<Value>::new());
+        // Read as reading, and the end keeps the start's verb and place even
+        // when the end frame leaves the command's reading out (I4).
+        let mut tools = CodexTools::default();
+        let read = codex(&mut tools, &event(ToolKind::Command, ToolPhase::Started, Some("/bin/zsh -lc 'sed -n 1,80p src/app.js'"), ToolDetail {
             cwd: Some("/work/copy".into()), actions: vec![CommandAction { kind: "read".into(), path: Some("/work/copy/src/app.js".into()), query: None }], ..Default::default()
         }), cwd);
-        assert_eq!(read, vec![json!({"action":"read","target":"src/app.js","command":"sed -n 1,80p src/app.js","cwd":".","id":"i"})]);
-        let search = codex(&event(ToolKind::Command, ToolPhase::Started, Some("rg TODO src"), ToolDetail {
-            actions: vec![CommandAction { kind: "search".into(), path: Some("src".into()), query: Some("TODO".into()) }], ..Default::default()
-        }), cwd);
-        assert_eq!(search[0]["target"], "TODO · src");
-        assert_eq!(search[0]["tool"], "Grep");
+        assert_eq!(read, vec![json!({"action":"read","target":"src/app.js","command":"sed -n 1,80p src/app.js","cwd":".","id":"c1"})]);
+        let end = codex(&mut tools, &event(ToolKind::Command, ToolPhase::Failed, None, ToolDetail { exit_code: Some(1), ..Default::default() }), cwd);
+        assert_eq!(end, vec![json!({"action":"read","target":"src/app.js","command":"sed -n 1,80p src/app.js","cwd":".","id":"c1","exit":1,"outcome":"failed","phase":"done"})]);
+        let declined = codex(&mut CodexTools::default(), &event(ToolKind::Command, ToolPhase::Declined, None, ToolDetail::default()), cwd);
+        assert_eq!(declined, vec![json!({"action":"command","id":"c1","outcome":"refused","phase":"done"})]);
     }
 
     #[test]
-    fn codex_file_changes_name_each_file_and_its_lines() {
+    fn codex_file_changes_name_each_file_and_keep_their_place() {
         use elsecrew_core::provider::vendor_observation::codex_events::stream::{FileChange, ToolDetail, ToolKind, ToolPhase};
         let cwd = Path::new("/work/copy");
-        let detail = ToolDetail { changes: vec![
-            FileChange { path: "/work/copy/src/app.ts".into(), kind: "update".into(), added: 3, removed: 1 },
-            FileChange { path: "/work/copy/new.md".into(), kind: "add".into(), added: 10, removed: 0 },
-            FileChange { path: "/work/copy/old.md".into(), kind: "delete".into(), added: 0, removed: 4 },
-        ], ..Default::default() };
-        assert_eq!(codex(&event(ToolKind::FileChange, ToolPhase::Started, None, detail.clone()), cwd), vec![
-            json!({"action":"edit","target":"src/app.ts","id":"i:0"}),
-            json!({"action":"write","target":"new.md","id":"i:1"}),
-            json!({"action":"delete","target":"old.md","id":"i:2"}),
+        let change = |path: &str, kind: &str, added, removed| FileChange { path: path.into(), kind: kind.into(), added, removed };
+        let mut tools = CodexTools::default();
+        let start = ToolDetail { changes: vec![change("/work/copy/src/app.ts", "update", 0, 0), change("/work/copy/new.md", "add", 0, 0), change("/work/copy/old.md", "delete", 0, 0)], ..Default::default() };
+        assert_eq!(codex(&mut tools, &event(ToolKind::FileChange, ToolPhase::Started, None, start), cwd), vec![
+            json!({"action":"edit","target":"src/app.ts","id":"c1:0"}),
+            json!({"action":"write","target":"new.md","id":"c1:1"}),
+            json!({"action":"delete","target":"old.md","id":"c1:2"}),
         ]);
-        let done = codex(&event(ToolKind::FileChange, ToolPhase::Completed, None, detail), cwd);
-        assert_eq!(done[0], json!({"action":"edit","target":"src/app.ts","added":3,"removed":1,"phase":"done","id":"i:0"}));
-        assert_eq!(codex(&event(ToolKind::FileChange, ToolPhase::Started, None, ToolDetail::default()), cwd), vec![json!({"action":"edit","id":"i"})]);
+        // The end lists the files in another order and adds one: matched by path.
+        let end = ToolDetail { changes: vec![change("/work/copy/new.md", "add", 10, 0), change("/work/copy/src/app.ts", "update", 3, 1), change("/work/copy/extra.md", "add", 2, 0)], ..Default::default() };
+        let done = codex(&mut tools, &event(ToolKind::FileChange, ToolPhase::Completed, None, end), cwd);
+        assert_eq!(done, vec![
+            json!({"action":"edit","target":"src/app.ts","id":"c1:0","added":3,"removed":1,"phase":"done"}),
+            json!({"action":"write","target":"new.md","id":"c1:1","added":10,"removed":0,"phase":"done"}),
+            json!({"action":"delete","target":"old.md","id":"c1:2","phase":"done"}),
+            json!({"action":"write","target":"extra.md","id":"c1:3","added":2,"removed":0,"phase":"done"}),
+        ]);
+        // An end with no file list keeps the start's files (I4).
+        let mut tools = CodexTools::default();
+        codex(&mut tools, &event(ToolKind::FileChange, ToolPhase::Started, None, ToolDetail { changes: vec![change("/work/copy/a.ts", "update", 0, 0)], ..Default::default() }), cwd);
+        assert_eq!(codex(&mut tools, &event(ToolKind::FileChange, ToolPhase::Completed, None, ToolDetail::default()), cwd),
+            vec![json!({"action":"edit","target":"a.ts","id":"c1:0","phase":"done"})]);
     }
 
     #[test]
-    fn claude_done_rows_keep_the_start_and_add_how_it_ended() {
+    fn claude_done_rows_keep_the_start_and_add_only_what_is_known() {
         use elsecrew_core::provider::vendor_observation::claude_events::ToolResult;
-        let started = json!({"action":"command","target":"npm test","command":"npm test","id":"t"});
-        let result = ToolResult { tool_use_id: "t".into(), is_error: true, exit_code: Some(2), output: Some("FAIL token=abc".into()), lines: None };
-        assert_eq!(claude_done(&started, &result, std::time::Duration::from_millis(1500)),
-            json!({"action":"command","target":"npm test","command":"npm test","id":"t","phase":"done","ms":1500,"outcome":"failed","exit":2,"output":"FAIL token=••••"}));
-        let ok = ToolResult { tool_use_id: "t".into(), output: Some("ok".into()), ..Default::default() };
-        assert_eq!(claude_done(&started, &ok, std::time::Duration::from_millis(5))["exit"], 0);
-        let edit = json!({"action":"edit","target":"src/a.ts","id":"e"});
-        let lines = ToolResult { tool_use_id: "e".into(), lines: Some((4, 2)), output: Some("file contents".into()), ..Default::default() };
-        let done = claude_done(&edit, &lines, std::time::Duration::from_millis(5));
-        assert_eq!((done["added"].clone(), done["removed"].clone(), done.get("output")), (json!(4), json!(2), None), "file contents are never stored");
+        let started = json!({"action":"command","target":"npm test","command":"npm test","id":"t1"});
+        let failed = ToolResult { tool_use_id: "x".into(), is_error: Some(true), exit_code: Some(2), ..Default::default() };
+        assert_eq!(claude_done(&started, &failed, std::time::Duration::from_millis(1500)),
+            Some(json!({"action":"command","target":"npm test","command":"npm test","id":"t1","phase":"done","ms":1500,"outcome":"failed","exit":2})));
+        // Success says no exit code; none is made up (I3).
+        let ok = ToolResult { tool_use_id: "x".into(), is_error: Some(false), ..Default::default() };
+        assert_eq!(claude_done(&started, &ok, std::time::Duration::from_millis(5)).unwrap().get("exit"), None);
+        let stopped = ToolResult { tool_use_id: "x".into(), is_error: Some(false), interrupted: true, ..Default::default() };
+        assert_eq!(claude_done(&started, &stopped, std::time::Duration::from_millis(5)).unwrap()["outcome"], "stopped");
+        let unknown = ToolResult { tool_use_id: "x".into(), is_error: None, ..Default::default() };
+        assert_eq!(claude_done(&started, &unknown, std::time::Duration::from_millis(5)), None);
+        let edit = json!({"action":"edit","target":"src/a.ts","id":"t2"});
+        let lines = ToolResult { tool_use_id: "x".into(), is_error: Some(false), lines: Some((4, 2)), ..Default::default() };
+        let done = claude_done(&edit, &lines, std::time::Duration::from_millis(5)).unwrap();
+        assert_eq!((done["added"].clone(), done["removed"].clone()), (json!(4), json!(2)));
     }
 
     /// Development replay, not a gate: recorded provider frames (Claude
     /// stream-json, Codex app-server JSON-RPC) through the real parsers and
-    /// row builders, written as JSON lines for a screen capture.
+    /// row builders and `sanitize`, written as JSON lines for a screen capture.
     /// `ELSECREW_ACTIVITY_REPLAY=<claude.jsonl>|<codex.jsonl>|<cwd claude>|<cwd codex>|<out.json>`
     #[test]
     #[ignore]
@@ -667,8 +621,9 @@ mod tests {
         let observe = |value: &Value| BoundedObservation::new(value.to_string().into_bytes()).unwrap();
         // Claude: each tool_use becomes the permission request the app would see.
         let mut claude_rows = Vec::new();
-        let mut started = std::collections::BTreeMap::new();
+        let mut started = BTreeMap::new();
         let mut projection: Option<SessionProjection> = None;
+        let mut next = 0;
         for line in std::fs::read_to_string(parts[0]).unwrap().lines() {
             let frame: Value = serde_json::from_str(line).unwrap();
             let session = frame["session_id"].as_str().unwrap_or("s").to_string();
@@ -685,9 +640,10 @@ mod tests {
                         "Bash" => ToolTarget::Shell,
                         _ => ToolTarget::Unsupported,
                     };
-                    let row = claude_row(name, &target, &input.to_string(), block["id"].as_str(), Path::new(parts[2]), false);
+                    next += 1;
+                    let row = claude_row(name, &target, &input.to_string(), Some(&format!("t{next}")), Path::new(parts[2]), false);
                     started.insert(block["id"].as_str().unwrap().to_string(), (row.clone(), frame["timestamp"].as_str().map(String::from)));
-                    claude_rows.push(row);
+                    claude_rows.extend(sanitize(&row));
                 }
             } else if frame["type"] == "user" {
                 if let Projection::ToolResults(results) = projection.project(&observe(&frame)).unwrap() {
@@ -699,7 +655,7 @@ mod tests {
                                 (Some(asked), Some(done)) => (done - asked).to_std().unwrap_or_default(),
                                 _ => std::time::Duration::ZERO,
                             };
-                            claude_rows.push(claude_done(&row, &result, elapsed));
+                            claude_rows.extend(claude_done(&row, &result, elapsed).as_ref().and_then(sanitize));
                         }
                     }
                 }
@@ -707,6 +663,7 @@ mod tests {
         }
         // Codex: the turn's notifications through the turn stream.
         let mut codex_rows = Vec::new();
+        let mut tools = CodexTools::default();
         let mut stream: Option<TurnStream> = None;
         for line in std::fs::read_to_string(parts[1]).unwrap().lines() {
             let frame: Value = serde_json::from_str(line).unwrap();
@@ -717,7 +674,7 @@ mod tests {
             }
             let Some(stream) = stream.as_mut() else { continue };
             match stream.observe(&observe(&json!({"method":method,"params":frame["params"]}))) {
-                Ok(Observed::Tool(tool)) => codex_rows.extend(codex(&tool, Path::new(parts[3]))),
+                Ok(Observed::Tool(tool)) => codex_rows.extend(codex(&mut tools, &tool, Path::new(parts[3])).iter().filter_map(sanitize)),
                 Ok(_) => {}
                 Err(_) => panic!("codex replay stopped at {method}: {}", stream.diagnostic_stage()),
             }

@@ -21,22 +21,19 @@ export function looksLikeSecret(text: string): boolean {
 }
 
 /* ---------------------------------------------------------------------------
- * Hiding secrets in a command or its output (work history, 2026-11-26).
+ * Hiding secrets in work history text (2026-11-26).
  *
- * The same rules run in the engine before a row is stored
- * (`crates/elsecrew-sidecar/src/agent_runtime/preparation/activity.rs`
- * `mask_secrets`) and here before it is drawn, so rows stored by an older
- * build are covered too. Both read `tests/fixtures/m5/secret-mask-cases.json`;
- * a new rule goes into both and gets a line there.
- *
- * Word by word: a known key shape (the list above) keeps its prefix and hides
- * the rest; a value given to a secret-named setting (`GITHUB_TOKEN=…`,
- * `--password …`, `"apiKey": "…"`), an `Authorization` header, a `Bearer`
- * token, a password in a URL and a private key block are hidden whole.
+ * The engine masks every row before it is stored
+ * (`crates/elsecrew-sidecar/src/agent_runtime/preparation/secret_mask.rs`);
+ * this is the same algorithm, run again before a row is drawn. Both read
+ * `tests/fixtures/m5/secret-mask-cases.json` and must give the same result;
+ * a new rule goes into both and gets a case there. See the Rust module for
+ * the list of rules.
  * ------------------------------------------------------------------------- */
 export const SECRET_MASK = "••••";
+const MASK = SECRET_MASK;
 
-const SECRET_WORDS = new Set(["token", "secret", "password", "passwd", "pwd", "pass", "passphrase", "apikey", "auth", "credential", "credentials", "cookie", "privatekey", "accesskey", "authorization"]);
+const SECRET_WORDS = new Set(["token", "secret", "password", "passwd", "pwd", "pass", "passphrase", "apikey", "auth", "credential", "credentials", "cookie", "privatekey", "accesskey", "authorization", "sig", "signature"]);
 const KEY_PARTS = new Set(["api", "access", "private", "secret", "signing", "encryption"]);
 const SECRET_ENDINGS = ["token", "secret", "password", "apikey"];
 
@@ -51,8 +48,9 @@ export function secretName(name: string): boolean {
     || SECRET_ENDINGS.some(ending => flat.endsWith(ending));
 }
 
+const WHITE = /^[ \t\n\r\v\f]/;
+const PIECES = /[ \t\n\r\v\f]+|[^ \t\n\r\v\f]+/g;
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
-const TRAILING = /[,;)}\]]+$/;
 const TOKEN_CHAR = /[A-Za-z0-9_-]/;
 const ALNUM = /[A-Za-z0-9]/;
 const PREFIXES: readonly { prefix: string; min: number; chars: RegExp; exact?: boolean }[] = [
@@ -66,6 +64,20 @@ const PREFIXES: readonly { prefix: string; min: number; chars: RegExp; exact?: b
   { prefix: "ASIA", min: 16, chars: /[0-9A-Z]/, exact: true },
   { prefix: "eyJ", min: 30, chars: /[A-Za-z0-9_.-]/ },
 ];
+
+function identifier(name: string): boolean { return IDENTIFIER.test(name); }
+
+/** `%5F` → `_` (ASCII only), so an encoded name still reads as a name. */
+function percentDecode(text: string): string {
+  return text.replace(/%([0-9A-Fa-f]{2})/g, (whole, hex: string) => { const code = parseInt(hex, 16); return code < 128 ? String.fromCharCode(code) : whole; });
+}
+
+/** The name part of `name=`/`name:`: percent-decoded, trailing quotes off,
+ * and only the identifier at its end (marks or words stuck in front do not hide it). */
+function nameOf(raw: string): string {
+  const decoded = percentDecode(raw.replace(/["']+$/, ""));
+  return decoded.match(/[A-Za-z0-9_.-]*$/)![0].replace(/^[^A-Za-z_]+/, "");
+}
 
 /** Known key shapes inside one word: keep the prefix, hide the rest. */
 function maskShapes(word: string): string {
@@ -82,7 +94,7 @@ function maskShapes(word: string): string {
         const shaped = exact ? run.length === min && !ALNUM.test(word[end] ?? "")
           : run.length >= min && (prefix !== "eyJ" || run.split(".").length >= 3);
         if (!shaped) continue;
-        out += prefix + SECRET_MASK;
+        out += prefix + MASK;
         index = end;
         continue outer;
       }
@@ -93,36 +105,91 @@ function maskShapes(word: string): string {
   return out;
 }
 
-/** A password in a URL: scheme://user:•••• @host. */
+/** A long run of letters and digits with no name: 32+, upper, lower and digits. */
+function maskBlobs(word: string): string {
+  return word.replace(/[A-Za-z0-9+=_-]+/g, run => run.length >= 32 && /[A-Z]/.test(run) && /[a-z]/.test(run) && /[0-9]/.test(run) ? MASK : run);
+}
+
+/** A password in a URL, or a long user name standing alone. */
 function maskUrl(word: string): string {
   const scheme = word.indexOf("://");
   if (scheme < 0) return word;
   const start = scheme + 3;
   const at = word.indexOf("@", start);
+  if (at < 0) return word;
   const slash = word.indexOf("/", start);
-  if (at < 0 || (slash >= 0 && slash < at)) return word;
-  const colon = word.indexOf(":", start);
-  if (colon < 0 || colon > at || colon + 1 === at) return word;
-  return `${word.slice(0, colon + 1)}${SECRET_MASK}${word.slice(at)}`;
+  if (slash >= 0 && slash < at) return word;
+  const user = word.slice(start, at);
+  const colon = user.indexOf(":");
+  if (colon >= 0 && colon + 1 < user.length) return `${word.slice(0, start + colon + 1)}${MASK}${word.slice(at)}`;
+  if (colon < 0 && user.length >= 16) return `${word.slice(0, start)}${MASK}${word.slice(at)}`;
+  return word;
 }
 
-type Expect = null | "value" | "long";
-interface MaskState { expect: Expect; quote: string | null; line: boolean }
+type Expect = null | "value" | "long" | "userpass";
+interface MaskState { expect: Expect; quote: string | null; line: boolean; mysql: boolean }
 
-/** A setting's value: quotes and trailing punctuation stay so the line still reads. */
+/** The closing quote not escaped with a backslash. */
+function closeQuote(text: string, quote: string): number {
+  for (let index = 0; index < text.length; index++) if (text[index] === quote && (index === 0 || text[index - 1] !== "\\")) return index;
+  return -1;
+}
+
 function maskValue(value: string, state: MaskState): string {
   const quote = value[0] === '"' || value[0] === "'" ? value[0] : null;
   if (quote) {
-    const close = value.indexOf(quote, 1);
-    if (close < 0) { state.quote = quote; return quote + SECRET_MASK; }
-    return quote + SECRET_MASK + value.slice(close);
+    const close = closeQuote(value.slice(1), quote);
+    if (close < 0) { state.quote = quote; return quote + MASK; }
+    return quote + MASK + value.slice(1 + close);
   }
-  const suffix = value.match(TRAILING)?.[0] ?? "";
-  return SECRET_MASK + suffix;
+  const suffix = value.match(/[)}\]]+$/)?.[0] ?? "";
+  return MASK + suffix;
 }
 
-function stripName(text: string): string {
-  return text.replace(/^[-{(\["']+/, "").replace(/["']+$/, "");
+/** `user:password` → `user:••••`. */
+function maskUserpass(value: string): string {
+  const colon = value.indexOf(":");
+  if (colon < 0 || colon + 1 >= value.length) return value;
+  const quote = value[0] === '"' || value[0] === "'" ? value[0] : null;
+  const tail = quote && value.length > 1 && value.endsWith(quote) ? quote : "";
+  return value.slice(0, colon + 1) + MASK + tail;
+}
+
+function longLike(word: string): boolean {
+  return word.length >= 16 || (word.length >= 8 && /[0-9]/.test(word));
+}
+
+function maskSegment(segment: string, state: MaskState): string {
+  for (const flag of ["--user=", "--proxy-user="]) if (segment.startsWith(flag)) return flag + maskUserpass(segment.slice(flag.length));
+  const equals = segment.indexOf("=");
+  if (equals > 0) {
+    const name = nameOf(segment.slice(0, equals));
+    if (identifier(name) && secretName(name)) {
+      const value = segment.slice(equals + 1);
+      if (!value) { state.expect = "value"; return segment; }
+      return segment.slice(0, equals + 1) + maskValue(value, state);
+    }
+  }
+  const colon = segment.indexOf(":");
+  if (colon > 0 && !segment.startsWith("://", colon)) {
+    const name = nameOf(segment.slice(0, colon));
+    if (identifier(name) && secretName(name)) {
+      const value = segment.slice(colon + 1);
+      if (!value) { state.expect = "value"; return segment; }
+      return segment.slice(0, colon + 1) + maskValue(value, state);
+    }
+  }
+  if (["-u", "-U", "--user", "--proxy-user"].includes(segment)) { state.expect = "userpass"; return segment; }
+  if (segment.length > 2 && segment.startsWith("-u") && !segment.startsWith("--") && segment.includes(":")) return "-u" + maskUserpass(segment.slice(2));
+  if (state.mysql && segment.length > 2 && segment.startsWith("-p") && !segment.startsWith("--")) return "-p" + MASK;
+  const flag = segment.replace(/^-+/, "");
+  if (segment.startsWith("-") && segment.length - flag.length <= 2 && /^[A-Za-z]/.test(flag) && identifier(flag) && secretName(flag)) {
+    state.expect = "value";
+    return segment;
+  }
+  const lower = segment.toLowerCase();
+  if (lower === "bearer" || lower === "basic") { state.expect = "long"; return segment; }
+  return maskBlobs(maskShapes(segment));
 }
 
 function maskWord(word: string, state: MaskState): string {
@@ -131,72 +198,62 @@ function maskWord(word: string, state: MaskState): string {
   const lower = core.toLowerCase();
   // Authorization: everything after it on the line (up to a closing quote).
   if (lower.startsWith("authorization:") || lower.startsWith("authorization=")) {
+    const head = core.slice(0, "authorization:".length);
     const rest = core.slice("authorization:".length);
     state.line = true;
     if (!rest) return word;
     const quote = rest.match(/["']$/)?.[0] ?? "";
     if (quote) state.line = false;
-    return opening + core.slice(0, "authorization:".length) + SECRET_MASK + quote;
+    return opening + head + MASK + quote;
   }
-  // NAME=value, --name=value
-  const equals = word.indexOf("=");
-  if (equals > 0) {
-    const name = stripName(word.slice(0, equals));
-    if (IDENTIFIER.test(name) && secretName(name)) {
-      const value = word.slice(equals + 1);
-      if (!value) { state.expect = "value"; return word; }
-      return word.slice(0, equals + 1) + maskValue(value, state);
+  let rest = maskUrl(word);
+  let out = "";
+  for (;;) {
+    if (state.quote) {
+      const close = closeQuote(rest, state.quote);
+      if (close < 0) return out + MASK;
+      out += MASK + state.quote;
+      rest = rest.slice(close + 1);
+      state.quote = null;
+      continue;
     }
+    if (!rest) return out;
+    const found = rest.search(/[;&|,?]/);
+    const split = found < 0 ? rest.length : found;
+    const segment = rest.slice(0, split);
+    if (segment) out += maskSegment(segment, state);
+    if (split === rest.length) return out;
+    out += rest[split];
+    rest = rest.slice(split + 1);
   }
-  // "name": value, name: value
-  const colon = word.indexOf(":");
-  if (colon > 0 && !word.startsWith("://", colon)) {
-    const name = stripName(word.slice(0, colon));
-    if (IDENTIFIER.test(name) && secretName(name)) {
-      const value = word.slice(colon + 1);
-      if (!value) { state.expect = "value"; return word; }
-      return word.slice(0, colon + 1) + maskValue(value, state);
-    }
-  }
-  // --password value
-  if (/^-{1,2}[A-Za-z]/.test(word) && IDENTIFIER.test(word.replace(/^-+/, "")) && secretName(word)) {
-    state.expect = "value";
-    return word;
-  }
-  if (word === "Bearer" || word === "Basic") { state.expect = "long"; return word; }
-  return maskUrl(maskShapes(word));
 }
 
 /** Text with the parts that look like secrets replaced by ••••. */
 export function maskSecrets(text: string): string {
-  // A private key block, whole.
-  text = text.replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, `PRIVATE KEY ${SECRET_MASK}`);
-  const state: MaskState = { expect: null, quote: null, line: false };
+  // A private key block, whole; the replacement is not a BEGIN line, so masking twice changes nothing.
+  text = text.replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, `PRIVATE KEY ${MASK}`);
+  const lower = text.toLowerCase();
+  const state: MaskState = { expect: null, quote: null, line: false, mysql: lower.includes("mysql") || lower.includes("mariadb") };
   let out = "";
-  for (const piece of text.match(/\s+|\S+/g) ?? []) {
-    if (/^\s/.test(piece)) {
-      if (piece.includes("\n")) { state.expect = null; state.quote = null; state.line = false; }
+  for (const piece of text.match(PIECES) ?? []) {
+    if (WHITE.test(piece)) {
+      // A line break ends a header or an expected value; a quoted value goes on.
+      if (piece.includes("\n")) { state.expect = null; state.line = false; }
       out += piece;
       continue;
     }
-    if (state.line) {
+    if (state.line && !state.quote) {
       const quote = piece.match(/["']$/)?.[0] ?? "";
       if (quote) state.line = false;
-      out += SECRET_MASK + quote;
+      out += MASK + quote;
       continue;
     }
-    if (state.quote) {
-      const close = piece.indexOf(state.quote);
-      if (close < 0) { out += SECRET_MASK; continue; }
-      out += SECRET_MASK + piece.slice(close);
-      state.quote = null;
-      continue;
-    }
-    if (state.expect) {
+    if (!state.quote && state.expect) {
       const expect = state.expect;
       state.expect = null;
-      if (expect === "value" && !piece.startsWith("-")) { out += maskValue(piece, state); continue; }
-      if (expect === "long" && piece.length >= 8) { out += maskValue(piece, state); continue; }
+      if (expect === "value") { out += maskValue(piece, state); continue; }
+      if (expect === "userpass") { out += maskUserpass(piece); continue; }
+      if (longLike(piece)) { out += maskValue(piece, state); continue; }
     }
     out += maskWord(piece, state);
   }

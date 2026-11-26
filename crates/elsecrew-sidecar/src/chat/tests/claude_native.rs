@@ -177,9 +177,16 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
         }
         let mut script = format!("IFS= read -r init || exit 1\nprintf '%s\\n' {}\nIFS= read -r prompt || exit 2\nprintf '%s\\n' {}\n", quoted(&control), quoted(&init));
         if case.starts_with("auto-read") {
+            // Synthetic secrets (they say FAKE) in the command, its summary and
+            // what it printed: stored masked or not at all (review PR #11).
             let bash = json!({"type":"control_request","request_id":"bash_once","request":{
-                "subtype":"can_use_tool","tool_name":"Bash","tool_use_id":"tool_bash","input":{"command":"ls","description":"list fixture"}}});
-            script.push_str(&format!("printf '%s\\n' {}\nIFS= read -r reply || exit 3\ncase \"$reply\" in *'\"behavior\":\"allow\"'*) ;; *) exit 4 ;; esac\n", quoted(&bash)));
+                "subtype":"can_use_tool","tool_name":"Bash","tool_use_id":"tool_bash","input":{
+                    "command":"GITHUB_TOKEN=ghp_FAKEexample0FAKEexample0FAKEexample0 gh auth status",
+                    "description":"check login with token=FAKEexampleNoteSecret"}}});
+            let printed = json!({"type":"user","uuid":"bash-result","session_id":"s","parent_tool_use_id":null,
+                "message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool_bash","is_error":false,"content":"FAKE-OUTPUT-MARKER printed"}]},
+                "tool_use_result":{"stdout":"FAKE-OUTPUT-MARKER printed","stderr":"","interrupted":false}});
+            script.push_str(&format!("printf '%s\\n' {}\nIFS= read -r reply || exit 3\ncase \"$reply\" in *'\"behavior\":\"allow\"'*) ;; *) exit 4 ;; esac\nprintf '%s\\n' {}\n", quoted(&bash), quoted(&printed)));
         }
         if case == "auto-read-index-lock" {
             // A concurrent provider `git status` briefly owns the index lock while
@@ -410,14 +417,20 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
         if durable && matches!(case, "auto-read" | "auto-read-mutate" | "auto-read-index-lock") {
             // Each allowed tool use leaves a work-history row: the command line
             // itself (masked) with the model's summary as a note (2026-11-26),
-            // a file by its workspace path; never file contents.
-            let history: Vec<Value> = public.iter().filter(|event| event["kind"] == "status")
+            // a file by its workspace path, the app's own ids; how the command
+            // ended (no exit code is made up), never what it printed.
+            let mut history: Vec<Value> = public.iter().filter(|event| event["kind"] == "status")
                 .filter_map(|event| serde_json::from_str::<Value>(event["text"].as_str()?).ok())
                 .filter(|row| row.get("action").is_some()).collect();
-            assert_eq!(history, vec![
-                json!({"action":"command","target":"ls","command":"ls","note":"list fixture","id":"tool_bash"}),
-                json!({"action":"read","target":"index.html","id":"tool_write"}),
-            ], "{case}");
+            assert!(history[1]["ms"].is_u64(), "{case}");
+            history[1].as_object_mut().unwrap().remove("ms");
+            let command = json!({"action":"command","target":"GITHUB_TOKEN=•••• gh auth status","command":"GITHUB_TOKEN=•••• gh auth status","note":"check login with token=••••","id":"t1"});
+            let mut ended = command.clone();
+            ended["phase"] = json!("done");
+            assert_eq!(history, vec![command, ended, json!({"action":"read","target":"index.html","id":"t2"})], "{case}");
+            // Read back from the store's files: no secret, no output, no provider id in a row.
+            super::assert_store_lacks(f._root.path(), &["FAKEexample0FAKEexample0", "FAKEexampleNoteSecret", "FAKE-OUTPUT-MARKER"]);
+            assert!(!public.iter().any(|event| event["text"].as_str().is_some_and(|text| text.contains("tool_bash") || text.contains("tool_write"))));
         }
         if case == "long" {
             assert_eq!(public.len(), 3000);
