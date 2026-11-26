@@ -19,6 +19,7 @@
   - 미리보기 UI 스모크(실제 앱, 새 `.vite/build`): 다크 2회·라이트 2회 연속 PASS.
   - 실제 개발 앱(임시 프로필 profile3, 포트 9398): 처음 시작 → 프로젝트 두 개 → 홈 → 전환(my-bakery-site → family-budget 한 동작) → 새 작업 첫 창 → 설정 각 화면을 다크로 확인. 앱 안 폴더 확인은 개발용 폴더 지정이 자동 승인이라 실제 앱에서는 띄우지 못했고, 보안 하네스·스모크로 확인했다.
   - 캡처: `~/Documents/elsecrew-ade-screens-u2-u4-2026-11-26/`(actual/{dark,light} 27장씩, compare/ 시안 대 실제 9화면×2테마).
+  - PR #12(https://github.com/wonseok-han/elsecrew/pull/12, base feature/ade): ee802788 CI macOS·Windows·website·GitGuardian 모두 통과.
 - **기존 시험 고침**: 파일 끝 빈 줄(`m5-pr5-review`), 정의 안 된 `--leading-body`(`m5-style-tokens`). 렌더러 스모크의 옛 선택자(레일, `li span` 경로, 설정 목록 순서, 저장공간 버튼 위치)를 새 구조에 맞췄다.
 - **주의**: 미리보기 스모크 전에 개발 앱을 닫으면서 `pkill -f "electron-forge start"`를 썼다. 같은 컴퓨터의 다른 워커가 그 순간 `electron-forge start`를 돌리고 있었다면 함께 닫혔을 수 있다(확인 불가). 다음부터는 자기 프로필 경로로만 종료한다.
 - **다음 할 일(U5~U8 전)**: 홈 카드의 상태 배지·작업 요약(시안의 '확인 필요 1' 등)은 Q1에 따라 넣지 않았다. 필요하면 엔진에 프로젝트별 요약 조회를 새로 만들어야 한다. 홈 검색칸·전환 팝오버의 '이 프로젝트 설정' 줄도 아직 없다. 알림 정리는 앱 시작 때만 돈다.
