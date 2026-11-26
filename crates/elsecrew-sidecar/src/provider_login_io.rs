@@ -13,8 +13,51 @@ use elsecrew_core::provider::{
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::process::{Child, ChildStdin, ChildStdout};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
+
+/// How many connections in this process may hold a line over the observation
+/// bound at once (PR #17 review I1). A connection waits, without reading more,
+/// until one is free: its provider then blocks writing, and nothing is lost.
+/// A holder always finishes or fails its line, so waiting never deadlocks.
+///
+/// Memory this bounds: each held line is at most 8 MiB raw plus the read in
+/// progress (64 KiB), its parsed tree (string bytes up to the raw size, at most
+/// `PROVIDER_SESSION_LINE_MAX_VALUES` values) and a 128 KiB result, so about
+/// 24 MiB per slot at worst, 48 MiB for both. Every other connection holds at
+/// most the 128 KiB bound plus one read (192 KiB) before it must wait.
+pub(crate) const LARGE_LINE_SLOTS: usize = 2;
+static LARGE_LINES_HELD: AtomicUsize = AtomicUsize::new(0);
+#[cfg(test)]
+static LARGE_LINES_PEAK: AtomicUsize = AtomicUsize::new(0);
+
+/// One of the `LARGE_LINE_SLOTS`; returned when dropped.
+struct LargeLineSlot(());
+
+impl LargeLineSlot {
+    fn try_take() -> Option<Self> {
+        let mut held = LARGE_LINES_HELD.load(Ordering::Acquire);
+        loop {
+            if held >= LARGE_LINE_SLOTS {
+                return None;
+            }
+            match LARGE_LINES_HELD.compare_exchange_weak(held, held + 1, Ordering::AcqRel, Ordering::Acquire) {
+                Ok(_) => {
+                    #[cfg(test)]
+                    LARGE_LINES_PEAK.fetch_max(held + 1, Ordering::AcqRel);
+                    return Some(Self(()));
+                }
+                Err(current) => held = current,
+            }
+        }
+    }
+}
+
+impl Drop for LargeLineSlot {
+    fn drop(&mut self) {
+        LARGE_LINES_HELD.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 #[cfg(test)]
 pub(crate) enum HookProbeRequest<'a> {
@@ -54,6 +97,8 @@ pub(crate) struct LoginIo {
     /// How much of `pending` is already known to hold no newline, so a long
     /// line is scanned once rather than again on every read.
     scanned: usize,
+    /// Held while `pending` is over the observation line bound.
+    large_line: Option<LargeLineSlot>,
 }
 
 /// Only requests already admitted by the corresponding protocol state machine.
@@ -176,6 +221,13 @@ impl LoginIo {
         Ok(())
     }
 
+    /// Forget buffered output, returning its memory and any large-line slot.
+    fn drop_pending(&mut self) {
+        self.pending = Vec::new();
+        self.scanned = 0;
+        self.large_line = None;
+    }
+
     fn stream_limit(&self) -> usize {
         if self.session_lines.is_some() { PROVIDER_SESSION_STREAM_MAX_BYTES } else { PROVIDER_OBSERVATION_TOTAL_MAX_BYTES }
     }
@@ -290,6 +342,7 @@ impl LoginIo {
             outgoing: None,
             session_lines: None,
             scanned: 0,
+            large_line: None,
         })
     }
 
@@ -447,8 +500,7 @@ impl LoginIo {
         let result = self.receive_inner(timeout, cancel, observe);
         if result.is_err() {
             self.failed = true;
-            self.pending.clear();
-            self.scanned = 0;
+            self.drop_pending();
         }
         result
     }
@@ -480,8 +532,7 @@ impl LoginIo {
         let result = self.poll_inner(cancel, observe);
         if result.is_err() {
             self.failed = true;
-            self.pending.clear();
-            self.scanned = 0;
+            self.drop_pending();
         }
         result
     }
@@ -512,12 +563,19 @@ impl LoginIo {
                 let end = self.scanned + offset;
                 self.scanned = 0;
                 if end == 0 || end > line_limit {
-                    return Err(failure());
+                    return Err(refuse_line(self.session_lines.is_some(), "over the session line bound"));
                 }
-                let bytes: Vec<u8> = self.pending.drain(..=end).collect();
+                // Take the line without copying it; only what follows is moved.
+                let rest = self.pending.split_off(end + 1);
+                let bytes = std::mem::replace(&mut self.pending, rest);
+                if self.pending.len() <= PROVIDER_OBSERVATION_LINE_MAX_BYTES {
+                    self.large_line = None;
+                }
                 if end > PROVIDER_OBSERVATION_LINE_MAX_BYTES {
                     let policy = self.session_lines.ok_or_else(failure)?;
-                    return reduce_oversized_line(&bytes, policy).map(Some).map_err(|_| failure());
+                    return reduce_oversized_line(&bytes, policy)
+                        .map(Some)
+                        .map_err(|refusal| refuse_line(true, refusal.as_str()));
                 }
                 return BoundedObservation::new(bytes)
                     .map(Some)
@@ -525,7 +583,18 @@ impl LoginIo {
             }
             self.scanned = self.pending.len();
             if self.pending.len() > line_limit {
-                return Err(failure());
+                return Err(refuse_line(self.session_lines.is_some(), "over the session line bound"));
+            }
+            // Past the observation bound a line needs one of the process-wide
+            // slots; without one, read nothing more until a slot is free.
+            if self.session_lines.is_some()
+                && self.pending.len() >= PROVIDER_OBSERVATION_LINE_MAX_BYTES
+                && self.large_line.is_none()
+            {
+                match LargeLineSlot::try_take() {
+                    Some(slot) => self.large_line = Some(slot),
+                    None => return Ok(None),
+                }
             }
             // A session reads larger pieces so a multi-megabyte line arrives in
             // a few polls; other exchanges keep the small read.
@@ -549,6 +618,15 @@ impl LoginIo {
         }
         Ok(None)
     }
+}
+
+/// A session line that could not be observed. The reason is a fixed name,
+/// never the provider's text (PR #17 review M2).
+fn refuse_line(session: bool, reason: &'static str) -> SidecarError {
+    if session {
+        eprintln!("provider session line refused: {reason}");
+    }
+    failure()
 }
 
 fn check_wait(start: Instant, timeout: Duration, cancel: &AtomicBool) -> Result<(), SidecarError> {
@@ -757,6 +835,58 @@ mod tests {
         assert_eq!(last.byte_len(), b"{\"type\":\"user\",\"uuid\":\"last\"}\n".len());
         assert!(io.received > PROVIDER_OBSERVATION_TOTAL_MAX_BYTES, "past the old 1 MiB connection total");
         assert!(!io.failed);
+    }
+
+    /// Review I1: several sessions send large lines at the same time. At most
+    /// `LARGE_LINE_SLOTS` connections in the process hold one; the others read
+    /// nothing past the observation bound plus one read until a slot is free,
+    /// and every session still gets every line.
+    #[test]
+    fn concurrent_large_lines_share_the_process_wide_slots() {
+        let cancel = AtomicBool::new(false);
+        let mut children = Vec::new();
+        let mut ios = Vec::new();
+        for _ in 0..4 {
+            let mut child = fixture(Some(&large_image_lines_script(3)));
+            let mut io = LoginIo::attach(&mut child.0).unwrap();
+            io.admit_session_lines(OversizedLinePolicy::ClaudeStreamJson).unwrap();
+            children.push(child);
+            ios.push(io);
+        }
+        let mut frames = [0usize; 4];
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while frames.iter().any(|count| *count < 4) {
+            assert!(Instant::now() < deadline, "sessions stalled: {frames:?}");
+            for (index, io) in ios.iter_mut().enumerate() {
+                if frames[index] == 4 { continue; }
+                if io.poll_observed(&cancel, &mut || Ok(())).unwrap().is_some() {
+                    frames[index] += 1;
+                }
+                if io.large_line.is_none() {
+                    assert!(io.pending.len() <= PROVIDER_OBSERVATION_LINE_MAX_BYTES + 64 * 1024,
+                        "a connection without a slot buffered {} bytes", io.pending.len());
+                }
+            }
+            assert!(LARGE_LINES_HELD.load(Ordering::Acquire) <= LARGE_LINE_SLOTS);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(LARGE_LINES_PEAK.load(Ordering::Acquire) <= LARGE_LINE_SLOTS);
+        assert!(ios.iter().all(|io| io.large_line.is_none() && !io.failed));
+    }
+
+    /// A line refused while it holds a slot (too many small values) returns
+    /// the slot and the buffer's memory.
+    #[test]
+    fn a_refused_large_line_returns_its_slot() {
+        let cancel = AtomicBool::new(false);
+        let script = "printf '{\"type\":\"user\",\"items\":['; i=0; while [ $i -lt 4000 ]; do \
+            printf '1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,'; i=$((i+1)); done; printf '1]}\\n'; read hold";
+        let mut child = fixture(Some(script));
+        let mut io = LoginIo::attach(&mut child.0).unwrap();
+        io.admit_session_lines(OversizedLinePolicy::ClaudeStreamJson).unwrap();
+        assert!(io.receive(Duration::from_secs(10), &cancel).is_err());
+        assert!(io.large_line.is_none());
+        assert_eq!(io.pending.capacity(), 0);
     }
 
     #[test]

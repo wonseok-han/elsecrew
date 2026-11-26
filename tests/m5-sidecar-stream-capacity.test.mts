@@ -56,8 +56,8 @@ function respond(child: FixtureSidecar, requestId: string, result: unknown) {
   child.stdout.write(`${JSON.stringify({ protocolVersion: 1, kind: "response", sidecarInstanceId: SIDECAR, requestId, ok: true, result })}\n`);
 }
 
-function chunk(child: FixtureSidecar, streamId: string, event: "blob.chunk" | "workspace.blob.chunk", text: string, seq = 1) {
-  const payload = event === "blob.chunk" ? { text } : { ...REF, text };
+function chunk(child: FixtureSidecar, streamId: string, event: "blob.chunk" | "workspace.blob.chunk", text: string, seq = 1, payloadOverride?: Record<string, unknown>) {
+  const payload = payloadOverride ?? (event === "blob.chunk" ? { text } : { ...REF, text });
   child.stdout.write(`${JSON.stringify({ protocolVersion: 1, kind: "event", sidecarInstanceId: SIDECAR, streamId, seq, event, payload } satisfies EventV1)}\n`);
 }
 
@@ -146,4 +146,62 @@ test("an empty stream holds no slot, even when the others are all open", async (
   });
   await read;
   assert.equal(client.failure, undefined);
+});
+
+/** Hold 16 project streams open, then refuse one task-workspace read. */
+async function refusedWorkspaceRead(child: FixtureSidecar, client: SidecarClientV1, streamId = "workspace_refused") {
+  for (let index = 0; index < 16; index += 1) await openProjectRead(child, client, `read_${index}`);
+  const read = client.readWorkspaceFile({ ...REF, path: "src/App.tsx" });
+  respond(child, lastRequest(child).requestId, {
+    ...REF, path: "src/App.tsx", classification: "utf8", byteLength: 5, version: HELLO,
+    stream: { streamId, chunkBytes: 262144 },
+  });
+  await assert.rejects(read, SidecarStreamCapacityError);
+}
+
+test("PR #17 review I2: a refused project read's chunks reach no listener, the renderer's event path included", async () => {
+  const { child, client } = await startedClient();
+  const events: string[] = [];
+  client.onEvent(event => events.push(`${event.event}:${event.streamId}`));
+  const outcomes: unknown[] = [];
+  for (let index = 0; index < 17; index += 1) outcomes.push(await openProjectRead(child, client, `read_${index}`));
+  assert.ok(outcomes[16] instanceof SidecarStreamCapacityError);
+  for (let index = 0; index < 17; index += 1) chunk(child, `read_${index}`, "blob.chunk", "hello");
+  assert.equal(client.failure, undefined);
+  assert.deepEqual(events, Array.from({ length: 16 }, (_, index) => `blob.chunk:read_${index}`), "only accepted streams are forwarded");
+});
+
+test("PR #17 review I3: a refused stream is checked like an accepted one — hash, kind, address and workspace contract", async () => {
+  const wrongText = "hellO"; // same length, different content
+  {
+    const { child, client } = await startedClient();
+    for (let index = 0; index < 17; index += 1) await openProjectRead(child, client, `read_${index}`);
+    chunk(child, "read_16", "blob.chunk", wrongText);
+    assert.match(String(client.failure?.message), /hash does not match/, "a refused file's hash is still checked");
+  }
+  {
+    const { child, client } = await startedClient();
+    await refusedWorkspaceRead(child, client);
+    chunk(child, "workspace_refused", "blob.chunk", "hello");
+    assert.match(String(client.failure?.message), /kind does not match/, "a workspace stream takes only workspace chunks");
+  }
+  {
+    const { child, client } = await startedClient();
+    await refusedWorkspaceRead(child, client);
+    chunk(child, "workspace_refused", "workspace.blob.chunk", "hello", 1, { ...REF, workspaceIdentity: "workspace_other", text: "hello" });
+    assert.match(String(client.failure?.message), /address does not match/, "the chunk must name the stream's workspace");
+  }
+  {
+    const { child, client } = await startedClient();
+    await refusedWorkspaceRead(child, client);
+    chunk(child, "workspace_refused", "workspace.blob.chunk", "hello", 1, { ...REF, text: "hello", extra: true });
+    assert.ok(client.failure, "the workspace event contract still applies to a refused stream");
+  }
+  {
+    // An accepted project stream also refuses a workspace chunk.
+    const { child, client } = await startedClient();
+    await openProjectRead(child, client, "read_0");
+    chunk(child, "read_0", "workspace.blob.chunk", "hello");
+    assert.match(String(client.failure?.message), /kind does not match/);
+  }
 });
