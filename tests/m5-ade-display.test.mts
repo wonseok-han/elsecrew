@@ -148,11 +148,14 @@ test("the user's goal shows once and filler status lines are left out (D4①②)
   assert.equal(timelineMessages(messages, null).length, 4);
 });
 
-test("activity lines read as a Korean verb and a place; a command's own words fold (D6)", () => {
-  assert.deepEqual(activityLine({ action: "read", target: "src/app.ts", tool: "Read" }), { label: "m5.output.activity.read", target: "src/app.ts", original: null });
-  assert.deepEqual(activityLine({ action: "command", target: "List files and view html/css", tool: "Bash" }), { label: "m5.output.activity.command", target: null, original: "List files and view html/css" });
+test("activity lines read as a Korean verb and what it worked on (D6, 2026-11-26)", () => {
+  assert.deepEqual(activityLine({ action: "read", target: "src/app.ts", tool: "Read" }), { label: "m5.output.activity.read", target: "src/app.ts", file: null, hidden: 0 });
+  assert.deepEqual(activityLine({ action: "command", program: "git", subcommand: "diff", hiddenArgs: 2 }), { label: "m5.output.activity.command", target: "git diff", file: null, hidden: 2 });
+  assert.deepEqual(activityLine({ action: "edit", target: "src/app.ts" }), { label: "m5.output.activity.edit", target: "src/app.ts", file: "src/app.ts", hidden: 0 });
   assert.equal(activityLine({ action: "search", tool: "Grep", target: "today" }).label, "m5.output.activity.searchText");
+  assert.equal(activityLine({ action: "other", tool: "WebFetch", target: "docs.example.com" }).label, "m5.output.activity.webFetch");
   assert.equal(ko["m5.output.activity.read"], "파일 읽기");
+  assert.equal(ko["m5.output.activity.repeat"], "{count}번");
   assert.deepEqual(collapseRepeats(["a", "a", "b", "a"], (x, y) => x === y), [{ row: "a", count: 2 }, { row: "b", count: 1 }, { row: "a", count: 1 }]);
 });
 

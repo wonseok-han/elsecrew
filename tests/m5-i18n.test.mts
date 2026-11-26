@@ -25,7 +25,7 @@ test("both dictionaries cover the workbench shell and admission keys", () => {
   const keys = Object.keys(ko).filter(key => key.startsWith("m5.")) as (keyof typeof ko)[];
   assert.ok(keys.length >= 16);
   // Brand names and placeholder-only labels are language-neutral by design.
-  const languageNeutral = new Set<string>(["m5.shell.eyebrow", "m5.dock.tabLabel", "m5.run.order"]);
+  const languageNeutral = new Set<string>(["m5.shell.eyebrow", "m5.dock.tabLabel", "m5.run.order", "m5.output.activity.lines"]);
   for (const key of keys) {
     assert.ok(ko[key].length > 0);
     assert.ok(en[key].length > 0);

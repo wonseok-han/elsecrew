@@ -29,7 +29,7 @@ export function RoleIcon({ roleId, name }: { roleId: string; name: string }) {
  * now shows its live activity. Provider, model, run ID and exit details are
  * in the History tab, not here.
  */
-export const MemberCard = memo(function MemberCard({ run, reports, definitions, teamRoleIds, phase, clock }: {
+export const MemberCard = memo(function MemberCard({ run, reports, definitions, teamRoleIds, phase, clock, onOpenFile, changedFiles }: {
   run: AgentRunRecordV1;
   reports: readonly CardMessage[];
   definitions?: readonly RoleDefinitionV3[];
@@ -37,6 +37,10 @@ export const MemberCard = memo(function MemberCard({ run, reports, definitions, 
   teamRoleIds: ReadonlySet<string> | null;
   phase: TaskPhase | null;
   clock: Intl.DateTimeFormat;
+  /** A changed file named in the live activity opens in the review sheet. */
+  onOpenFile?: (path: string) => void;
+  /** The task's current change list: only those files open from a line. */
+  changedFiles?: ReadonlySet<string> | null;
 }) {
   const { t } = useI18n();
   const status = runStageStatus(run);
@@ -69,7 +73,7 @@ export const MemberCard = memo(function MemberCard({ run, reports, definitions, 
     </div>)}
     {notice && <p className="m5-member-note">{t(notice)}</p>}
     {run.failure && <p className="m5-member-failure" role="alert">{t(`m5.run.failure.${run.failure.stage}`)}</p>}
-    {live && <div className="m5-member-live"><AgentOutputPanel runs={[run]} definitions={definitions} posted={reports} /></div>}
+    {live && <div className="m5-member-live"><AgentOutputPanel runs={[run]} definitions={definitions} posted={reports} onOpenFile={onOpenFile} changedFiles={changedFiles} /></div>}
   </article>;
 });
 
