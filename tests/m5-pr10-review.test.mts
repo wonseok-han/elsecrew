@@ -172,6 +172,20 @@ test("I4: drawn combinations pass in both themes, compared before rounding", () 
   assert.match(css, /--role-color, var\(--text-tertiary\)\) var\(--role-tint\), transparent\)/);
 });
 
+test("I4: every input, textarea and select rule draws its edge with --line-input (3:1)", () => {
+  // A more specific old rule once outranked the shared input edge (CI, light, Claude connection code).
+  const offenders: string[] = [];
+  for (const match of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+    const selector = match[1].trim();
+    const last = selector.split(",").map(part => part.trim());
+    if (!last.some(part => /(^|[\s>+~])(input|textarea|select)(?![\w-])(?!\[type="(checkbox|radio)"\])/.test(part) && !/type="(checkbox|radio|range)"/.test(part))) continue;
+    for (const decl of match[2].matchAll(/border(?:-color)?\s*:\s*([^;]+)/g)) {
+      if (/var\(--(line-strong|line-default|line-subtle|m5-border|m5-border-strong)\)/.test(decl[1])) offenders.push(selector.slice(0, 80));
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
+
 test("minor: solid danger only on the confirm buttons that ask for it, not every dialog button", () => {
   assert.doesNotMatch(css, /dialog \.m5-danger/);
   assert.doesNotMatch(css, /\.m5-discard-dialog \.m5-danger/);

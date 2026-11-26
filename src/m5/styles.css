@@ -317,7 +317,7 @@ button, input, textarea, select {
 }
 
 .m5-toolbar-actions > select {
-  border: 1px solid var(--m5-border-strong);
+  border: 1px solid var(--line-input);
   border-radius: 6px;
   padding: 7px 8px;
   background: var(--bg-app);
@@ -340,7 +340,7 @@ h1 { margin: 0; font-size: 22px; }
 .m5-breadcrumbs [aria-current] { color: var(--m5-text); }
 .m5-file-search { padding: 8px; border-bottom: 1px solid var(--m5-border-strong); }
 .m5-file-search form { display: flex; flex-wrap: wrap; gap: 6px; }
-.m5-file-search input { flex: 1; min-width: 70px; width: 100%; background: var(--m5-bg); color: var(--m5-text); border: 1px solid var(--m5-border-strong); border-radius: 5px; padding: 7px; }
+.m5-file-search input { flex: 1; min-width: 70px; width: 100%; background: var(--m5-bg); color: var(--m5-text); border: 1px solid var(--line-input); border-radius: 5px; padding: 7px; }
 .m5-file-search p { font-size: 12px; color: var(--m5-muted); }
 .m5-search-results { display: flex; flex-direction: column; gap: 3px; max-height: 240px; overflow: auto; }
 .m5-search-results button { text-align: left; overflow-wrap: anywhere; background: var(--bg-raised); color: var(--m5-text); }
@@ -566,7 +566,7 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 @keyframes m5-chat-dot { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .m5-chat-status::before { animation: none !important; } }
 .m5-new-chat-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; flex: 1 1 420px; min-width: 0; gap: 7px; }
-.m5-new-chat-form input, .m5-role-card input, .m5-role-card select { min-width: 0; border: 1px solid var(--m5-border-strong); border-radius: 6px; padding: 7px 8px; background: var(--bg-app); color: var(--m5-text); }
+.m5-new-chat-form input, .m5-role-card input, .m5-role-card select { min-width: 0; border: 1px solid var(--line-input); border-radius: 6px; padding: 7px 8px; background: var(--bg-app); color: var(--m5-text); }
 .m5-new-chat-form > input { grid-column: 1; grid-row: 1; width: 100%; box-sizing: border-box; }
 .m5-new-chat-form > button { grid-column: 2; grid-row: 1; white-space: nowrap; }
 .m5-new-chat-form > label, .m5-new-chat-form > p { grid-column: 1 / -1; margin: 0; font-size: 12px; color: var(--m5-muted); }
@@ -639,7 +639,7 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-dock-group-tabs button { cursor: default; background: var(--bg-raised); color: var(--m5-muted); white-space: nowrap; }
 .m5-dock-group-tabs button[aria-selected="true"] { background: var(--m5-surface); color: var(--text-primary); box-shadow: inset 0 -2px var(--status-running); }
 .m5-dock-count { display: inline-block; min-width: 1.5em; margin-left: 6px; padding: 1px 4px; border-radius: 8px; background: var(--bg-selected); color: var(--text-primary); font-size: 10px; font-variant-numeric: tabular-nums; }
-.m5-dock-heading select { max-width: 86px; padding: 4px; background: var(--bg-raised); color: var(--text-primary); border: 1px solid var(--line-strong); border-radius: 4px; }
+.m5-dock-heading select { max-width: 86px; padding: 4px; background: var(--bg-raised); color: var(--text-primary); border: 1px solid var(--line-input); border-radius: 4px; }
 .m5-dock-options { flex: 0 0 auto; }
 .m5-dock-restore { align-self: flex-start; margin: 0 4px 4px; font-size: 12px; }
 .m5-dock-options > summary { display: grid; place-items: center; width: 28px; height: 28px; cursor: pointer; border-radius: 4px; color: var(--m5-muted); list-style: none; }
@@ -661,7 +661,7 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-conversation { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
 .m5-conversation-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .m5-followup { display: grid; flex: 0 0 auto; box-sizing: border-box; max-height: 50%; overflow: auto; gap: 8px; padding: 12px; border-top: 1px solid var(--m5-border); background: var(--m5-surface); color: var(--text-primary); }
-.m5-followup textarea { box-sizing: border-box; width: 100%; min-height: 64px; max-height: 160px; resize: vertical; padding: 10px; color: var(--m5-text); background: var(--bg-app); border: 1px solid var(--line-strong); border-radius: 8px; font: inherit; }
+.m5-followup textarea { box-sizing: border-box; width: 100%; min-height: 64px; max-height: 160px; resize: vertical; padding: 10px; color: var(--m5-text); background: var(--bg-app); border: 1px solid var(--line-input); border-radius: 8px; font: inherit; }
 .m5-followup p { margin: 0; font-size: 12px; color: var(--text-secondary); white-space: pre-wrap; }
 .m5-followup pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .m5-settings-dialog { box-sizing: border-box; width: calc(100vw - var(--m5-project-rail-width, 0px) - 24px); max-width: none; height: calc(100vh - 24px); max-height: none; margin: 12px 12px 12px auto; padding: 24px; overflow: hidden; color: var(--m5-text); box-shadow: 0 24px 80px var(--shadow-color); }
@@ -724,7 +724,7 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-agent-runs summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .m5-durable-output { min-width: 0; border-top: 1px solid var(--m5-border); margin-top: 12px; padding-top: 12px; display: grid; gap: 12px; }
 .m5-durable-output > label, .m5-durable-output nav { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.m5-durable-output select { min-width: 0; max-width: 100%; padding: 5px 8px; border: 1px solid var(--m5-border); border-radius: 6px; background: var(--m5-surface); color: var(--m5-text); font: inherit; }
+.m5-durable-output select { min-width: 0; max-width: 100%; padding: 5px 8px; border: 1px solid var(--line-input); border-radius: 6px; background: var(--m5-surface); color: var(--m5-text); font: inherit; }
 .m5-output-heading { justify-content: space-between; color: var(--m5-muted); font-size: 12px; }
 .m5-durable-output nav button { padding: 5px 9px; font-size: 12px; }
 .m5-durable-output .m5-output-scroll { margin: 0; }
@@ -853,7 +853,7 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-role-sidebar { display: grid; gap: 10px; align-content: start; min-width: 0; }
 .m5-role-team-tools { display: grid; gap: 4px; }
 .m5-role-team-tools small { font-size: 11px; color: var(--m5-muted); }
-.m5-role-card textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; min-width: 0; border: 1px solid var(--m5-border-strong); border-radius: 6px; padding: 7px 8px; background: var(--m5-bg); color: var(--m5-text); }
+.m5-role-card textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; min-width: 0; border: 1px solid var(--line-input); border-radius: 6px; padding: 7px 8px; background: var(--m5-bg); color: var(--m5-text); }
 .m5-role-navigation button { display: grid; text-align: left; gap: 5px; background: transparent; border-color: transparent; padding: 12px; min-width: 0; }
 .m5-role-navigation button[aria-pressed="true"] { background: var(--m5-raised); border-color: var(--m5-border-strong); box-shadow: inset 2px 0 var(--m5-action-bg); }
 .m5-role-navigation strong { font-size: 13px; font-weight: 550; }
@@ -864,7 +864,7 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-settings-dialog .m5-role-card[hidden] { display: none; }
 .m5-settings-dialog .m5-role-card > strong { grid-column: 1 / -1; font-size: 18px; font-weight: 550; }
 .m5-settings-dialog .m5-role-card label { gap: 8px; font-size: 12px; color: var(--m5-muted); }
-.m5-settings-dialog .m5-role-card input, .m5-settings-dialog .m5-role-card select { width: 100%; min-width: 0; box-sizing: border-box; background: var(--m5-bg); border-color: var(--m5-border-strong); padding: 9px 10px; }
+.m5-settings-dialog .m5-role-card input, .m5-settings-dialog .m5-role-card select { width: 100%; min-width: 0; box-sizing: border-box; background: var(--m5-bg); border-color: var(--line-input); padding: 9px 10px; }
 .m5-settings-dialog .m5-role-permission { align-self: end; padding: 9px 0; font-size: 12px; }
 .m5-settings-dialog .m5-role-model-help { grid-column: 1 / -1; }
 .m5-settings-actions { padding-top: 14px; }
@@ -1005,13 +1005,13 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-preferences-row > span { flex: 1; min-width: 0; }
 .m5-preferences-row strong { display: block; font-size: 13px; font-weight: 500; }
 .m5-preferences-row small { display: block; max-width: 490px; margin-top: 4px; font-size: 12px; line-height: 1.5; color: var(--m5-muted); }
-.m5-preferences-row select { flex: none; min-width: 142px; max-width: 230px; padding: 6px 10px; border: 1px solid var(--m5-border-strong); border-radius: 6px; color: var(--m5-text); background: var(--m5-raised); }
+.m5-preferences-row select { flex: none; min-width: 142px; max-width: 230px; padding: 6px 10px; border: 1px solid var(--line-input); border-radius: 6px; color: var(--m5-text); background: var(--m5-raised); }
 .m5-app-settings button:not([hidden]) { font-size: 12px; }
 .m5-preferences-content button { padding: 7px 11px; border-radius: 6px; }
 .m5-preferences-content .m5-provider-install, .m5-preferences-content .m5-provider-login { margin: 12px 0; padding: 16px; border-color: var(--m5-border-strong); border-radius: 10px; background: var(--m5-surface); color: var(--m5-text); }
 .m5-preferences-content .m5-provider-login button, .m5-preferences-content .m5-provider-install button { background: var(--m5-raised); color: var(--m5-text); border-color: var(--m5-border-strong); }
 .m5-preferences-content .m5-provider-login small, .m5-preferences-content .m5-provider-install details { color: var(--m5-muted); }
-.m5-preferences-content .m5-provider-login > div[id$="-connection-details"] > form input { background: var(--m5-bg); color: var(--m5-text); border-color: var(--m5-border-strong); }
+.m5-preferences-content .m5-provider-login > div[id$="-connection-details"] > form input { background: var(--m5-bg); color: var(--m5-text); border-color: var(--line-input); }
 .m5-settings-inline { margin: 16px 0 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
 .m5-settings-inline > header { justify-content: flex-end; margin-bottom: 12px; }
 .m5-settings-inline > header > div, .m5-settings-inline .m5-settings-scope { display: none; }
@@ -1026,7 +1026,7 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-settings-inline .m5-role-card[hidden] { display: none; }
 .m5-settings-inline .m5-role-card > strong, .m5-settings-inline .m5-role-model-help, .m5-settings-inline .m5-role-card > details { grid-column: 1 / -1; }
 .m5-settings-inline .m5-role-card label { color: var(--m5-muted); gap: 7px; }
-.m5-settings-inline .m5-role-card input, .m5-settings-inline .m5-role-card select { width: 100%; box-sizing: border-box; background: var(--m5-bg); color: var(--m5-text); border-color: var(--m5-border-strong); }
+.m5-settings-inline .m5-role-card input, .m5-settings-inline .m5-role-card select { width: 100%; box-sizing: border-box; background: var(--m5-bg); color: var(--m5-text); border-color: var(--line-input); }
 .m5-settings-inline .m5-role-card span { color: var(--m5-muted); }
 .m5-settings-inline .m5-role-card > details { border-top: 1px solid var(--m5-border); padding-top: 12px; color: var(--m5-muted); font-size: 12px; }
 .m5-settings-inline .m5-settings-actions { margin-top: 20px; }
@@ -1164,7 +1164,7 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-storage-summary { margin-top: 0; color: var(--m5-text) !important; font-size: 14px !important; font-variant-numeric: tabular-nums; }
 .m5-storage-limit { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--m5-border); }
 .m5-storage-limit label { display: flex; align-items: center; justify-content: space-between; gap: 16px; font-size: 13px; }
-.m5-storage-limit input { width: 100px; min-width: 0; padding: 8px 10px; border: 1px solid var(--m5-border-strong); border-radius: 6px; color: var(--m5-text); background: var(--m5-bg); }
+.m5-storage-limit input { width: 100px; min-width: 0; padding: 8px 10px; border: 1px solid var(--line-input); border-radius: 6px; color: var(--m5-text); background: var(--m5-bg); }
 .m5-storage-consent { display: flex; align-items: flex-start; gap: 10px; margin: 20px 0; font-size: 12px; line-height: 1.7; color: var(--m5-muted); }
 .m5-storage-consent input { flex: none; margin: 4px 0 0; accent-color: var(--m5-action-bg); }
 .m5-storage-actions { display: flex; justify-content: flex-end; }
@@ -1994,7 +1994,7 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-task-eyebrow > span { white-space: nowrap; }
 
 /* PR #5 review fixes */
-.m5-sheet-file-select { display: none; min-width: 0; max-width: 40%; padding: 3px 6px; border: 1px solid var(--line-default); border-radius: var(--radius-s); background: var(--bg-raised); color: var(--text-primary); font-size: var(--text-s); }
+.m5-sheet-file-select { display: none; min-width: 0; max-width: 40%; padding: 3px 6px; border: 1px solid var(--line-input); border-radius: var(--radius-s); background: var(--bg-raised); color: var(--text-primary); font-size: var(--text-s); }
 @media (max-width: 1099px) { .m5-sheet-file-select { display: block; } }
 .m5-approval-covered { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: var(--space-2) var(--space-3); padding: var(--space-2) var(--space-3); border: 1px solid color-mix(in srgb, var(--status-attention) 45%, var(--line-default)); border-radius: var(--radius-m); background: var(--status-attention-bg); color: var(--status-attention-text); font-size: var(--text-s); }
 .m5-approval-covered strong { flex: 1; min-width: 0; }
@@ -2090,7 +2090,7 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-role-editor > header small, .m5-role-editor > header details { color: var(--text-tertiary); font-size: var(--text-xs); }
 .m5-role-editor > header code { margin-left: var(--space-1); color: var(--text-secondary); }
 .m5-role-editor label { display: grid; gap: var(--space-1); min-width: 0; color: var(--text-secondary); font-size: var(--text-s); }
-.m5-role-editor input:not([type="radio"]), .m5-role-editor select, .m5-role-editor textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--line-strong); border-radius: var(--radius-m); background: var(--bg-sunken); color: var(--text-primary); font: inherit; }
+.m5-role-editor input:not([type="radio"]), .m5-role-editor select, .m5-role-editor textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--line-input); border-radius: var(--radius-m); background: var(--bg-sunken); color: var(--text-primary); font: inherit; }
 .m5-role-editor textarea { resize: vertical; line-height: 1.6; }
 .m5-role-editor .m5-role-field-wide { grid-column: 1 / -1; }
 .m5-role-editor p { margin: 0; }
