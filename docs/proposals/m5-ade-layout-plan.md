@@ -1,4 +1,4 @@
-> **제안 문서(아직 사실 아님).** 원본: `~/Documents/elsecrew-ade-layout-plan-2026-11-25/` (2026-11-25). 목업(`mockup/`)은 저장소에 넣지 않았고, 본문의 `mockup/…` 경로는 그 폴더 기준이다. 1차-가(믿을 수 있는 표시)는 2026-11-25 `orca/ade-phase1a`에서 구현됐다(`docs/history.md`). 현재 동작은 `docs/architecture.md`·`docs/history.md`를 기준으로 한다. 2장 미리보기의 P1·P2·P4는 2026-11-26 `orca/ade-preview-backend`에서 `ELSECREW_PREVIEW=1` 뒤로 구현됐고 T3(DNS 미리 찾기)는 실제 누출로 확인돼 앱 전체 Blink 설정으로 막았다(`docs/architecture.md` "결과 미리보기 백엔드").
+> **제안 문서(아직 사실 아님).** 원본: `~/Documents/elsecrew-ade-layout-plan-2026-11-25/` (2026-11-25). 목업(`mockup/`)은 저장소에 넣지 않았고, 본문의 `mockup/…` 경로는 그 폴더 기준이다. 1차-가(믿을 수 있는 표시)는 2026-11-25 `orca/ade-phase1a`에서 구현됐다(`docs/history.md`). 현재 동작은 `docs/architecture.md`·`docs/history.md`를 기준으로 한다. 2장 미리보기의 P1·P2·P4는 2026-11-26 `orca/ade-preview-backend`에서 `ELSECREW_PREVIEW=1` 뒤로 구현됐고 T3(DNS 미리 찾기)는 실제 누출로 확인돼 앱 전체 Blink 설정으로 막았다. P3 화면과 기본 활성화는 2026-11-26 `orca/ade-preview-ui`에서 구현했다(`docs/architecture.md` "결과 미리보기").
 
 # Elsecrew ADE 1차-나 — 레이아웃 재배치 설계와 구현 계획
 

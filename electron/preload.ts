@@ -235,8 +235,8 @@ contextBridge.exposeInMainWorld("m5ClaudeUsage", Object.freeze({
   read: async () => validateClaudeUsageResult(await ipcRenderer.invoke(M5_CLAUDE_USAGE_CHANNEL)),
 }));
 
-// Result preview (ADE 1차-나 F12). Main refuses all but `status` unless the
-// app started with `ELSECREW_PREVIEW=1`. The page shown in a preview never
+// Result preview (ADE 1차-나 F12). On by default; with `ELSECREW_PREVIEW=0`
+// main refuses all but `status`. The page shown in a preview never
 // gets this bridge: its view has no preload at all.
 const previewListeners = new Set<(event: PreviewEventV1) => void>();
 ipcRenderer.on(M5_PREVIEW_EVENT_CHANNEL, (_event, payload: unknown) => {

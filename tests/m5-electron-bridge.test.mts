@@ -2277,14 +2277,23 @@ test("result preview: an optional pair after installation, validated answers, ne
   assert.equal(old.child.writes.length, writes);
 });
 
-test("the preview flag reads exactly two names and keeps developer tools out of packaged apps", async () => {
-  const { previewFlagsFromEnvironment } = await import("../electron/preview-flag.ts");
-  assert.deepEqual(previewFlagsFromEnvironment({}, false), { enabled: false, devTools: false });
-  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "true" }, false), { enabled: false, devTools: false });
-  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "1" }, false), { enabled: true, devTools: false });
-  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "1", ELSECREW_PREVIEW_DEVTOOLS: "1" }, false), { enabled: true, devTools: true });
-  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "1", ELSECREW_PREVIEW_DEVTOOLS: "1" }, true), { enabled: true, devTools: false });
-  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW_DEVTOOLS: "1" }, false), { enabled: false, devTools: false });
+test("the preview is on by default on macOS only, off with ELSECREW_PREVIEW=0, and keeps developer tools out of packaged apps (PR #9 review I2·I5)", async () => {
+  const { PREVIEW_DEFAULT_PLATFORMS, previewFlagsFromEnvironment } = await import("../electron/preview-flag.ts");
+  // On by default where it was checked (macOS); only "0" turns it off there.
+  // Windows is off until its isolation and screen checks run: "1" turns it on.
+  assert.deepEqual([...PREVIEW_DEFAULT_PLATFORMS], ["darwin"]);
+  assert.deepEqual(previewFlagsFromEnvironment({}, false, "darwin"), { enabled: true, devTools: false });
+  assert.deepEqual(previewFlagsFromEnvironment({}, true, "darwin"), { enabled: true, devTools: false });
+  for (const platform of ["win32", "linux"]) {
+    assert.deepEqual(previewFlagsFromEnvironment({}, true, platform), { enabled: false, devTools: false }, platform);
+    assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "1" }, true, platform), { enabled: true, devTools: false }, platform);
+  }
+  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "0" }, false, "darwin"), { enabled: false, devTools: false });
+  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "0" }, true, "darwin"), { enabled: false, devTools: false });
+  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "1" }, false, "darwin"), { enabled: true, devTools: false });
+  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW_DEVTOOLS: "1" }, false, "darwin"), { enabled: true, devTools: true });
+  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW_DEVTOOLS: "1" }, true, "darwin"), { enabled: true, devTools: false });
+  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "0", ELSECREW_PREVIEW_DEVTOOLS: "1" }, false, "darwin"), { enabled: false, devTools: false });
   const flagSource = source("electron/preview-flag.ts");
   assert.deepEqual([...flagSource.matchAll(/ELSECREW_[A-Z_]+/g)].map(match => match[0]).filter((name, index, all) => all.indexOf(name) === index), ["ELSECREW_PREVIEW", "ELSECREW_PREVIEW_DEVTOOLS"]);
   // The preview view never gets a preload; the app window's isolation is unchanged.

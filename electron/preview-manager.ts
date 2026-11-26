@@ -27,6 +27,7 @@ import {
   PREVIEW_TOKEN_MAX_BYTES_V1,
   PREVIEW_TOKEN_MAX_REQUESTS_V1,
   type PreviewBoundsV1,
+  type PreviewPageSizeV1,
   type PreviewCloseReasonV1,
   type PreviewEventV1,
   type PreviewIpcRequestV1,
@@ -53,7 +54,9 @@ import {
   previewPartition,
   previewResponseHeaders,
   previewViewRect,
-  validatePreviewBounds,
+  pageSizeMatches,
+  pixelRatioMatches,
+  windowBounds,
 } from "./preview-policy.ts";
 
 export const PREVIEW_IDLE_CLOSE_MS = 30_000;
@@ -88,6 +91,9 @@ export interface PreviewManagerOptionsV1 {
   /** Fixed labels only: never a path, URL or page content. */
   log(label: string): void;
   idleCloseMs?: number;
+  /** The app page's zoom factor and its display's scale (PR #9 review B1). */
+  zoomFactor(): number;
+  displayScale(): number;
   /** Tests only shorten these. */
   readDeadlineMs?: number;
   snapshotDelayMs?: number;
@@ -103,9 +109,17 @@ interface PreviewInstance {
   readonly session: Session;
   view: WebContentsView | undefined;
   state: PreviewStateV1;
-  bounds: PreviewBoundsV1;
+  /** Window coordinates; null until a measurement matches the current zoom. */
+  bounds: PreviewBoundsV1 | null;
   viewport: PreviewViewportV1;
   obscured: boolean;
+  /** No view is shown before the page has sent a layout after the open
+   * (PR #9 review I1): the page checks its task and stage first. */
+  confirmed: boolean;
+  /** Whether the view is on screen now (the last `#apply`). */
+  visible: boolean;
+  /** Where the view was last put (window coordinates). */
+  rect: PreviewBoundsV1 | null;
   /** The screen asked to hide it (another tab); it closes after a while. */
   hidden: boolean;
   requests: number;
@@ -139,6 +153,11 @@ export interface PreviewDiagnosticsV1 {
   unexpectedResponses: number;
 }
 
+/** One refusal of the preview's permission handlers (PR #9 review I3). */
+export interface PreviewDenialV1 { previewId: string; kind: "request" | "check" | "device" | "display" | "bluetooth" | "select"; permission: string; at: number }
+const DENIALS_MAX = 500;
+const VISIBILITY_MAX = 500;
+
 export class PreviewManagerV1 {
   readonly #options: PreviewManagerOptionsV1;
   #current: PreviewInstance | undefined;
@@ -149,6 +168,12 @@ export class PreviewManagerV1 {
   /** Quit preparation in progress (an update, say): may be resumed. */
   #suspended = false;
   #windowHidden = false;
+  /** What was refused, by whom and which permission: for the isolation probe (never IPC). */
+  readonly denials: PreviewDenialV1[] = [];
+  /** Measurements main did not use (stale zoom or size, off screen): for the probes (never IPC). */
+  readonly refusedMeasurements: { at: number; css: PreviewBoundsV1; pixelRatio: number; page: PreviewPageSizeV1; zoom: number; scale: number; content: { width: number; height: number } }[] = [];
+  /** When each view was shown or hidden: for the UI smoke's ordering checks (never IPC). */
+  readonly visibility: { previewId: string; visible: boolean; at: number }[] = [];
   readonly diagnostics: PreviewDiagnosticsV1 = {
     opened: 0, closed: 0, blockedRequests: 0, blockedNavigations: 0, blockedDownloads: 0,
     deniedPermissions: 0, refusedMethods: 0, notFound: 0, unexpectedResponses: 0,
@@ -161,6 +186,11 @@ export class PreviewManagerV1 {
   get enabled(): boolean { return this.#options.enabled; }
   /** The live view's page, for the isolation probe only (never IPC). */
   get currentWebContents(): WebContents | undefined { return this.#current?.view?.webContents; }
+  /** Where the live view is and whether it is shown, for the UI smoke only (never IPC). */
+  get currentLayout(): { state: PreviewStateV1; bounds: { x: number; y: number; width: number; height: number } } | undefined {
+    const view = this.#current?.view;
+    return view && this.#current ? { state: this.#current.state, bounds: view.getBounds() } : undefined;
+  }
 
   async request(request: PreviewIpcRequestV1): Promise<PreviewIpcResultV1> {
     if (request.action === "status") return { action: "status", enabled: this.#options.enabled && !this.#quitting && !this.#suspended };
@@ -224,6 +254,20 @@ export class PreviewManagerV1 {
     if (this.#current) this.#close(this.#current, "reloaded");
   }
 
+  /**
+   * The window is about to change size, or the page its zoom (PR #9
+   * re-review B1). Called by main BEFORE the change: the view is hidden at
+   * once and forgets where it was, so it shows again only at a place the
+   * page measures after the change (`#measure` refuses older measurements).
+   */
+  geometryChanged(): void {
+    const instance = this.#current;
+    if (!instance) return;
+    instance.bounds = null;
+    instance.layoutGeneration++;
+    this.#apply(instance);
+  }
+
   /** The main window was minimized or hidden (or shown again). */
   setWindowHidden(hidden: boolean): void {
     this.#windowHidden = hidden;
@@ -239,10 +283,26 @@ export class PreviewManagerV1 {
     return { width: width ?? 0, height: height ?? 0 };
   }
 
+  /** The page's measurement in window coordinates, or null when it is not
+   * usable now (taken at another zoom or window size, too small, outside the
+   * window). */
+  #measure(window: BrowserWindow, css: PreviewBoundsV1, pixelRatio: number, page: PreviewPageSizeV1): PreviewBoundsV1 | null {
+    const zoom = this.#options.zoomFactor();
+    const content = this.#contentSize(window);
+    const scale = this.#options.displayScale();
+    const placed = pixelRatioMatches(pixelRatio, zoom, scale) && pageSizeMatches(page, zoom, content) ? windowBounds(css, zoom, content) : null;
+    if (!placed) {
+      this.refusedMeasurements.push({ at: Date.now(), css, pixelRatio, page, zoom, scale, content });
+      if (this.refusedMeasurements.length > 50) this.refusedMeasurements.shift();
+    }
+    return placed;
+  }
+
   async #open(request: Extract<PreviewIpcRequestV1, { action: "open" }>): Promise<PreviewIpcResultV1> {
     const window = this.#options.window();
     if (!window || window.isDestroyed()) throw new Error("preview needs the main window");
-    const bounds = validatePreviewBounds(request.bounds, this.#contentSize(window));
+    const bounds = this.#measure(window, request.bounds, request.pixelRatio, request.page);
+    if (!bounds) throw new Error("preview stage is not on screen at the current zoom");
     const generation = ++this.#generation;
     if (this.#current) this.#close(this.#current, "replaced");
     const sidecar = this.#options.sidecar();
@@ -258,7 +318,7 @@ export class PreviewManagerV1 {
       ref: { chatId: resolved.chatId, projectId: resolved.projectId, worktreeId: resolved.worktreeId, workspaceIdentity: resolved.workspaceIdentity },
       handle: resolved.previewHandle,
       session, view: undefined, state: "loading", bounds, viewport: request.viewport,
-      obscured: false, hidden: false, requests: 0, bytes: 0, reserved: 0, reading: 0, waiting: [],
+      obscured: false, confirmed: false, visible: false, rect: null, hidden: false, requests: 0, bytes: 0, reserved: 0, reading: 0, waiting: [],
       layoutGeneration: 0, lastSnapshot: null, snapshotTimer: undefined,
       blockedNoticeSent: false, logged: new Set(), idleTimer: undefined,
     };
@@ -271,15 +331,18 @@ export class PreviewManagerV1 {
     }
     const target = this.#options.window();
     if (!target || target.isDestroyed()) { this.#dispose(instance); throw new Error("preview needs the main window"); }
-    // The window may have changed size while the sidecar and session answered.
-    try { instance.bounds = validatePreviewBounds(request.bounds, this.#contentSize(target)); }
-    catch (error) { this.#dispose(instance); throw error; }
+    // The window may have changed size or zoom while the sidecar and session
+    // answered; the view is made hidden either way and shows only after the
+    // page's next layout.
+    instance.bounds = this.#measure(target, request.bounds, request.pixelRatio, request.page);
     const view = this.#options.createView(previewWebPreferences(session, this.#options.devTools));
     instance.view = view;
     this.#configureContents(instance, view.webContents);
     view.setBackgroundColor("#ffffff");
     this.#current = instance;
     this.diagnostics.opened++;
+    // Attached hidden: shown only by the page's first layout (review I1).
+    view.setVisible(false);
     target.contentView.addChildView(view);
     this.#apply(instance);
     view.webContents.loadURL(previewEntryUrl(token, resolved.entry)).catch(() => {
@@ -298,12 +361,16 @@ export class PreviewManagerV1 {
     const instance = this.#find(request.previewId);
     const window = this.#options.window();
     if (!instance || !window || window.isDestroyed()) return { action: "layout", previewId: request.previewId, state: "closed", snapshot: null };
-    const bounds = validatePreviewBounds(request.bounds, this.#contentSize(window));
     instance.layoutGeneration++;
     const snapshot = request.obscured && !instance.obscured ? instance.lastSnapshot : null;
-    instance.bounds = bounds;
-    instance.viewport = request.viewport;
+    // Hiding always wins (PR #9 review B1): it never depends on the bounds.
     instance.obscured = request.obscured;
+    instance.confirmed = true;
+    if (request.obscured) this.#apply(instance);
+    // A measurement that does not fit (stale zoom, outside the window) hides
+    // the view until a good one arrives; it is never an error.
+    instance.bounds = this.#measure(window, request.bounds, request.pixelRatio, request.page);
+    instance.viewport = request.viewport;
     // Shown again: no longer idle.
     instance.hidden = false;
     clearTimeout(instance.idleTimer);
@@ -339,24 +406,44 @@ export class PreviewManagerV1 {
   #apply(instance: PreviewInstance): void {
     const view = instance.view;
     if (!view || instance.state === "closed") return;
-    view.setBounds(previewViewRect(instance.bounds, instance.viewport));
-    const visible = !instance.obscured && !instance.hidden && !this.#windowHidden;
-    view.setVisible(visible);
+    const visible = instance.confirmed && instance.bounds !== null && !instance.obscured && !instance.hidden && !this.#windowHidden;
+    const rect = instance.bounds ? previewViewRect(instance.bounds, instance.viewport) : null;
+    const moves = rect !== null && (instance.rect === null || rect.x !== instance.rect.x || rect.y !== instance.rect.y || rect.width !== instance.rect.width || rect.height !== instance.rect.height);
+    // Hidden before it moves, moved before it shows (PR #9 re-review B1):
+    // a shown view that changes place is hidden first, never moved in sight.
+    if (!visible || (moves && instance.visible)) view.setVisible(false);
+    if (rect && moves) { view.setBounds(rect); instance.rect = rect; }
+    if (visible) view.setVisible(true);
     if (instance.state !== "loading") instance.state = visible ? "shown" : "hidden";
+    if (visible !== instance.visible) {
+      instance.visible = visible;
+      this.visibility.push({ previewId: instance.previewId, visible, at: Date.now() });
+      if (this.visibility.length > VISIBILITY_MAX) this.visibility.splice(0, this.visibility.length - VISIBILITY_MAX);
+    }
   }
 
   async #configureSession(instance: PreviewInstance): Promise<void> {
     const { session, token } = instance;
-    const deny = () => { this.diagnostics.deniedPermissions++; return false; };
-    session.setPermissionRequestHandler((_contents, _permission, callback) => { deny(); callback(false); });
-    session.setPermissionCheckHandler(() => deny());
-    session.setDevicePermissionHandler(() => deny());
-    session.setDisplayMediaRequestHandler((_request, callback) => { deny(); callback({}); });
+    // Every refusal is recorded with its permission (PR #9 review I3).
+    const deny = (kind: PreviewDenialV1["kind"], permission: string) => {
+      this.diagnostics.deniedPermissions++;
+      this.denials.push({ previewId: instance.previewId, kind, permission, at: Date.now() });
+      if (this.denials.length > DENIALS_MAX) this.denials.splice(0, this.denials.length - DENIALS_MAX);
+      return false;
+    };
+    session.setPermissionRequestHandler((_contents, permission, callback, details) => {
+      const media = (details as { mediaTypes?: string[] } | undefined)?.mediaTypes?.length ? `:${(details as { mediaTypes: string[] }).mediaTypes.join("+")}` : "";
+      deny("request", `${permission}${media}`);
+      callback(false);
+    });
+    session.setPermissionCheckHandler((_contents, permission) => deny("check", permission));
+    session.setDevicePermissionHandler((details) => deny("device", details.deviceType));
+    session.setDisplayMediaRequestHandler((_request, callback) => { deny("display", "display-capture"); callback({}); });
     // Windows/Linux only; elsewhere the permission handlers above already refuse.
-    try { session.setBluetoothPairingHandler((_details, callback) => { deny(); callback({ confirmed: false }); }); } catch { /* unsupported */ }
-    session.on("select-hid-device", (event, _details, callback) => { event.preventDefault(); deny(); callback(); });
-    session.on("select-usb-device", (event, _details, callback) => { event.preventDefault(); deny(); callback(); });
-    session.on("select-serial-port", (event, _ports, _contents, callback) => { event.preventDefault(); deny(); callback(""); });
+    try { session.setBluetoothPairingHandler((_details, callback) => { deny("bluetooth", "bluetooth"); callback({ confirmed: false }); }); } catch { /* unsupported */ }
+    session.on("select-hid-device", (event, _details, callback) => { event.preventDefault(); deny("select", "hid"); callback(); });
+    session.on("select-usb-device", (event, _details, callback) => { event.preventDefault(); deny("select", "usb"); callback(); });
+    session.on("select-serial-port", (event, _ports, _contents, callback) => { event.preventDefault(); deny("select", "serial"); callback(""); });
     session.on("will-download", (event) => {
       event.preventDefault();
       this.diagnostics.blockedDownloads++;
@@ -403,11 +490,26 @@ export class PreviewManagerV1 {
       if (!isPreviewNavigationAllowed(details.url, instance.token, details.isMainFrame)) { details.preventDefault(); blocked(); }
     });
     contents.on("will-attach-webview", (event) => event.preventDefault());
+    // The app's window shortcuts (⌘/Ctrl+1·2·3·\\·N) still work while the
+    // preview has focus: they go to the app page instead (PR #9 review minor).
+    contents.on("before-input-event", (event, input) => {
+      if (!isAppShortcut(input)) return;
+      const window = this.#options.window();
+      if (!window || window.isDestroyed()) return;
+      event.preventDefault();
+      window.webContents.focus();
+      const modifiers = [input.meta && "meta", input.control && "control", input.shift && "shift", input.alt && "alt"].filter((value): value is string => Boolean(value));
+      window.webContents.sendInputEvent({ type: "keyDown", keyCode: input.key, modifiers: modifiers as Electron.InputEvent["modifiers"] });
+    });
     // A page never keeps itself open (beforeunload).
     contents.on("will-prevent-unload", (event) => event.preventDefault());
     contents.on("render-process-gone", () => this.#close(instance, "crashed"));
-    contents.on("unresponsive", () => this.#emit({ previewId: instance.previewId, kind: "unresponsive" }));
-    contents.on("responsive", () => this.#emit({ previewId: instance.previewId, kind: "responsive" }));
+    // A page that stops answering is closed at once (plan 2.3): hiding it
+    // would only stop Chromium watching it, and it would come back hung.
+    contents.on("unresponsive", () => {
+      this.#emit({ previewId: instance.previewId, kind: "unresponsive" });
+      this.#close(instance, "crashed");
+    });
     contents.on("did-finish-load", () => {
       if (instance.state === "closed") return;
       instance.state = "hidden";
@@ -566,6 +668,15 @@ export class PreviewManagerV1 {
     void session.clearCache().catch(() => undefined);
     void session.closeAllConnections().catch(() => undefined);
   }
+}
+
+/** The app's own window shortcuts (workbench.tsx): ⌘ on macOS, Ctrl elsewhere,
+ * with 1, 2, 3, \\ or N, as workbench.tsx reads them. Nothing else a page
+ * types is taken from it. */
+export function isAppShortcut(input: { type: string; key: string; meta: boolean; control: boolean; alt: boolean; shift: boolean }, platform: string = process.platform): boolean {
+  const mod = platform === "darwin" ? input.meta && !input.control : input.control && !input.meta;
+  if (input.type !== "keyDown" || !mod || input.alt || input.shift) return false;
+  return ["1", "2", "3", "\\", "n", "N"].includes(input.key);
 }
 
 /** Read through a call: the state changes across awaits. */

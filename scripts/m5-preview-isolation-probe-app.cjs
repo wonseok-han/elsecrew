@@ -10,7 +10,7 @@ const { app, BrowserWindow, dialog, session } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { leakPage, FILES } = require('./m5-preview-pages.cjs');
+const { leakPage, controlPage, FILES } = require('./m5-preview-pages.cjs');
 
 const root = process.env.PROBE_ROOT;
 const httpPort = Number(process.env.PROBE_HTTP_PORT);
@@ -20,7 +20,9 @@ const udp6Port = Number(process.env.PROBE_UDP6_PORT);
 const marker = process.env.PROBE_MARKER;
 const controlHost = process.env.PROBE_CONTROL_HOST;
 const workspaceKind = process.env.PROBE_WORKSPACE;
-if (!root || !httpPort || !udpPort || !tcp6Port || !udp6Port || !marker || !controlHost || !['git', 'snapshot'].includes(workspaceKind) || process.env.ELSECREW_PREVIEW !== '1') throw new Error('probe environment is incomplete');
+const webrtcPage = JSON.parse(process.env.PROBE_WEBRTC || 'null');
+const webrtcControl = JSON.parse(process.env.PROBE_WEBRTC_CONTROL || 'null');
+if (!root || !httpPort || !udpPort || !tcp6Port || !udp6Port || !marker || !controlHost || !['git', 'snapshot'].includes(workspaceKind) || !webrtcPage || !webrtcControl || process.env.ELSECREW_PREVIEW !== '1') throw new Error('probe environment is incomplete');
 const repoRoot = path.resolve(__dirname, '..');
 const source = path.join(root, 'project');
 const result = { steps: [], errors: [] };
@@ -39,7 +41,7 @@ dialog.showOpenDialog = async (...args) => {
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let finished = false;
-const deadline = setTimeout(() => finish(new Error('probe timeout')), 240_000);
+const deadline = setTimeout(() => finish(new Error('probe timeout')), 480_000);
 
 function finish(error) {
   if (finished) return;
@@ -96,6 +98,10 @@ app.on('browser-window-created', (_event, window) => {
 async function run(window) {
   const main = require(path.join(repoRoot, '.vite/build/main.cjs'));
   const manager = main.previewManager;
+  // When main hears the window change size (it hides the view until the next layout).
+  result.geometry = [];
+  const geometryChanged = manager.geometryChanged.bind(manager);
+  manager.geometryChanged = () => { if (result.geometry.length < 100) result.geometry.push({ at: Date.now(), size: window.getContentSize(), step: result.steps ? result.steps.at(-1) : null }); geometryChanged(); };
   const page = code => window.webContents.executeJavaScript(code);
   const waitFor = async (predicate, ms = 30_000, label = 'condition') => {
     const end = Date.now() + ms;
@@ -143,12 +149,21 @@ async function run(window) {
   const write = (directory, files) => { for (const [name, text] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(directory, name)), { recursive: true }); fs.writeFileSync(path.join(directory, name), text); } };
   fs.writeFileSync(path.join(root, 'outside.txt'), 'outside secret\n');
   for (const chat of Object.values(chats)) {
-    write(chat.worktreePath, { ...FILES, 'refresh.html': FILES['refresh.html'].replace('REFRESH_TARGET', `http://127.0.0.1:${httpPort}/refresh`), 'leak.html': leakPage({ httpPort, udpPort, tcp6Port, udp6Port, marker }), 'a/.secret/x.js': 'fixture-only' });
+    write(chat.worktreePath, { ...FILES, 'refresh.html': FILES['refresh.html'].replace('REFRESH_TARGET', `http://127.0.0.1:${httpPort}/refresh`), 'leak.html': leakPage({ httpPort, udpPort, tcp6Port, udp6Port, marker, webrtc: webrtcPage }), 'a/.secret/x.js': 'fixture-only' });
     fs.symlinkSync(path.join(root, 'outside.txt'), path.join(chat.worktreePath, 'link.txt'));
   }
   const hashBefore = treeHash(chats.a.worktreePath);
   const bounds = await page(`(() => ({ x: Math.round(innerWidth * 0.45), y: 60, width: Math.round(innerWidth * 0.5), height: innerHeight - 100 }))()`);
-  const open = (chat, entry, viewport = 'wide') => page(`window.m5Preview.open(${JSON.stringify({ projectId, chatId: chat.chatId, entry, bounds, viewport })})`);
+  // The page's ratio and own size, measured at each request: main uses a
+  // measurement only at the window's current size and zoom (PR #9 re-review B1).
+  const measureNow = () => page('({ pixelRatio: devicePixelRatio, page: { width: innerWidth, height: innerHeight } })');
+  const layoutOf = async (previewId, viewport, obscured) => page(`window.m5Preview.layout(${JSON.stringify({ previewId, bounds, viewport, obscured, ...(await measureNow()) })})`);
+  const open = async (chat, entry, viewport = 'wide') => {
+    const opened = await page(`window.m5Preview.open(${JSON.stringify({ projectId, chatId: chat.chatId, entry, bounds, viewport, ...(await measureNow()) })})`);
+    // Main keeps a new view hidden until the page places it (PR #9 review I1).
+    if (opened && opened.outcome === 'opened') await layoutOf(opened.previewId, viewport, false);
+    return opened;
+  };
   const loaded = async () => {
     const contents = await waitFor(() => manager.currentWebContents, 10_000, 'preview view');
     await waitFor(() => !contents.isLoading() && contents.getURL().startsWith('elsecrew-preview://'), 15_000, 'preview load');
@@ -181,6 +196,7 @@ async function run(window) {
 
   // T1·T2·T4–T7·T9·T10·T13 in chat A's leak page.
   const openedA = await open(chats.a, 'leak.html');
+  const previewA = openedA.previewId;
   const contents = await loaded();
   const tokenA = tokenOf(contents);
   result.tokensDiffer = tokenA !== tokenB;
@@ -192,11 +208,42 @@ async function run(window) {
   result.leak = await contents.executeJavaScript('window.runProbe()');
   // T10 and T9 again with a user gesture on a focused view: one call each,
   // so every attempt has its own activation.
+  // Placed again with a fresh measurement (the window may have changed size
+  // since, which hides the view in main): a hidden view cannot take focus.
+  const placed = await layoutOf(previewA, 'wide', false);
+  result.placedForPermissions = { state: placed.state, layout: manager.currentLayout };
+  // The window in front (another app may be): a page only has focus in the active window.
+  app.focus({ steal: true });
+  window.focus();
+  await sleep(300);
   contents.focus();
   await sleep(200);
   result.permissions = {};
+  // Another app may take the front while the probe runs (this machine is
+  // shared): each call first makes sure the page really has focus.
+  const focusPage = async () => {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      if (await contents.executeJavaScript('document.hasFocus()')) return true;
+      app.focus({ steal: true });
+      window.focus();
+      contents.focus();
+      await sleep(300);
+    }
+    return false;
+  };
   for (const name of await contents.executeJavaScript('window.PERMISSION_NAMES')) {
-    result.permissions[name] = await contents.executeJavaScript(`window.runPermission(${JSON.stringify(name)})`, true);
+    await focusPage();
+    // Main's own refusals during this one call, each with its kind and
+    // permission (PR #9 review I3): the probe matches them to the call.
+    const last = manager.denials.at(-1);
+    const answer = await contents.executeJavaScript(`window.runPermission(${JSON.stringify(name)})`, true);
+    await sleep(100);
+    const fresh = manager.denials.slice(last === undefined ? 0 : manager.denials.lastIndexOf(last) + 1);
+    result.permissions[name] = {
+      ...answer,
+      denials: fresh.filter(denial => denial.previewId === previewA).map(denial => `${denial.kind}:${denial.permission}`),
+      otherDenials: fresh.filter(denial => denial.previewId !== previewA).length,
+    };
   }
   result.newWebContents = webContents.getAllWebContents().length - contentsBefore;
   result.pageNavigationsBlocked = manager.diagnostics.blockedNavigations - navigationsBefore;
@@ -256,15 +303,16 @@ async function run(window) {
   result.todoEntry = openedTodo.entry;
   await todo.executeJavaScript(`(() => { const input = document.getElementById('text'); input.value = '미리보기 확인'; document.querySelector('button').click(); input.value = '좁은 화면'; document.querySelector('button').click(); document.querySelector('li').click(); return document.getElementById('count').textContent; })()`).then(text => { result.todoCount = text; });
   result.todoStorage = await todo.executeJavaScript('localStorage.getItem("todos")');
-  await page(`window.m5Preview.layout(${JSON.stringify({ previewId: openedTodo.previewId, bounds, viewport: 'wide', obscured: false })})`);
+  await layoutOf(openedTodo.previewId, 'wide', false);
   await sleep(400);
   // A window capture holds only the app page; the view is captured on its own.
   await saveCapture(todo, 'todo-wide-view.png');
-  await page(`window.m5Preview.layout(${JSON.stringify({ previewId: openedTodo.previewId, bounds, viewport: 'narrow', obscured: false })})`);
+  await layoutOf(openedTodo.previewId, 'narrow', false);
   await sleep(400);
   await saveCapture(todo, 'todo-narrow-view.png');
   result.todoNarrowWidth = await todo.executeJavaScript('innerWidth');
-  const obscured = await page(`window.m5Preview.layout(${JSON.stringify({ previewId: openedTodo.previewId, bounds, viewport: 'narrow', obscured: true })})`);
+  result.refusedMeasurements = manager.refusedMeasurements.slice(-10);
+  const obscured = await layoutOf(openedTodo.previewId, 'narrow', true);
   result.obscured = { state: obscured.state, snapshot: typeof obscured.snapshot === 'string' && obscured.snapshot.startsWith('data:image/jpeg;base64,') };
   step('todo');
 
@@ -290,6 +338,14 @@ async function run(window) {
     ? fs.readdirSync(path.join(root, 'userdata', 'Partitions')).filter(name => /preview/i.test(name)) : [];
   result.status = await page('window.m5Preview.status()');
   void partitionsB;
+  // WebRTC positive control: the same per-transport code in an unrestricted
+  // page of the app's own session, against control collectors: every
+  // transport must reach its collector there, so silence in the preview is
+  // the boundary at work, not a probe that never sends.
+  const control = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true } });
+  await control.loadURL(`data:text/html;base64,${Buffer.from(controlPage(webrtcControl)).toString('base64')}`);
+  result.webrtcControl = await control.webContents.executeJavaScript('window.runControl()');
+  control.destroy();
   // Net log positive control: a host lookup the log must show, made by the
   // app's own default session (never the preview's).
   result.controlLookup = await session.defaultSession.resolveHost

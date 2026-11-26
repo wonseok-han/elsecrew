@@ -2,107 +2,63 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #8 독립 검토(차단 0, 중요 4, 경미 2) 반영
-검토서: `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr8.md`(대상 34b3d17a). 리뷰 재현은 `tests/m5-pr8-review.test.mts`로 막았다.
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #9 재확인(B1·I1 부분 해결) 마지막 라운드 (`orca/ade-preview-ui`)
+재확인 `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr9-2.md` 결과 I2·I3은 해결, B1·I1은 부분 해결이었다. 핵심 요구는 "네이티브 뷰가 숨겨진 것이 확인된 뒤에만 좌표를 바꾸거나 덮개를 보인다"였다. 이번 라운드로 둘 다 닫고 **macOS 기본 켜짐을 유지**한다. 코드는 89459c38이다.
 
-- **I1 화면상 같은 이름**: 이름 비교를 화면 표시 기준으로 바꿨다. 키는 NFC 정규화 → 공백 제거 → 소문자이고, 시드 이름 그대로인 기본 역할은 번역 이름(ko·en)도 키로 가진다. Rust(`unicode-normalization =0.1.25`를 protocol에 직접 의존으로 추가, sidecar와 같은 버전)·TS가 같은 표(`role-names-v3.json`에 `legacyLabels`와 5개 사례 추가)로 시험한다. `uniqueRoleName`도 같은 키를 피해 영어 화면에서 기획 템플릿을 한 번 더 넣으면 "Planning 2"가 된다. 실행 출력 선택기에 총괄 ★(ID 기준)과 FSI/PDI 격리를 넣었다.
-- **I2 삭제 취소 누락**: `undoLastRemoval`은 같은 ID 역할이 이미 있거나(템플릿으로 되살린 기본 역할) 팀이 가득 차면 팀·기록을 그대로 두고 이유를 돌려준다. 화면은 이유를 알리고 버튼을 남긴다.
-- **I3 앱 기본값 불러오기**: 미저장 변경이 있으면 기존 폐기 확인을 거친다(`appDefaultsLoadStep`, "변경 버리고 앱 기본값 불러오기").
-- **I4 두 범위 저장**: 순서를 프로젝트 → 앱 기본값으로 바꾸고(`saveProjectThenAppDefaults`), `ChatUiController.updateSettings`·앱 기본값 저장이 성공 여부를 돌려준다. 프로젝트 실패면 앱 기본값을 건드리지 않고, 둘 다 됐을 때만 "앱 기본값에도 저장했어요", 프로젝트만 됐으면 "앱 기본값은 저장하지 못했어요"를 작업대가 보여 준다.
-- **경미**: 새 ID는 불러온 작업 목록의 팀 스냅샷 ID도 피한다(발급 기록 영속 저장은 하지 않음 — 목록 첫 페이지 밖의 옛 작업 ID는 여전히 6자리 난수에 의존). 메뉴 Esc는 메뉴를 연 요소(끼워 넣기 선 포함)로 초점을 돌린다.
-- **함께 고침**: 팀에 없는 역할로 위임한 총괄 응답을 원문 JSON 대신 "총괄이 팀에 없는 담당(…)을 골라 다시 정하게 했어요"로 보인다(`orchestratorMisdirected`, 역할 문자열은 32자로 자르고 FSI 격리).
-- **테스트**: `tests/m5-pr8-review.test.mts` 8개(I1 두 개, I2, I3, I4, m1, m2, 원문 JSON), `m5-g5-chat-ui-state`의 저장 실패/성공 반환값, `m5-team-editing`의 공용 표 시험(번역 이름이 locale과 같은지 포함). `npm test` 869·`pnpm build` 통과. `cargo test -p elsecrew-protocol` 75(공용 표 시험 포함), `cargo test -p elsecrew-sidecar --lib -- custom_roles app_role orchestration` 37 통과. Cargo.lock은 protocol 의존 한 줄만 바뀜.
+- **main이 먼저 숨김**: 창 `will-resize`·`resize`·전체 화면 전환에서 `geometryChanged()`가 바로 숨기고 위치를 잊는다. 보기 메뉴의 확대·축소는 기본 role 대신 직접 만든 항목(`electron/zoom-menu.ts`)이라, 숨김이 확대보다 먼저다. 계약에 측정 시점의 페이지 크기(`page`)를 넣어, 크기·배율 변화 전의 측정은 쓰지 않는다(`pageSizeMatches`). 보이는 뷰가 자리를 옮기면 숨김→이동→표시 순서다.
+- **렌더러 순서는 `src/m5/preview-layout-loop.ts`**: 숨김은 대기열을 건너뛰어 바로 보낸다. 표시는 앞선 응답을 모두 기다린다. 받아들여진 배치만 사실로 치고, 3초 무응답은 실패로 보고 다시 보낸다. 숨겨진 동안에는 측정이 바뀌어도 더 보내지 않는다. 붙잡은 덮개는 main 숨김 확인 뒤 **모두 함께** 놓는다. 1.5초 무응답이면 떼어 내고(close), 그 응답 뒤에만 놓은 다음 탭이 다시 연다.
+- **덮개**: 붙잡힌 요소는 본문과 `::backdrop`을 함께 숨기고(`opacity 0`, backdrop-filter 없음) `inert`로 포커스·입력을 막는다. 놓을 때 포커스를 돌려준다. '새 결과'·차단 안내 띠는 숨김 확인 뒤에만 나타나고, 배치가 끝난 뒤(`settled`) 새 자리로 다시 보인다.
+- **발견(재조사 방지)**
+  - 덮개 두 개(종 버튼과 그 안 패널)를 하나씩 놓으며 그때마다 가림을 판정하면, 아직 `inert`인 쪽이 hit test에 잡히지 않는다. 그래서 뷰가 보였다 숨었다를 수십 ms 간격으로 반복했다. 모두 놓은 뒤 한 번만 판정해야 한다.
+  - 닫힌 서랍에서는 무대 측정이 '없음'과 실제 값을 오간다. 숨김 상태에서도 좌표가 바뀔 때마다 숨김을 다시 보내면 요청이 폭주한다(4분에 1,600개 → 수정 뒤 89개).
+  - 떼어 낼 때 main의 `closed{requested}` 알림이 close 응답보다 먼저 온다. 그래서 현재 미리보기의 `requested` 닫힘은 다시 열기로 처리한다.
+  - 격리 프로브는 페이지 크기를 요청마다 새로 재야 하고, 권한 호출 전에 창 포커스를 다시 가져와야 한다(이 컴퓨터는 다른 작업과 같이 써서 다른 앱이 앞에 올 수 있다).
+- **검증**
+  - 단위·빌드: `npm test` 897/897, 보안 묶음(`m5:test:security`) 93/93, `pnpm build`, 렌더러 마운트 스모크 68 통과.
+  - 실제 앱 UI 스모크: 검사 34개 PASS(커밋 89459c38). 응답을 일부러 900ms 늦추거나(적용 전·후) 끊은 상태에서 확인했다.
+    - 대화상자·backdrop·검토 시트가 숨김 응답 전까지 보이지 않고 입력을 받지 않았다.
+    - 띠는 숨김 응답 뒤에 생겼고, 뷰는 새 무대 위치로 돌아왔다.
+    - 창 크기를 바꾸자 main이 즉시 숨겼다.
+    - 무응답이면 떼어 냈고, 닫기 응답 뒤에만 덮개를 보였다.
+  - 격리 프로브: 두 모드 모두 관측 70/70 PASS, 관측 불가 16(IPv6), dirty 없음.
+  - 기본값 확인: 개발·패키지 모두 PASS.
+  - 증거는 `~/Documents/elsecrew-ade-preview-ui-2026-11-26/pr9-review2/`(`isolation/` 포함)에 있다.
+- **남은 과제**: 라우팅 가능한 IPv6가 있는 기기에서 IPv6 WebRTC 차단 관측, 패키지 앱 안의 격리 프로브, Windows 실행·검증(기본 꺼짐 유지).
 
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 팀 역할 편집 R0·R1·R2·R4 구현과 실제 앱 확인 (`orca/ade-roles`, 기준 feature/ade 12961d04)
-설계: `docs/proposals/m5-custom-roles-plan.md` 3.1절·2장, 4장 Q1~Q8은 추천안대로 결정(조정자 위임). 커밋 c56e4314(R0 기계적 이동) → c90e85de(R1·R2·R4) → bd3cd323(실제 앱 확인 중 수정).
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #9 독립 검토(차단 1·중요 5·경미 3) 전부 반영 (`orca/ade-preview-ui`)
+검토 `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr9.md`(대상 e5819e0e). B1·I1을 해결해 **macOS 기본 켜짐은 유지**하고, 확인하지 않은 Windows·Linux는 기본으로 껐다.
 
-- **R0**: `RoleSettings`·`AppRoleDefaultsEditor`를 `src/m5/role-settings.tsx`로 옮겼다(화면 변화 0). 소스 검사 파일 목록에 추가.
-- **R1**: 세로 역할 목록 + 편집 영역. 끼워 넣기 선(+)·⋯ 메뉴(위/아래에 끼워 넣기·복제 ⌘D·위로 ⌥↑·아래로 ⌥↓·삭제)·끌어 놓기·화면 읽기 알림, 삭제 되돌리기, 미저장 요약, 이름 문제 ! 표시, "지금 일하는 작업 N개는 시작할 때의 팀으로 계속해요", 권한 라디오와 "권한은 여기서 고른 값만 적용돼요", 총괄 '기본값으로 되돌리기'(Q7), '앱 기본값 불러오기'·'앱 기본값으로도 저장'(Q6). 메뉴 이름 '팀 역할'. 스타일은 L0 의미 토큰과 `role-colors.ts`만 쓴다.
-- **R2**: 템플릿 메뉴(빈 역할 + 기본 제공 8개: 기존 4개 + 테스트 작성·보안 점검·문서 정리·자료 조사, Q8). 지운 기본 역할은 원래 ID로 되살림. 새 ID는 무작위 `member-xxxxxx`로 재사용하지 않음. 새 빈 역할은 읽기만(Q4).
-- **R4**: 이름 규칙(Cf 서식 문자·총괄 이름·중복)을 TS 갱신 요청·앱 기본값 요청과 Rust `projectRoleSettingsUpdate`·sidecar `update_app_role_defaults`에 같게 적용, 저장된 기록 읽기는 그대로. 위임 바로잡기 1회(`orchestration.rs`). 팀 단계 prompt 끝 `CLOSING_REMINDER`(`agent_runtime::resolve_prompt`). 맡은 일·이름의 비밀 값 모양 경고(화면만).
-- **실제 앱 확인**(개발 앱 `--remote-debugging-port=9391`, 자작 CDP 스크립트; 캡처·JSON `~/Documents/elsecrew-ade-roles-2026-11-26/screenshots/`):
-  - 편집(임시 프로필 `--user-data-dir`=scratchpad, 시험 폴더 roles-test-project): 기획 아래 '자료 조사' 끼워 넣기 → 개발 ⌥↑ 두 번(5→3번째) → 디자인 ⌘D 복제 → 검증 삭제 → 끌어 놓기로 사본을 2번째로 → 이름을 "총괄"·"기 획"으로 바꿔 사칭·중복 경고와 저장 비활성, `sk-ant-…` 비밀 값 경고 → 원래대로 → 검증 삭제 되돌리기 → '역할 추가'로 보안 점검(7/7, 추가 메뉴 비활성, Esc는 메뉴만 닫음) → 저장 → 닫고 다시 열기: 순서·이름·권한 동일(`before-save.json` = `after-reopen.json`). '앱 기본값으로도 저장' 뒤 설정의 앱 기본값 화면에 같은 팀(`08`·`09`). 임시 앱은 정상 종료(engine exit 0).
-  - 실제 위임(기본 개발 프로필, 시험 프로젝트 todo-test-1125a, Claude Code): 총괄 바로 아래에 '자료 조사'(`member-zhd1z6`, 읽기만)를 넣고 저장(설정 버전 3) → 새 작업 "데이터 저장 방법 비교·추천, 자료 조사에게 맡기고 파일은 바꾸지 마" → 총괄(28초) → 자료 조사(39초) → 총괄(28초), 약 4분, 검토 대기. 보고서는 `docs/elsecrew/member-zhd1z6.md`로 남았다(`12b`). 그 뒤 팀에서 자료 조사를 지우고 저장(버전 4, 원래 5명 그대로 `todo-team-before.json`과 같음) — 끝난 작업 카드에는 '자료 조사'가 그대로 보였다(스냅샷, `13`). 작업은 합치지 않고 검토 대기로 남겼다. 자료 조사 실행 중 목록에 잠깐 "허락을 기다려요"가 보였으나 카드는 뜨지 않은 채 끝났다(원인 미조사).
-  - 확인 중 고친 것: 편집 영역 머리말 정렬, 앱 기본값 화면이 좁을 때 칸 배치, 프로젝트 저장 뒤 다시 마운트로 "앱 기본값에도 저장했어요"가 사라지던 것(작업대가 안내를 들도록), 안내 문구의 '역할·모델 바꾸기' → '팀 역할 바꾸기'.
-- **테스트**: `npm test` 826 통과(새 `tests/m5-team-editing.test.mts` 14개, `m5-custom-roles` 갱신). `pnpm build` 통과. `cargo test -p elsecrew-protocol saved_role_names` 통과, `cargo test -p elsecrew-sidecar --lib -- orchestration custom_roles_v3` 35 통과(바로잡기·재확인·이름 규칙 포함). 렌더러 스모크(`pnpm m5:test:editor`)는 역할 화면 선택자·제목('Team roles')·미저장 표시(`.m5-team-unsaved`)를 새 화면에 맞췄다. 처음엔 "Monaco mount and reveal"(기존 결함)에서 멈췄으나 feature/ade의 PR #7 병합 뒤 68개 전부 통과(PR #8 첫 CI의 macOS 실패 "English role settings"가 이 낡은 기대값이었다). `cargo test -p elsecrew-core -p elsecrew-protocol -p elsecrew-sidecar`(`CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4`, nice 15) 전부 통과: core 242, protocol 71, sidecar lib 906(무시 43)·통합 16(무시 1). `git diff --check origin/feature/ade` 통과.
-- **PR #8**: https://github.com/wonseok-han/elsecrew/pull/8 (`--base feature/ade`). 연 직후 feature/ade에 PR #6(미리보기 백엔드)·#7이 들어와 충돌(architecture·history·렌더러 스모크)로 CI가 돌지 않아 feature/ade(8493496e)를 병합했다. 문서는 양쪽을 모두 두고, 스모크는 feature/ade의 "설정 안 안내(D4⑥)" 규칙에 새 선택자를 씌웠다. 병합 뒤 `npm test` 861·`pnpm build`·`cargo test -p elsecrew-protocol` 75 통과, `cargo test -p elsecrew-sidecar --lib -- orchestration custom_roles preview` 44 통과·1 실패(`an_app_closed_mid_run_reopens_with_the_work_kept_and_the_task_usable`, 단독 재실행 통과 — 프로세스 종료 시험의 부하 타이밍으로 판단).
-- **PR #8 CI**(4bc2775d): macOS·Windows 하네스(렌더러 스모크 포함), website, GitGuardian 모두 통과. 병합 가능(CLEAN). Codex 검토는 조정자가 붙인다.
-- **남은 것**: R3('이번 작업만' 팀, 2차), 다른 프로젝트에서 가져오기, 설정 위쪽 [이 프로젝트 | 앱 기본값] 전환, 팀에 없는 역할로 위임한 총괄 응답의 원문 JSON 표시 다듬기, 실행 중 잠깐 보인 "허락을 기다려요" 원인. history가 500줄을 넘었지만 워크로그가 모두 11-26이라 날짜 경계로 옮길 엔트리가 없다(다음 날짜 엔트리 때 11-26 묶음을 아카이브).
+- **B1(확대·축소)**: 렌더러가 측정마다 `devicePixelRatio`를 보낸다(계약 `pixelRatio`, 0.25~16). main은 CSS px × `getZoomFactor()`를 안쪽으로 반올림하고 창 내용으로 자른다(`windowBounds`). 비율이 확대×화면 배율과 다르면 쓰지 않고 숨긴다(`pixelRatioMatches`). 맞지 않는 측정은 오류가 아니라 숨김이다. `obscured:true`는 좌표보다 먼저 적용한다(숨김이 항상 이김). 렌더러는 받아들여진 배치만 기억하고 실패하면 다시 보낸다. 창 크기·비율이 바뀌면 즉시 숨기고 0.15초 뒤 다시 놓는다.
+- **I1(숨김 먼저)**: 새 뷰는 숨긴 채 붙고 화면의 첫 배치 뒤에만 보인다. MutationObserver(그리기 전)가 무대와 겹치는 새·바뀐 앱 요소를 `data-preview-wait`(opacity 0)로 붙잡고, main이 숨김을 받아들인 뒤 놓는다. 모달은 항상, 탭 전환은 마지막 무대 위치로 판단한다. 가림 감지는 49점(2px 안쪽)과 바뀐 요소의 사각형 교차(`coveredByRect`)로 바꿨다. 무대를 담은 요소는 가림으로 치지 않는다.
+- **I2**: 프로브 판정은 관측된 검사만으로 낸다. 대조가 닿지 않은 전송은 '관측 불가'로 이유와 함께 따로 센다. TURN TCP/TLS IPv6 전송을 추가했다. 기본 활성화를 `PREVIEW_DEFAULT_PLATFORMS=["darwin"]`로 제한했다.
+- **I3**: main이 거절마다 `{previewId, kind, permission}`을 남긴다(`denials`). 프로브는 그 호출 동안 그 미리보기의 같은 권한 거절(예: 전체 화면 `request:fullscreen`) 또는 정책 거절을 요구한다. 시간 초과만 남으면 관측 불가다.
+- **I4**: `closed{quitting}` → "앱을 끝낼 준비를 하는 동안 미리보기를 닫았어요" 화면을 보인다. 1초마다 `status()`를 묻고, 다시 켜지면 저절로 연다.
+- **I5**: 화면 스모크는 `scripts/m5-preview-ui-run.mjs`로 띄운다(POSIX 환경 변수 문법 없음). 격리 프로브·화면 스모크는 macOS가 아니면 종료 코드 2(미실행, 하네스 NOT_READY)로 끝난다. 기본값 확인은 Windows 패키지 경로를 알고 기본·0·1을 본다. CI에서 돌리지 않는 이유는 `ci.yml` 주석에 남겼다.
+- **경미**: 미리보기에 포커스가 있어도 ⌘/Ctrl+1·2·3·\\·N은 앱으로 넘긴다(`isAppShortcut`, workbench와 같은 수식키 규칙). `loadFailed`는 실패 화면 + 다시 열기로 연결했다. 기본 탭은 변경에 페이지가 있으면 미리보기다(`hasPreviewPage`, 변경이 늦게 오면 자동 선택된 탭만 바꿈).
+- **발견**: TURN IPv6 전송 2개를 더하자 WebRTC 시도 전체가 페이지 `attempt` 기본 기한 4초를 넘었다(전송당 약 0.43초). 이 시도에만 전송 수 × 8.5초 기한을 준다. 확대 상태의 렌더러 `devicePixelRatio`는 확대×화면 배율이다(Retina 150% → 3).
+- **검증**: `npm test` 884/884, `pnpm build`, 렌더러 마운트 스모크 68. 실제 앱 UI 스모크 검사 28개 PASS — 확대 125·150·80·67%에서 무대 안·틀 밖·대화상자 숨김, 대화상자 연 채 50% 축소해도 숨김 유지, 덮개 붙잡기→뷰 숨김→놓기 순서(알림·대화상자·다른 탭·가장자리 1.5px 알림), 열기 지연 중 대화상자·작업 전환, 종료 취소 복구, 단축키. 캡처는 `~/Documents/elsecrew-ade-preview-ui-2026-11-26/pr9-review/`. 격리 프로브는 git·사본 모두 관측 70/70 PASS이고 관측 불가 16(IPv6 WebRTC, 이 기기에 라우팅 가능한 IPv6 없음)이다. 증거는 같은 폴더 `isolation/`. 기본값 확인은 개발·패키지 모두 PASS(기본 켜짐·0 꺼짐·1 켜짐).
+- **다음**: 재검토 대응. Windows·IPv6 기기에서 프로브를 돌리고, 패키지 앱 격리를 확인한다. `m5-project-ui-smoke.cjs` 공급자 선택 단계 수정은 별도 작업이다.
 
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #6 독립 보안 검토(차단 1·중요 5·경미 2) 전부 반영
-검토서: `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr6.md`(대상 b7eabc64). 같은 브랜치 `orca/ade-preview-backend`에서 한 번에 고쳤다.
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 미리보기 화면(P3)·I5 완결·기본 활성화 (`orca/ade-preview-ui`, 기준 feature/ade 8493496e)
+PR #6은 머지됐다(8493496e). 재확인(`REVIEW-pr6-2.md`)에서 B1 해결, I5 부분 해결(STUN/TURN 개별 관측·권한의 명시적 거절 부족)이라 이번에 완결하고, 화면·기본 활성화를 붙였다.
 
-- **B1(차단) 검증 핸들과 읽기 핸들 불일치**: 결속 검사가 검증한 작업 공간 디렉터리 핸들을 돌려주게 했다(`validate_workspace_binding_with_lock_handle`). `preview.resolve`는 그 핸들로 git 검사·진입 파일 찾기를 하고 루트 신원(dev·inode)을 `previewHandle` 아래 기록한다. `preview.readAsset`은 매번 새 핸들로 결속 검사를 하고, 신원이 기록과 같을 때만 그 핸들로 읽는다. 시험: `reads_go_through_the_verified_handle_even_when_the_folder_is_swapped_mid_request`, `resolve_looks_up_the_entry_through_the_verified_handle`. 둘 다 검증과 읽기 사이에 Git 링크/사본 표식까지 복사한 실제 디렉터리로 루트를 바꿔치며, git worktree·사본 두 종류로 돈다. 발견: 기존 chat Fixture는 설정과 무관하게 사본만 만든다(git worktree는 `application_baseline=true` 경로). 이번 시험은 두 종류를 모두 만든다.
-- **I1 실제 읽기 한도**: 5MiB 초과로 알려진 파일은 읽지 않고, 읽는 중 커지는 파일도 한도+1바이트까지만 읽는다(`read_preview_file`, 시험 `bounded_reads_stop_at_the_limit_whatever_the_file_claims`). 파일은 한 번 읽고 해시하며, 나머지 조각은 그 내용에서 준다(전역 1개, 마지막 조각 뒤 버림). 시험 `read_asset_is_bounded_and_reads_a_file_once`.
-- **I2 병렬 읽기**: 토큰마다 sidecar 읽기 4개·대기 64개(넘치면 503), 파일당 15초 기한(504, 자리는 sidecar 응답까지 유지)을 둔다. 64MiB는 조각을 묻기 전에 예약하고, 거절된 요청도 2,000개 한도에 센다. 닫으면 대기 요청은 sidecar에 가지 않는다. 매니저 시험 4개.
-- **I3 가림 순서**: `layout`은 await 없이 바로 숨기고, 정지 이미지는 보이는 동안 미리 찍어 둔 것을 준다. 더 새 요청이나 숨김 뒤에 끝난 캡처, 1초를 넘긴 캡처는 버린다. 시험 "covering hides at once even while a capture hangs…".
-- **I4 수명**: 앱 화면 새로고침·렌더러 종료(`did-start-navigation`/`render-process-gone`) 때 `pageReplaced()`로 닫고, 진행 중인 열기도 폐기한다. `prepareQuit`(업데이트 설치 포함)는 `suspend()`로 닫고 읽기를 멈추며, 준비가 취소되면 `resume()`한다. 닫힘 사유에 `reloaded`를 추가했다. 보안 하네스와 매니저 시험으로 확인했다.
-- **I5 프로브**: 시도마다 결과가 있어야 하고 반드시 실패해야 한다. 양성 대조 세 가지를 둔다: 수집기(TCP/UDP×IPv4/IPv6)가 프로브의 접촉을 1건씩 셀 것, net log가 손대지 않은 완전한 로그일 것, 그 로그에 대조 DNS 조회와 페이지의 무효 프록시 시도가 보일 것. DNS 서버 연결은 대조 조회 외 네트워크 조회가 0일 때만 대조 몫이다. WebRTC는 STUN v6·TURN udp/tcp/tls를 추가했고, 세 계층 모두 후보 0이어야 한다. 권한과 창 열기는 포커스된 뷰에서 사용자 활성화로 시도하며, 활성화 없음·포커스 없음으로 거절된 것은 합격이 아니다. T9는 새 webContents 0개와 차단 증가분으로 판정한다. **git worktree 모드**를 추가해 기본 두 모드로 돌린다. 미리보기 뷰는 `disableBlinkFeatures: FileSystemAccess`로 파일 선택기 자체를 없앴다(T7).
-- **경미**: 실행 때 준 `--blink-settings` 값에 덧붙인다. bounds는 가장자리를 자른 뒤에도 최소 120을 확인하고, 열기 중 기다린 뒤에도 현재 창 크기로 다시 확인한다.
-- **Keychain 사후 확인(PR #4)**: 머지본 cd5f502d로 더미 항목 probe를 돌렸다. cdhash가 다른 두 빌드 모두 창 없이 갱신됐고 partition은 `apple-tool:`로 유지됐다. 더미 항목은 삭제했다(노예 확인).
-- **검증**: Rust 워크스페이스 전체(core 242·protocol 74·sidecar lib 914·stdio 16) 통과, `npm test` 841/841, `pnpm build` 통과. 커밋 ea7b57e0(소스 깨끗함)에서 격리 프로브 git worktree·사본 두 모드 모두 PASS(모드당 검사 39개, net log 1,742 이벤트, 페이지발 수집기 접촉 0·대조 접촉 각 1, 무효 프록시 시도 52, webRequest 단독 차단 20). `feature/ade`(PR #5 레이아웃)를 병합한 e01ac585에서도 두 모드 PASS, `npm test` 847/847·`pnpm build` 통과(병합으로 `crates/`·`electron/` 변경 없음).
-- **다음**: 노예가 B1·I5를 짧게 재확인한 뒤 머지. 남은 경계: Windows·패키지 실행에서의 프로브, P3 화면(T8·T16), 사용자 파일 선택·끌어놓기 범위.
+- **I5 완결**: WebRTC를 전송마다 따로 시도한다(STUN v4/v6, TURN udp v4/v6, TURN tcp, TURN tls, 바깥 STUN 이름). 전송마다 수집기가 따로 있고, 판정은 "후보 0 + 수집 완료 또는 서버 오류"다. 기한 내 무응답은 `unobserved`로 따로 남기며 불합격이다.
+  - 양성 대조: 같은 코드를 제한 없는 앱 기본 세션 창에서 대조 수집기로 돌려 IPv4 전송 4개가 모두 닿는 것(STUN 6·TURN udp 12·tcp 1·tls 2건)과, net log에 그 TCP 연결이 보이는 것을 요구한다.
+  - IPv6 전송은 이 컴퓨터에 라우팅 가능한 IPv6가 없어 대조가 닿지 않는다. 그래서 "관측 불가"로 기록하고 합격으로 치지 않는다(IPv6 있는 기기에서는 대조 도달이 필수).
+  - 권한: 호출 직전 사용자 활성화·포커스를 기록하고, 명시적 거절만 합격으로 친다. 명시적 거절은 main 권한 처리기의 거절 수가 그 호출 동안 늘었거나, 페이지의 Permissions-Policy 판정(`allowsFeature`)이 false인 경우다.
+  - 커밋 725674ab에서 git·사본 두 모드 모두 PASS(모드당 검사 60개).
+- **P3 미리보기 탭**(`src/m5/preview-tab.tsx`, 규칙은 `preview-tab-model.ts`): bounds 동기화, 넓게/좁게(390px), 다시 불러오기, 실행이 끝나면 "새 결과" 띠, 빈 상태("화면으로 볼 결과가 없어요"), 실패·멈춤·폴더 정리됨 상태가 있다. 파일 탭과 편집기 시트의 '미리보기로 열기'(시트를 닫고 미리보기 탭으로)도 붙였다.
+  - **T8**: 앱의 틀("미리보기 — 팀이 만든 결과"·"읽기 전용"·"인터넷 차단")은 무대 밖에 있고, 뷰 사각형은 무대 안쪽으로 반올림한다.
+  - **T16**: 레이아웃의 명시 목록에 더해, 무대 위 25점에서 페이지 최상단 요소를 묻는다. 무대가 아니면 즉시 숨기고 미리 찍어 둔 정지 이미지를 보인다. 덮개가 전환으로 사라질 수 있어, 덮인 동안 0.25초마다 다시 본다.
+  - 발견: 무대의 둥근 모서리 1px 점이 부모 요소로 잡혀 늘 덮였다고 판정됐다. 표본은 8px 안쪽에서 찍는다.
+- **멈춘 페이지**: 뷰를 숨기면 Chromium이 멈춤 감시를 멈추고 'responsive'를 보내 숨김↔표시가 번갈아 바뀌었다. main이 'unresponsive'에서 바로 닫고(설계 2.3), 탭은 "멈췄어요 · 다시 열기"를 보인다.
+- **기본 활성화**: `ELSECREW_PREVIEW=0`일 때만 끈다. `scripts/m5-preview-default-check.mjs`로 개발 빌드와 패키지 앱(`pnpm m5:package`)이 같음을 확인했다(기본: 상태 켜짐 + 브라우저 명령줄에 `--blink-settings=dnsPrefetchingEnabled=false`, `=0`: 꺼짐·스위치 없음).
+  - 메인 앱 영향: 렌더러 마운트 스모크 68개 통과, 실제 앱 미리보기 UI 스모크 통과.
+  - 기존 `m5-project-ui-smoke.cjs`는 공급자 선택 단계에서 멈춘다. 미리보기를 켠 것과 끈 것이 같은 지점에서 멈추므로 미리보기와 무관한 기존 문제(레이아웃 변경 뒤 스모크 미갱신 추정)다.
+- **실제 앱 확인**(`scripts/m5-preview-ui-smoke.cjs`, `pnpm m5:test:preview-ui`, g6-release 연결): todo 결과물을 실제 클릭·키 입력으로 조작했다. 넓게(503px)와 좁게(390px)에서 추가·완료가 됐다. 알림 패널·새 작업 대화상자·다른 탭·닫힌 서랍에서 뷰가 숨고 정지 이미지가 깔렸다가 돌아왔다. 무대에 닿지 않는 메뉴는 뷰를 숨기지 않았다. 검사 14개 PASS, 캡처 `~/Documents/elsecrew-ade-preview-ui-2026-11-26/`.
+- **검증**: `npm test` 853/853, `pnpm build`, 렌더러 마운트 스모크, 격리 프로브(두 모드), UI 스모크, 기본값 확인(개발·패키지) 통과. Rust 변경 없음. `feature/ade`(PR #8 팀 역할)를 병합한 acc66fda에서 `npm test` 875/875·`pnpm build`·렌더러 마운트 스모크 68·격리 프로브 두 모드·UI 스모크(플래그 미설정) 다시 PASS.
+- **다음**: Codex 검토 대응. `m5-project-ui-smoke.cjs` 공급자 선택 단계 수정은 별도 작업이다. Windows·IPv6 기기에서 프로브를 다시 돌린다.
 
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — ADE 1차-나 결과 미리보기 백엔드(P1·P2·P4 안전 시험), `ELSECREW_PREVIEW=1` 뒤
-브랜치 `orca/ade-preview-backend`(기준 `feature/ade` d221832f). 설계 `docs/proposals/m5-ade-layout-plan.md` 2장·3.2 P1/P2/P4. 결정(위임 채택): 격리 세션 안 JS 허용, 저장 데이터는 열려 있는 동안만(메모리 partition), 대상은 작업 공간 정적 파일만. 화면(P3)·`workbench.tsx`·`styles.css`는 건드리지 않았다(레이아웃 워커와 병행).
-
-- **P1 sidecar**: `preview.resolve`(project+chat만 받고 채팅 영속 바인딩에서 주소를 꺼냄, 진입 후보 순서)·`preview.readAsset`(링크 비추종 핸들 탐색, 점 조각·인코딩·확장자 거절, 512KiB base64 조각, 없음/거절/초과는 `outcome`). `provider.install` 뒤 선택 접미 능력. 계약 Rust/TS 동일 표.
-- **P2 main**: `PreviewManagerV1`(WebContentsView 1개, 토큰별 메모리 partition, 첫 로드 전 세션 설정: 권한 전부 거절·webRequest·무효 프록시(루프백 포함)·WebRTC 정책·다운로드 취소), GET/HEAD 전용 핸들러와 고정 헤더, 탐색·창 제한, 수명(교체·30초 숨김·충돌·작업 공간 소멸·창 닫힘·종료 시작), IPC `m5:preview:v1`, preload `window.m5Preview`. 상세는 `docs/architecture.md` "결과 미리보기 백엔드".
-- **발견(T3 실제 누출)**: `<link rel=dns-prefetch>`는 CSP·webRequest·프록시를 모두 우회해 실제 DNS 질의를 보냈다(net log `DNS_TRANSACTION_QUERY`). 플래그가 켜지면 `--blink-settings=dnsPrefetchingEnabled=false`를 앱 전체에 붙여 막았고, 수정 뒤 프로브에서 고유 호스트 조회 0건. 프록시가 거절된 뒤 Chromium이 하는 캐시·hosts 전용 조회(task 4/9)와 IPv6 도달성 UDP connect(패킷 없음)는 누출이 아니라 판정에서 분리 기록했다.
-- **P4 프로브** `scripts/m5-preview-isolation-probe.mjs`(`pnpm m5:test:preview-isolation`, g6-release에 연결): 격리 앱 데이터·사본 작업 공간(`ELSECREW_GIT_WORKTREES=0`)·공급자 없음·원격 디버깅 포트 없음. 로컬 HTTP/WS/UDP 수집기 0건, net log, 페이지 자체 보고로 판정. CSP를 CDP로 우회한 상태(webRequest만)와 webRequest까지 뗀 상태(프록시만)에서도 다시 시도해 각 계층이 혼자 막는 것을 확인. 결과 **PASS**(T1·T2·T3·T4·T5·T6·T7·T9·T10·T11·T12·T13·T14·T15, todo 넓게/좁게 390px). T8·T16·T17은 화면(P3) 몫.
-- **G6 진단(1회, 개발 빌드, Electron 프로세스만·sidecar 제외)**: 유휴 413MiB(4개) → todo 미리보기 열림 508MiB(+렌더러 92MiB) → 닫은 뒤 387MiB(4개). 유휴에는 추가 프로세스가 없다. partition 객체는 앱 종료까지 남는다(내용은 지움).
-- **검증**: Rust 워크스페이스 — core 242·protocol 74(preview 4)·sidecar lib 886+(preview 6, 전체 실행에서 나머지 8 포함 통과)·stdio 통합 16 통과. 첫 전체 실행에서 Rust 상태 파서(`lifecycle_g5d_v1::parse_followup_status`)가 미리보기 접미 쌍을 몰라 4개 실패 → 추가 후 통과. `npm test` 840/840(PR #4 머지 뒤 `feature/ade`로 리베이스해 833/833), `pnpm build` 통과. PR #6 CI(GitGuardian·macOS·Windows·website) 통과. GitGuardian이 시험 고정값(`/etc/passwd.txt` 경로 문자열 등)을 "Generic Password"로 잡아 무해한 값으로 바꾸고 제 브랜치 커밋을 하나로 다시 썼다 — 시험 데이터에 `passwd`·`TOKEN=`·이름이 token인 고엔트로피 16진 고정값을 쓰지 말 것. 미리보기 단위: 정책 11·매니저 13·보안 하네스 1(IPC 보낸 쪽 위조·플래그 꺼짐·스위치)·브리지 2. 격리 프로브 PASS.
-- **다음**: Codex 독립 검토(조정자 진행), 검토 차단·중요 0 뒤 기본 활성화 결정, P3 화면(레이아웃 머지 후; API는 `M5PreviewBridgeV1`), 패키지 빌드에서 프로브 재확인, Electron 올릴 때 T2·T3 프로브 재실행.
-
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 렌더러 마운트 스모크 복구와 CI 연결 (`orca/ade-smoke-fix`, 기준 feature/ade 12961d04)
-PR #5 보고에 남긴 `tests/m5-renderer-mount-smoke.mts` 실패를 고쳤다. 테스트 하네스 파일만 바꿨다(제품 코드 변경 없음).
-
-- **원인**: 11-17 '마지막 작업 자동 재개' 뒤로 프로젝트를 열면 작업 공간이 열리는데, 가짜 bridge(`tests/m5-renderer-smoke-preload.cjs`)는 작업 공간 파일 API를 `unexpected`로 두었다. 그 앞뒤로 화면이 바뀐 기대값이 여럿 쌓여 있었다(아무도 끝까지 돌리지 않음).
-- **가짜 bridge**: `readWorkspaceFile`·`beginWorkspaceFileSave`·`appendWorkspaceFileSaveChunk`·`commitWorkspaceFileSave`·`getWorkspaceDiffSummary`·`getWorkspaceDiffFile`·`closeWorkspace`를 프로젝트 방식과 같은 내용으로 구현했다(`workspace.blob.chunk` 이벤트, 작업 공간 주소 포함). 저장 완료는 `commitFileSave`로 위임해 러너의 저장 횟수 감시가 그대로 동작한다. 파일·비교 내용은 공용 함수(`smokeFileText`, `smokeDiffText`)로 묶었다.
-- **러너 기대값**(`tests/m5-renderer-smoke-runner.cjs`):
-  - 파일 검색은 '파일' 탭 범위로 좁혔다(변경 탭에도 같은 클래스 검색 칸이 있음).
-  - 역할 설정 '다시 불러옴' 알림은 설정이 열린 동안 설정 안에 나온다(1차-가 D4⑥).
-  - 편집기는 검토 시트 안이라 편집기 탭으로 시트를 다시 열고, 변경 줄은 시트를 닫고 누른다(시트가 열리면 뒤가 inert).
-  - 넓은 시트의 비교는 나란히 보기가 기본이라 200줄 페이지가 199행이다.
-  - 사라진 사본 반영 검토 패널(`.m5-chat-review`, 11-17 한 번에 반영으로 교체) 시험 단계를 뺐다.
-  - 메시지는 말풍선·이야기 카드(`.m5-story-flow …`)로, 단계 사이 안내는 단계 막대 '지금' 칸으로, 실행 세부는 '기록' 탭으로, 프로젝트 이름은 프로젝트 선택 버튼으로 읽는다.
-  - 재진입 때 안내는 '이전 첫 작업 이어가기' 대신 바로 '진행 확인'이다(자동 재개).
-- **결과**: `node --test tests/m5-renderer-mount-smoke.mts` 2/2 통과, `pnpm m5:test:editor` 68 통과, `tests/m5-project-permissions-ui.mts` 통과, `npm test` 812 통과.
-- **CI 연결 판단**: 이 스모크는 이미 하네스 g4-project-editor와 g6 누적 게이트(`m5:test:editor`)에 있지만 CI는 baseline만 돌려 깨진 채 지나갔다. CI `test (macos-latest)`에 `node node_modules/electron/install.js && pnpm m5:test:editor` 단계를 붙였다(pnpm이 electron postinstall을 막으므로 바이너리를 직접 받음). Windows는 창 없는 Electron 시험이 흔들릴 위험이 있어 붙이지 않았다. 첫 CI에서 러너의 시스템 언어(영어) 때문에 한국어 기대값과 어긋나 실패했고, 러너가 `app.commandLine.appendSwitch("lang", "ko")`로 한국어를 고정한다(`ko-KR`은 Chromium이 받지 않아 영어로 떨어짐 — 로컬에서 `en-US`로 바꿔 CI와 같은 지점 실패를 재현해 확인). 두 번째 CI에서는 러너 화면이 작아 창이 1100px 아래로 줄어 서랍 모드가 됐다. 창을 `useContentSize`·`enableLargerThanScreen`으로 만들고 크기 바꾸기를 `setContentSize`로 해 내용 크기를 고정했다.
-
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #5 독립 검토(차단 0, 중요 5, 경미 4) 반영
-검토서: `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr5.md`(대상 e3d0adff). 판단은 새 순수 함수 `src/m5/task-view-model.ts`에 두고, 지적마다 리뷰 재현을 `tests/m5-pr5-review.test.mts`로 막았다.
-
-- **#1 권한 카드 접근**: 시트·서랍이 열린 동안 대기 요청이 있으면(`approvalCovered`) 둘 위에 "팀이 허락을 기다리고 있어요 · 허락 요청 보기"가 뜬다. 누르면 시트·서랍을 닫고 **카드 자체**에 초점을 둔다(첫 버튼이 '실행 취소'라 버튼에 두지 않음). 열린 작업의 권한 알림도 같은 동작.
-- **#2 결과 상자 경로**: 도움말 '반영·복구 안내 보기'는 `focusResultBox`(시트 닫기 + 패널/서랍 열기 `revealResults`)로 간다. 변경·파일 요청도 ⌘\로 숨긴 패널을 먼저 연다.
-- **#3 복구 대기**: "팀이 일하는 중"은 phase가 아니라 채팅 상태(`teamWorking`: draft·preparing·running·stopping·applying)로 읽는다. 복구·확인 필요 작업은 단계 막대에 '다음 담당을 정하는 중'이 없고, 결과 상자는 "확인이 필요한 일이 먼저예요"(`resultBoxMode` attention), 변경 탭은 "확인이 필요한 일이 있어 아직 넣을 수 없어요".
-- **#4 읽기 실패**: 변경 탭 줄(`changesLine`)은 읽는 중엔 자리표시, 실패면 결과 상자와 같은 "확인하지 못했어요 · 다시 확인". 선택된 목록 줄도 `activeReadFailed`를 따른다.
-- **#5 Esc·초점**: Esc 한 번은 가장 안쪽만 닫는다(`escapeTarget`; 메뉴를 닫은 처리기가 `preventDefault`). 서랍은 열 때 연 버튼을 기억해 열린 탭에 초점, 닫으면 돌려준다. 시트 첫 초점은 고른 파일 → 첫 파일 → 열린 편집기 탭 순.
-- **경미**: 사용자 역할은 총괄 색(1번)을 받지 않고(해시 2~8), 총괄은 역할 ID로 ★ 표식, 이름은 `<bdi>`/FSI 격리. 레일 점마다 자기 묶음만 열고 aria-expanded·초점·Esc·바깥 클릭 처리. 좁은 시트에도 파일 선택 상자. 파일 끝 빈 줄 제거(`git diff --check origin/feature/ade` 통과).
-- **실제 앱 확인**(개발 앱 9377, 캡처 `~/Documents/elsecrew-ade-layout-2026-11-26/review-pr5/`):
-  - #5: 키 입력만으로 변경 줄 Enter → 시트(초점: 시트의 그 파일) → 비교 옵션 Enter → Esc 1회 메뉴만 닫힘·시트 유지 → Esc 2회 시트 닫힘·초점 변경 줄 복귀. 1024px 상단 '변경' 토글 Enter → 서랍(초점: 변경 탭) → Esc → 닫힘·초점 토글 복귀(`k0~k5`, `keyboard.json`).
-  - #1: 권한 요청을 띄우려고 todo-test-1125a의 '명령 실행 허용'을 잠시 끄고 검증 담당에게 `pwd`(1회차는 `ls`)를 시켰다. 시트를 연 채 요청이 오자 시트 위 안내 → 누르면 시트 닫힘·카드에 초점, 1024px 서랍에서도 같음(`a1~a4`, `approval.json`). 두 요청 모두 거절했고 권한은 원래대로(파일·명령 허용) 되돌렸다. 시험 작업 2건(답변 완료)이 목록에 남는다. 앞선 시도(`open -a Safari`)는 샌드박스가 승인 요청 없이 막아 카드가 뜨지 않았다.
-  - 함정: 개발 앱 실행 중 `workbench.tsx`를 고치면 전체 재로딩으로 홈 화면이 되고, 실행이 끝난 뒤에야 프로젝트를 다시 열 수 있었다(11-25 기록과 같음).
-- **렌더러 스모크**: 낡은 기대값을 고쳤다 — 추천 기본 모델은 미저장 변경이 아님(D12), 스모크 창 1280×768, 파일 탭 열기, 가짜 bridge의 권한 응답 `recorded`, 자동 재개된 작업의 작업 공간 트리·rescan. 그래도 "Monaco mount and reveal"에서 멈춘다: 11-17 자동 재개 이후 열리는 것이 작업 공간인데 가짜 bridge가 작업 공간 파일 읽기·저장·비교(`readWorkspaceFile` 등)를 `unexpected`로 둔다("파일을 열지 못했어요"). 기준 커밋 d221832f에 같은 가짜 bridge 수정만 얹어도 같은 단계·같은 문구로 멈춰 레이아웃과 무관한 기존 결함으로 판단했다. 남은 시나리오(~600줄)를 작업 공간 방식으로 옮기는 것은 별도 작업.
-- **테스트**: `npm test` 819 통과(새 6개), `pnpm build` 통과. Rust 변경 없음. `feature/ade`(PR #4 Keychain 수정, cd5f502d)를 병합해 충돌(이 파일)을 풀었고, 병합 뒤 `npm test` 812(PR #4가 서명 스크립트 시험을 지움)·`pnpm build` 통과.
-- **history 롤오버**: 병합 뒤 507줄이지만 워크로그가 모두 11-26 같은 날짜라 날짜 경계로 옮길 엔트리가 없고(오늘 것을 통째로 옮기지 않음), 고정 섹션만 약 350줄이다. 다음 날짜 엔트리가 생길 때 11-26 묶음을 아카이브로 옮긴다.
-
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — ADE 1차-나 레이아웃 L0~L6 구현과 실제 앱 측정 (`orca/ade-layout`, 기준 feature/ade d221832f)
-설계: `docs/proposals/m5-ade-layout-plan.md`(A 뼈대 + 오른쪽 첫 탭 C + 왼쪽 B, 편집기·diff는 넓은 검토 시트, 합치기·반영은 결과 상자 한 곳, 단계 막대는 실제 실행 순서, L6 포함, 토큰 2단+다크). 현재 구조는 `docs/architecture.md` "작업 레이아웃"·"색·간격 토큰" 절. 묶음마다 로컬 커밋(8b33dbd1 L0 → b35dd315 L1 기계적 이동 → a4dfed9c L1 → c689f5b0 L2 → b26cddcd L3 → 7a43243b L4a → 824f191b L4b+R5 → 46632c89 L5 → 080a2af5 L6 → 9d894a74 측정 중 수정).
-
-- **한 일**: 토큰 2단 구조(`--m5-*`는 별칭, 화면 변화 0). dock 삭제 → `TaskLayout` 3영역 + 시트, `panelRequestTarget`로 편집기 요청 해석(컨트롤러 불변). 시트(바뀐 내용/편집기, 파일 목록, Esc·초점 복귀·`inert`, 미저장 ●). 상태 묶음 목록(`task-list-model.ts`, 1차-가 `taskGroup`). 머리말·단계 막대(`stageCells`: 일하는 동안 지금 칸·"다음 · 총괄이 정해요"·실행 사이 "결과를 읽고 다음 담당을 정하는 중"). 팀원 카드(`storyItems`: 실행 + 같은 runId 보고 = 카드 하나), 확인 요청 입력칸 위 고정(portal), 역할 색·이름 통일(R5 `role-colors.ts`, 팀에 없는 역할 표시). 오른쪽 탭 4개(미리보기는 자리만)·결과 상자(합치기·반영·버리기 유일 위치, `ApplyLatest`는 1차-가 방식대로 계속 마운트)·기록 탭(실행 세부·출력·개발용 fixture). 1100 미만 레일·서랍·상단 토글, 820 미만 92% 서랍, 단축키 ⌘1/2/3/\\/N.
-- **1차-가 규칙 유지**: 판단은 `task-status.ts`·`standing-read.ts` 등 그대로 읽기만 했다. 1차-가 규칙을 지키는 소스 검사는 `tests/m5-workbench-source.mts`로 작업대의 나뉜 파일(workbench·task-story·editor-surface·task-list·member-card·result-box …)을 함께 읽게 바꿨다(검사 내용은 그대로).
-- **실제 앱 측정**(개발 앱 `--remote-debugging-port=9377`, CDP 뷰포트 에뮬레이션, todo-test-1125a): 캡처·JSON `~/Documents/elsecrew-ade-layout-2026-11-26/screenshots/`.
-  - 1280×768: 가운데 열 640×699px(폭 50%), 이야기 스크롤 634px(`width-1280`, `state-*`). 1680: 896×876. 960·1024는 레일+서랍으로 가운데 904·968px.
-  - 10초 무설명 구간: 실제 작업 1건(README 한 줄, 총괄→개발→총괄, Claude Code, 188초 + 감시 시작 전 약 30초)을 1초마다 기록 — 일하는 동안 '지금' 칸이 비어 있던 최장 0초(`run-monitor.json`). 개발 끝 → 다음 총괄 실행이 목록에 나타나기까지 약 55초를 "결과를 읽고 다음 담당을 정하는 중"이 채웠다(sidecar 쪽 지연은 미조사, 11-25 approval/getChat 지연과 같은 계열로 추정).
-  - 상태 일치 5상태: 진행 중(목록 running·머리말 running·결과 상자 "끝나면 여기서 넣을 수 있어요"), 검토 대기·합침·반영함·합친 뒤 또 바뀜에서 목록·머리말·결과 상자·변경 탭 줄이 모두 같은 상태(`state-*.json`). 합친 뒤 또 바뀜은 합친 작업의 작업 공간 README에 한 줄을 넣고 저장해 만들었고, 측정 뒤 그 파일을 마지막 기록으로 되돌려 "합침"으로 돌아온 것을 확인했다(Monaco 실행 취소는 CDP 키로 안 먹어 작업 공간 파일만 `git checkout -- README.md`).
-  - 마크다운 원문: 이야기 영역 보고·메시지에서 제목·굵게·표·코드 울타리·인용·링크 원문 0건(모든 측정).
-  - 글자 세로 깨짐: 960·1024·1100·1280·1680·640에서 0건, 가로 넘침 없음(`width-*.json`). 처음 측정에서 960의 레일에 전체 목록이 그려져 "작업 상태 다시 확인"이 세로로 깨진 것은 측정 도구가 가려진 창에서 프레임을 그리지 않아 resize가 늦게 온 탓이었다. 앱은 CSS와 같은 media query로도 구간을 갱신하게 했다(9d894a74).
-  - 측정 중 고친 결함: 머리말·카드 머리에 옛 `.m5-timeline header` 규칙이 먹어 목표가 상태 옆으로 붙던 것(`run-running.png`는 수정 전 캡처), 작업이 끝나도 오른쪽이 '파일'에 머물던 것.
-  - 시험 데이터: 새 작업 "README.md 맨 아래에 '마지막 점검…'"은 검토 대기로 남겨 두었다. 합치기는 시험 폴더의 기존 미기록 변경(PR #3 사본 반영 시험이 남긴 README 한 줄)과 겹쳐 제품이 막았고, 그 폴더는 건드리지 않았다.
-- **테스트**: `npm test` 813 통과(새 `m5-task-layout`·`m5-task-story` 시험 포함, 옛 `m5-dock-layout` 삭제), `pnpm build` 통과. Rust 변경 없음(cargo는 개발 sidecar 빌드만). `tests/m5-renderer-mount-smoke.mts`는 기준선(d221832f)과 같은 지점("default suggestion remains an unsaved edit", 역할 설정)에서 실패 — 1차-가 D12로 자동 추천 모델을 미저장으로 세지 않게 된 뒤 낡은 기대값이며 이번 범위(RoleSettings 불변) 밖이다. 그 뒤의 레이아웃 검사는 새 `data-testid`로 바꿔 두었지만 실행으로 확인하지 못했다.
-- **남은 것**: 실제 권한 요청이 이번 실행에서 나오지 않아 입력칸 위 고정 확인 카드는 실제 화면으로 못 봤다(코드상 portal). 실행별 바뀐 파일 칩은 renderer에 실행별 파일 목록이 없어 넣지 않았다(2차 F4와 함께 sidecar 계약). 미리보기 탭은 자리만(P3, `data-preview-covered`로 겹침 상태 노출). 렌더러 스모크의 역할 설정 기대값 갱신(역할 편집 R0~R2 작업에서). Codex 검토 반영.
-- **PR**: https://github.com/wonseok-han/elsecrew/pull/5 (`--base feature/ade`). CI(b6948350) macOS·Windows·website·GitGuardian 모두 통과.
 ## 프로젝트 요약 (고정)
 터미널을 한 번도 안 열어본 비개발자를 **코딩 에이전트(Claude Code·Codex)가 굴러가는 상태까지** 데려다주는 데스크톱 GUI 앱. 현재 배포 경로는 Tauri 2 + React 19이고, M5는 Electron + React/TypeScript + Monaco와 Rust sidecar의 별도 작업대 골격으로 전환 중이다.
 - 기획 원본: `~/Library/CloudStorage/OneDrive-개인/ObsidianVault/오픈소스/아이디어/후보/에이전트-스타터.md`
@@ -118,7 +74,7 @@ PR #5 보고에 남긴 `tests/m5-renderer-mount-smoke.mts` 실패를 고쳤다. 
   - 함정: 프로젝트 설정을 저장하면 `RoleSettings`가 revision 키로 다시 마운트돼 컴포넌트 안 상태(안내 문구 등)가 사라진다. 저장 뒤에도 보여야 할 안내는 작업대(`workbench.tsx`)가 들고 있어야 한다.
   - 함정: sidecar 통합 시험(`orchestration_dispatch`)의 fake 에이전트는 `target/debug/elsecrew-sidecar` 실행 파일을 띄운다. `cargo test --lib`만 돌리면 "fake agent control launcher failed: No such file"로 15개가 실패하니 `cargo build -p elsecrew-sidecar`를 먼저 한다.
 
-- **결과 미리보기의 DNS 미리 찾기(2026-11-26)**: Electron 43에서 `<link rel=dns-prefetch>`는 CSP·`webRequest`·고정 프록시를 모두 거치지 않고 실제 DNS 질의를 보낸다. 미리보기가 켜지면 `--blink-settings=dnsPrefetchingEnabled=false`(앱 전체)를 유지할 것. 확인은 `pnpm m5:test:preview-isolation`의 net log 판정이며 Electron을 올릴 때 다시 돌린다. 미리보기 토큰은 renderer에 주지 않고, 작업 공간 주소는 sidecar가 채팅 바인딩에서 꺼낸다(renderer 값 불사용).
+- **결과 미리보기의 DNS 미리 찾기(2026-11-26)**: Electron 43에서 `<link rel=dns-prefetch>`는 CSP·`webRequest`·고정 프록시를 모두 거치지 않고 실제 DNS 질의를 보낸다. 미리보기가 켜지면(macOS 기본값, Windows·Linux는 `ELSECREW_PREVIEW=1`일 때만, `=0`으로 끔) `--blink-settings=dnsPrefetchingEnabled=false`(앱 전체)를 유지할 것. 미리보기 뷰는 앱 페이지 위에 그려지므로, 미리보기 영역을 덮는 새 화면 요소는 `previewObscured` 목록에 넣거나 DOM 변화로 나타나야 한다(탭이 그리기 전에 붙잡고 뷰를 숨긴 뒤 보임, PR #9 I1). CSS `:hover`만으로 뜨는 덮개와 `pointer-events: none`인 덮개는 감지되지 않는다. 앱 확대·축소에서 좌표는 main이 `getZoomFactor()`로 바꾸고, 렌더러 측정의 `devicePixelRatio`·페이지 크기가 맞지 않으면 숨긴다. 창 크기·확대를 바꾸는 새 경로는 반드시 그 전에 `previewManager.geometryChanged()`를 부를 것(보기 메뉴 확대는 `electron/zoom-menu.ts`). 숨김·표시 순서는 `src/m5/preview-layout-loop.ts` 한 곳에서만 정한다. 확인은 `pnpm m5:test:preview-isolation`의 net log 판정이며 Electron을 올릴 때 다시 돌린다. 미리보기 토큰은 renderer에 주지 않고, 작업 공간 주소는 sidecar가 채팅 바인딩에서 꺼낸다(renderer 값 불사용).
 
 - **작업 레이아웃의 규칙은 순수 함수에 있다(2026-11-26, ADE 1차-나)**: 창 폭 구간·오른쪽 폭·편집기 요청 해석·기본 탭·미리보기 겹침은 `task-layout-model.ts`, 목록 묶음은 `task-list-model.ts`, 단계 칸·카드 결합은 `task-story-model.ts`, 역할 색은 `role-colors.ts`. 화면 컴포넌트는 그 값을 그리기만 한다. 합치기·반영·버리기 버튼은 결과 상자(`result-box.tsx`) 한 곳에만 둔다 — 다른 곳은 "결과 상자에서 넣기" 링크로 가리킨다.
   - 측정 함정: CDP `Emulation.setDeviceMetricsOverride`로 폭을 바꾸면 CSS는 즉시 바뀌지만, 창이 가려져 있으면 프레임이 없어 `resize`·`matchMedia` 처리기가 다음 캡처 때 돈다. 재기 전에 `Page.captureScreenshot`으로 프레임을 한두 번 그리게 한다.
@@ -467,3 +423,5 @@ PR #5 보고에 남긴 `tests/m5-renderer-mount-smoke.mts` 실패를 고쳤다. 
 2026-11-23~11-25 워크로그(실제 todo 시험, ADE 진단·서명·Codex 0.171, ADE 1차-가 구현, PR #3 1차 검토 반영)는 2026-11-26 롤오버로 같은 파일 맨 위로 옮겼다. 고정 섹션만 약 340줄이라 300줄 이하는 맞출 수 없다.
 
 2026-11-26 워크로그 중 이미 main 쪽 `feature/ade`에 머지된 PR #3·#4(Keychain 수정 포함) 엔트리는 같은 날 롤오버로 `docs/archive/history-2026-11.md` 맨 위로 옮겼다. 모든 엔트리가 11-26이라 날짜 경계로는 자를 수 없어, 머지된 PR 단위로 나눴다.
+
+2026-11-26 워크로그 중 `feature/ade`에 머지된 PR #5(레이아웃)·#6(미리보기 백엔드)·#7(스모크 복구)·#8(팀 역할) 엔트리는 같은 날 두 번째 롤오버로 `docs/archive/history-2026-11.md` 맨 위로 옮겼다(머지된 PR 단위).

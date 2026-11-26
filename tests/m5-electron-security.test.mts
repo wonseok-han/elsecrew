@@ -17,6 +17,9 @@ import * as previewContract from "../src/m5/contracts/preview-v1.ts";
 import * as previewPolicy from "../electron/preview-policy.ts";
 import * as previewManagerModule from "../electron/preview-manager.ts";
 import * as previewFlag from "../electron/preview-flag.ts";
+import * as zoomMenuModel from "../electron/zoom-menu-model.ts";
+/** The View menu's zoom callback main.ts installed (the real menu needs Electron). */
+const installedZoom: { current: ((step: -1 | 0 | 1) => void) | null } = { current: null };
 import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS, M5_BRIDGE_V6_CHANNELS, M5_BRIDGE_V7_CHANNELS, M5_BRIDGE_V8_CHANNELS } from "../electron/ipc-channels.ts";
 
 const require = createRequire(import.meta.url);
@@ -232,6 +235,12 @@ class FakeWindow {
     on: (event: string, listener: (...args: unknown[]) => void) => this.webContents.listeners.set(event, listener),
     send: () => undefined,
     setWindowOpenHandler: (handler: () => { action: string }) => { this.openHandler = handler; },
+    getZoomFactor: () => 1,
+    zoomLevel: 0,
+    zoomCalls: [] as string[],
+    getZoomLevel: () => this.webContents.zoomLevel,
+    setZoomLevel: (level: number) => { this.webContents.zoomLevel = level; this.webContents.zoomCalls.push(`setZoomLevel:${level}`); },
+    setZoomFactor: (factor: number) => { this.webContents.zoomCalls.push(`setZoomFactor:${factor}`); },
   };
 
   constructor(options: unknown) {
@@ -249,6 +258,10 @@ class FakeWindow {
 
   getContentSize() {
     return [1280, 800];
+  }
+
+  getBounds() {
+    return { x: 0, y: 0, width: 1280, height: 800 };
   }
 
   async loadURL(url: string) {
@@ -286,6 +299,7 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
       quit: () => undefined,
     },
     BrowserWindow: Object.assign(FakeWindow, { getAllWindows: () => FakeWindow.windows }),
+    screen: { getDisplayMatching: () => ({ scaleFactor: 1 }) },
     dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }), showMessageBox: async (_window: unknown, options: { detail?: string }) => { sidecarCalls.push(`confirm:${options.detail ?? ""}`); return { response: externalLinkAnswer.value }; } },
     shell: { openExternal: async () => { sidecarCalls.push("openExternal"); } },
     safeStorage: { isEncryptionAvailable: () => false, encryptString: () => { throw new Error("unexpected encryption"); }, decryptString: () => { throw new Error("unexpected decryption"); } },
@@ -419,6 +433,7 @@ function moduleFor(
 ) {
   if (specifier === "electron") return fakes.electron;
   if (specifier === "./app-update-menu.ts") return { installAppUpdateMenu() {} };
+  if (specifier === "./zoom-menu.ts") return { installZoomGuardedMenu: (zoom: (step: -1 | 0 | 1) => void) => { installedZoom.current = zoom; }, zoomLevelAfter: zoomMenuModel.zoomLevelAfter };
   // Usage reads touch the app keychain and network; the security harness only
   // needs the reader to exist and must fail loudly if a handler reaches it.
   if (specifier === "./claude-usage.ts") return {
@@ -431,7 +446,8 @@ function moduleFor(
   if (specifier.endsWith("preview-v1.ts")) return previewContract;
   if (specifier === "./preview-policy.ts") return previewPolicy;
   if (specifier === "./preview-manager.ts") return previewManagerModule;
-  if (specifier === "./preview-flag.ts") return { previewFlags: (packaged: boolean) => previewFlag.previewFlagsFromEnvironment(fakes.env, packaged) };
+  // The platform is the harness's (macOS unless a test names another), not the machine's.
+  if (specifier === "./preview-flag.ts") return { previewFlags: (packaged: boolean) => previewFlag.previewFlagsFromEnvironment(fakes.env, packaged, fakes.env.TEST_PLATFORM ?? "darwin") };
   if (specifier.endsWith("git-selection-v1.ts")) return gitSelectionContract;
   if (specifier === "./git-selection.ts") return {
     GitSelectionStore: class {
@@ -580,18 +596,25 @@ test("update readiness rejects unsolicited, stale and foreign replies", async ()
   await assert.rejects(handler(harness.currentEvent(), undefined, true));
 });
 
-test("result preview IPC is off by default, answers only the main frame, and never takes a workspace, token or URL", async () => {
-  const open = { action: "open", projectId: "project_1", chatId: "chat_1", entry: null, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide" };
-  const off = await loadMain();
-  assert.deepEqual(off.privilegedSchemes.map(entry => entry.scheme), ["app"], "no preview scheme without the flag");
-  assert.deepEqual(off.switches, [], "no Chromium switch without the flag");
+test("result preview IPC is on by default on macOS, off with ELSECREW_PREVIEW=0 and elsewhere, answers only the main frame, and never takes a workspace, token or URL", async () => {
+  const open = { action: "open", projectId: "project_1", chatId: "chat_1", entry: null, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", pixelRatio: 1, page: { width: 1280, height: 800 } };
+  // Windows is not checked yet (PR #9 review I2·I5): off unless asked for.
+  const windows = await loadMain(undefined, false, { TEST_PLATFORM: "win32" });
+  assert.deepEqual(windows.switches, []);
+  assert.equal(JSON.stringify(await windows.handlers.get(previewContract.PREVIEW_CHANNEL_V1)!(windows.currentEvent(), { action: "status" })), JSON.stringify({ action: "status", enabled: false }));
+  const windowsOn = await loadMain(undefined, false, { TEST_PLATFORM: "win32", ELSECREW_PREVIEW: "1" });
+  assert.deepEqual(windowsOn.switches, ["blink-settings=dnsPrefetchingEnabled=false"]);
+  const off = await loadMain(undefined, false, { ELSECREW_PREVIEW: "0" });
+  assert.deepEqual(off.privilegedSchemes.map(entry => entry.scheme), ["app"], "no preview scheme when turned off");
+  assert.deepEqual(off.switches, [], "no Chromium switch when turned off");
   const offHandler = off.handlers.get(previewContract.PREVIEW_CHANNEL_V1);
   assert.ok(offHandler);
   assert.equal(JSON.stringify(await offHandler(off.currentEvent(), { action: "status" })), JSON.stringify({ action: "status", enabled: false }));
   await assert.rejects(offHandler(off.currentEvent(), open), /not enabled/);
   assert.deepEqual(off.sidecarCalls, []);
 
-  const on = await loadMain(undefined, false, { ELSECREW_PREVIEW: "1" });
+  // The default (no setting) is on.
+  const on = await loadMain();
   // T3: DNS prefetching (outside proxy, webRequest and CSP) is off app-wide.
   assert.deepEqual(on.switches, ["blink-settings=dnsPrefetchingEnabled=false"]);
   // Privileges only; the default session never gets a preview handler (T14).
@@ -621,9 +644,12 @@ test("result preview IPC is off by default, answers only the main frame, and nev
     { ...open, entry: "/etc/index.html" }, { ...open, bounds: { x: 0, y: 0, width: Number.NaN, height: 10 } }, { ...open, viewport: "tall" },
   ]) await assert.rejects(handler(on.currentEvent(), bad));
   await assert.rejects(handler(on.currentEvent(), open, "extra"));
-  // Bounds outside the window are refused in main too.
-  await assert.rejects(handler(on.currentEvent(), { ...open, bounds: { x: 1200, y: 0, width: 500, height: 600 } }), /outside the window/);
-  await assert.rejects(handler(on.currentEvent(), { ...open, bounds: { x: 0, y: 0, width: 100, height: 600 } }), /too small/);
+  // A stage not on screen at the window's zoom is refused in main too, and
+  // so is a measurement taken at another zoom (PR #9 review B1).
+  await assert.rejects(handler(on.currentEvent(), { ...open, bounds: { x: 1200, y: 0, width: 500, height: 600 } }), /not on screen/);
+  await assert.rejects(handler(on.currentEvent(), { ...open, bounds: { x: 0, y: 0, width: 100, height: 600 } }), /too small|not on screen/);
+  await assert.rejects(handler(on.currentEvent(), { ...open, pixelRatio: 2 }), /not on screen/);
+  await assert.rejects(handler(on.currentEvent(), { ...open, page: { width: 1100, height: 800 } }), /not on screen/, "a measurement from another window size");
   assert.deepEqual(on.sidecarCalls, []);
   // A task with no page yet: nothing is created.
   assert.equal(JSON.stringify(await handler(on.currentEvent(), open)), JSON.stringify({ action: "open", outcome: "empty", reason: "noEntry" }));
@@ -660,4 +686,40 @@ test("a launch blink-settings value is kept; quit preparation closes the preview
   const navigation = merged.window.webContents.listeners.get("did-start-navigation");
   assert.ok(navigation);
   assert.ok(merged.window.webContents.listeners.get("render-process-gone"));
+});
+
+test("the View menu's zoom and a window resize hide the preview before anything moves (PR #9 re-review B1)", async () => {
+  const order: string[] = [];
+  const original = previewManagerModule.PreviewManagerV1.prototype.geometryChanged;
+  previewManagerModule.PreviewManagerV1.prototype.geometryChanged = function geometryChanged(this: InstanceType<typeof previewManagerModule.PreviewManagerV1>) { order.push("hide"); return original.call(this); };
+  try {
+    const on = await loadMain();
+    assert.ok(installedZoom.current, "main installs the guarded View menu");
+    const contents = on.window.webContents as unknown as { zoomCalls: string[] };
+    contents.zoomCalls.length = 0;
+    const record = contents.zoomCalls.push.bind(contents.zoomCalls);
+    contents.zoomCalls.push = (...items: string[]) => { order.push(...items); return record(...items); };
+    installedZoom.current!(1);
+    installedZoom.current!(1);
+    installedZoom.current!(0);
+    assert.deepEqual(order, ["hide", "setZoomLevel:0.5", "hide", "setZoomLevel:1", "hide", "setZoomLevel:0"]);
+    // The window tells main before and as it resizes, and around full screen.
+    for (const event of ["will-resize", "resize", "enter-full-screen", "leave-full-screen"]) {
+      order.length = 0;
+      on.window.listeners.get(event)!();
+      assert.deepEqual(order, ["hide"], event);
+    }
+  } finally {
+    previewManagerModule.PreviewManagerV1.prototype.geometryChanged = original;
+  }
+  // The menu's zoom items are the only zoom path, each through the callback.
+  const steps: number[] = [];
+  const view = zoomMenuModel.viewMenuTemplate(true, step => { steps.push(step); });
+  const items = view.submenu as { role?: string; accelerator?: string; click?: () => void }[];
+  assert.equal(items.some(item => /zoom/i.test(item.role ?? "")), false, "no built-in zoom role");
+  for (const item of items.filter(entry => entry.accelerator)) item.click!();
+  assert.deepEqual(steps, [0, 1, 1, -1]);
+  assert.equal(zoomMenuModel.zoomLevelAfter(9, 1), 9);
+  assert.equal(zoomMenuModel.zoomLevelAfter(-8, -1), -8);
+  assert.equal(zoomMenuModel.zoomLevelAfter(2.5, 0), 0);
 });

@@ -1,6 +1,7 @@
 // Result preview: the pure rules (plan 2.3/2.4/2.6 "TS 순수 함수 단위").
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 
 import {
   PREVIEW_MIME_V1,
@@ -26,8 +27,10 @@ import {
   previewEntryUrl,
   previewPartition,
   previewResponseHeaders,
+  pageSizeMatches,
+  pixelRatioMatches,
   previewViewRect,
-  validatePreviewBounds,
+  windowBounds,
 } from "../electron/preview-policy.ts";
 
 // A preview host is 32 lowercase hex digits; these two are fixed fakes.
@@ -154,17 +157,41 @@ test("the dead proxy also catches loopback; the user agent drops product tokens"
   );
 });
 
-test("bounds are finite, inside the window, at least 120×120; narrow is a centered 390px column", () => {
+test("bounds: the page's CSS pixels times the zoom, rounded inwards, cut to the window, at least 120×120; narrow is a centered 390px column (PR #9 review B1)", () => {
   const content = { width: 1280, height: 800 };
-  assert.deepEqual(validatePreviewBounds({ x: 700.4, y: 60.6, width: 579.6, height: 700 }, content), { x: 700, y: 61, width: 580, height: 700 });
-  assert.deepEqual(validatePreviewBounds({ x: 700, y: 0, width: 581, height: 800 }, content), { x: 700, y: 0, width: 580, height: 800 });
-  // The one-pixel edge allowance never yields a rectangle under the minimum.
-  assert.throws(() => validatePreviewBounds({ x: 1161, y: 0, width: 120, height: 300 }, content), /too small/);
-  for (const bad of [
-    { x: -1, y: 0, width: 300, height: 300 }, { x: 0, y: 0, width: 119, height: 300 }, { x: 0, y: 0, width: 300, height: 100 },
-    { x: 1000, y: 0, width: 300, height: 300 }, { x: 0, y: 600, width: 300, height: 300 }, { x: Number.NaN, y: 0, width: 300, height: 300 },
-    { x: 0, y: 0, width: Number.POSITIVE_INFINITY, height: 300 },
-  ]) assert.throws(() => validatePreviewBounds(bad, content), JSON.stringify(bad));
+  assert.deepEqual(windowBounds({ x: 700.4, y: 60.6, width: 579.6, height: 700 }, 1, content), { x: 701, y: 61, width: 579, height: 699 });
+  // Running past the window: cut at its edge, never an error.
+  assert.deepEqual(windowBounds({ x: 700, y: 0, width: 581, height: 800 }, 1, content), { x: 700, y: 0, width: 580, height: 800 });
+  // Zoomed in: the stage is further right and larger in window pixels.
+  assert.deepEqual(windowBounds({ x: 400, y: 50, width: 300, height: 400 }, 1.25, content), { x: 500, y: 63, width: 375, height: 499 });
+  // Zoomed out: smaller, and a stage measured past the window is cut to it.
+  assert.deepEqual(windowBounds({ x: 1300, y: 50, width: 300, height: 400 }, 0.8, content), { x: 1040, y: 40, width: 240, height: 320 });
+  // Inside the stage on every side: never left of or above what was measured.
+  for (const zoom of [0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 3]) {
+    const css = { x: 333.3, y: 77.7, width: 401.9, height: 455.5 };
+    const placed = windowBounds(css, zoom, { width: 4000, height: 4000 })!;
+    assert.ok(placed.x >= css.x * zoom && placed.y >= css.y * zoom, `${zoom}`);
+    assert.ok(placed.x + placed.width <= (css.x + css.width) * zoom && placed.y + placed.height <= (css.y + css.height) * zoom, `${zoom}`);
+  }
+  for (const [bad, zoom] of [
+    [{ x: 0, y: 0, width: 119, height: 300 }, 1], [{ x: 0, y: 0, width: 300, height: 100 }, 1],
+    [{ x: 1200, y: 0, width: 300, height: 300 }, 1], [{ x: 0, y: 700, width: 300, height: 300 }, 1],
+    [{ x: Number.NaN, y: 0, width: 300, height: 300 }, 1], [{ x: 0, y: 0, width: Number.POSITIVE_INFINITY, height: 300 }, 1],
+    [{ x: 0, y: 0, width: 300, height: 300 }, 0], [{ x: 0, y: 0, width: 300, height: 300 }, Number.NaN], [{ x: 0, y: 0, width: 200, height: 300 }, 0.5],
+  ] as const) assert.equal(windowBounds(bad, zoom, content), null, JSON.stringify([bad, zoom]));
+  // A measurement from another zoom (or display) is not used.
+  assert.equal(pixelRatioMatches(2, 1, 2), true);
+  assert.equal(pixelRatioMatches(2.5, 1.25, 2), true);
+  assert.equal(pixelRatioMatches(2.5, 1.5, 2), false);
+  assert.equal(pixelRatioMatches(1, 1, 2), false, "measured on a standard display, now on a Retina one");
+  assert.equal(pixelRatioMatches(Number.NaN, 1, 1), false);
+  // …nor one taken at another window size (PR #9 re-review B1).
+  assert.equal(pageSizeMatches({ width: 1280, height: 800 }, 1, content), true);
+  assert.equal(pageSizeMatches({ width: 853, height: 533 }, 1.5, content), true, "innerWidth rounds down at a fractional zoom");
+  assert.equal(pageSizeMatches({ width: 1600, height: 1000 }, 0.8, content), true);
+  assert.equal(pageSizeMatches({ width: 1280, height: 800 }, 1.25, content), false, "measured before zooming in");
+  assert.equal(pageSizeMatches({ width: 1100, height: 800 }, 1, content), false, "measured before the window grew");
+  assert.equal(pageSizeMatches({ width: Number.NaN, height: 800 }, 1, content), false);
   const bounds = { x: 700, y: 60, width: 500, height: 600 };
   assert.deepEqual(previewViewRect(bounds, "wide"), bounds);
   assert.deepEqual(previewViewRect(bounds, "narrow"), { x: 755, y: 60, width: 390, height: 600 });
@@ -210,12 +237,21 @@ test("sidecar contract: requests are exact, answers must echo them and match the
 });
 
 test("renderer contract: exact actions and answers", () => {
-  const open = { action: "open", projectId: "p", chatId: "c", entry: null, bounds: { x: 1, y: 2, width: 300, height: 300 }, viewport: "narrow" } as const;
+  const open = { action: "open", projectId: "p", chatId: "c", entry: null, bounds: { x: 1, y: 2, width: 300, height: 300 }, viewport: "narrow", pixelRatio: 2, page: { width: 1280, height: 800 } } as const;
   assert.deepEqual(validatePreviewIpcRequestV1(open), open);
+  // The page's devicePixelRatio comes with every measurement (PR #9 review B1).
+  const { pixelRatio: _ratio, ...unmeasured } = open;
+  assert.throws(() => validatePreviewIpcRequestV1(unmeasured), /unexpected fields/);
+  for (const bad of [0, -1, 0.1, 17, Number.NaN, Number.POSITIVE_INFINITY, "2"]) assert.throws(() => validatePreviewIpcRequestV1({ ...open, pixelRatio: bad }), /pixelRatio/, String(bad));
+  // …and the page's own size, so main can refuse a measurement from before a resize.
+  const { page: _page, ...sizeless } = open;
+  assert.throws(() => validatePreviewIpcRequestV1(sizeless), /unexpected fields/);
+  for (const bad of [{ width: 0, height: 800 }, { width: 1280 }, { width: 1280, height: 800, x: 1 }, { width: "1280", height: 800 }, { width: 1280, height: Number.NaN }]) assert.throws(() => validatePreviewIpcRequestV1({ ...open, page: bad }), JSON.stringify(bad));
   assert.throws(() => validatePreviewIpcRequestV1({ ...open, action: "navigate" }));
   assert.throws(() => validatePreviewIpcRequestV1({ action: "close", previewId: "a".repeat(32) }));
   const previewId = `pv_${"b".repeat(32)}`;
-  const layout = validatePreviewIpcRequestV1({ action: "layout", previewId, bounds: open.bounds, viewport: "wide", obscured: true });
+  const layout = validatePreviewIpcRequestV1({ action: "layout", previewId, bounds: open.bounds, viewport: "wide", obscured: true, pixelRatio: 1.25, page: { width: 1024, height: 640 } });
+  assert.throws(() => validatePreviewIpcRequestV1({ action: "layout", previewId, bounds: open.bounds, viewport: "wide", obscured: true, pixelRatio: 1.25 }));
   assert.equal(validatePreviewIpcResultV1({ action: "layout", previewId, state: "hidden", snapshot: "data:image/jpeg;base64,AAAA" }, layout).state, "hidden");
   assert.throws(() => validatePreviewIpcResultV1({ action: "layout", previewId, state: "hidden", snapshot: "https://x/y.png" }, layout));
   const opened = validatePreviewIpcRequestV1(open);
@@ -224,4 +260,20 @@ test("renderer contract: exact actions and answers", () => {
   assert.deepEqual(validatePreviewEventV1({ previewId, kind: "closed", reason: "crashed" }), { previewId, kind: "closed", reason: "crashed" });
   assert.throws(() => validatePreviewEventV1({ previewId, kind: "closed", reason: "other" }));
   assert.throws(() => validatePreviewEventV1({ previewId, kind: "loaded", url: "x" }));
+});
+
+test("the preview's real-app checks say they are macOS only and start without shell-specific syntax (PR #9 review I5)", () => {
+  const scripts = JSON.parse(readFileSync("package.json", "utf8")).scripts as Record<string, string>;
+  assert.equal(scripts["m5:test:preview-ui"], "node scripts/m5-preview-ui-run.mjs");
+  for (const name of ["m5:test:preview-ui", "m5:test:preview-isolation"]) assert.doesNotMatch(scripts[name]!, /(?:^|\s)[A-Z_]+=\S/, `${name} sets no variable the POSIX way`);
+  for (const file of ["scripts/m5-preview-ui-run.mjs", "scripts/m5-preview-ui-smoke.cjs", "scripts/m5-preview-isolation-probe.mjs"]) {
+    const source = readFileSync(file, "utf8");
+    assert.match(source, /process\.platform !== ["']darwin["']\) \{[\s\S]{0,200}NOT_RUN[\s\S]{0,240}process\.exit\(2\)/, `${file}: not run (exit 2) off macOS`);
+  }
+  // Exit 2 is NOT_READY in the harness, never a pass.
+  assert.match(readFileSync("scripts/m5-harness.mjs", "utf8"), /result\.status === 2 && !result\.error\) \{\n\s+report\.status = "NOT_READY";/);
+  const check = readFileSync("scripts/m5-preview-default-check.mjs", "utf8");
+  assert.match(check, /Elsecrew-win32-\$\{process\.arch\}/);
+  assert.match(check, /const onByDefault = process\.platform === "darwin";/);
+  assert.match(readFileSync(".github/workflows/ci.yml", "utf8"), /m5:test:preview-ui[\s\S]{0,400}CI에서[\s\S]{0,40}돌리지 않는다/);
 });

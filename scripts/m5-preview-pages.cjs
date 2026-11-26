@@ -3,8 +3,10 @@
 // think of and reports what happened; nothing here is shipped with the app.
 'use strict';
 
-function leakPage({ httpPort, udpPort, tcp6Port, udp6Port, marker }) {
+function leakPage({ httpPort, udpPort, tcp6Port, udp6Port, marker, webrtc }) {
   const script = String.raw`
+const WEBRTC = ${JSON.stringify(webrtc)};
+${TRANSPORTS_SOURCE}
 const H = "http://127.0.0.1:${httpPort}";
 const H6 = "http://[::1]:${tcp6Port}";
 const WS = "ws://127.0.0.1:${httpPort}";
@@ -16,8 +18,8 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const within = (promise, ms = 4000) => Promise.race([promise, sleep(ms).then(() => { throw new Error("timeout"); })]);
 const describe = error => String(error && (error.name && error.name !== "Error" ? error.name + ": " : "") + (error && error.message || error));
 const out = {};
-async function attempt(name, fn) {
-  try { out[name] = { ok: true, value: await within(Promise.resolve().then(fn)) }; }
+async function attempt(name, fn, ms) {
+  try { out[name] = { ok: true, value: await within(Promise.resolve().then(fn), ms) }; }
   catch (error) { out[name] = { ok: false, error: describe(error) }; }
 }
 function element(tag, attributes, ms = 1500) {
@@ -80,21 +82,10 @@ async function network() {
     const input = document.createElement("input"); input.name = "s"; input.value = "secret"; form.append(input); document.body.append(form);
     form.submit(); await sleep(1000); return "submitted";
   });
-  // T2: WebRTC to local STUN (IPv4 and IPv6) and TURN (UDP, TCP, TLS)
-  // collectors and an outside STUN host.
-  await attempt("webrtc", async () => {
-    const pc = new RTCPeerConnection({ iceServers: [
-      { urls: ["stun:127.0.0.1:" + UDP, "stun:[::1]:" + UDP6, "stun:" + MARK + "-stun.example.com:3478"] },
-      { urls: ["turn:127.0.0.1:" + UDP + "?transport=udp", "turn:127.0.0.1:" + TCP + "?transport=tcp", "turns:127.0.0.1:" + TCP + "?transport=tcp", "turn:[::1]:" + UDP6 + "?transport=udp"], username: "probe", credential: "probe" },
-    ] });
-    const candidates = [];
-    pc.onicecandidate = event => { if (event.candidate) candidates.push(event.candidate.type || "unknown"); };
-    pc.createDataChannel("x");
-    await pc.setLocalDescription(await pc.createOffer());
-    await sleep(3000);
-    pc.close();
-    return candidates;
-  });
+  // T2: WebRTC, one transport at a time (STUN v4/v6, TURN udp v4/v6, TURN
+  // tcp v4/v6, TURN tls v4/v6, an outside STUN name), each against its own
+  // collector. Each may take up to 8.3 s, so the whole run gets its own deadline.
+  await attempt("webrtcTransports", () => probeTransports(WEBRTC), Object.keys(WEBRTC).length * 8_500 + 2_000);
 }
 async function rest() {
   // T6: no app bridge, no Node.
@@ -153,12 +144,58 @@ const PERMISSIONS = {
   targetBlank: async () => { const a = document.createElement("a"); a.href = H + "/blank"; a.target = "_blank"; document.body.append(a); a.click(); await sleep(500); return "clicked"; },
 };
 window.PERMISSION_NAMES = Object.keys(PERMISSIONS);
+// What held right before the call (review I5): the call had a user
+// activation and focus, so a refusal is the boundary's, not the browser's.
+const POLICY_FEATURE = {
+  camera: "camera", microphone: "microphone", displayMedia: "display-capture", geolocation: "geolocation", clipboardRead: "clipboard-read",
+  hid: "hid", usb: "usb", serial: "serial", midi: "midi", fullscreen: "fullscreen", permissionGeolocation: "geolocation", permissionCamera: "camera",
+};
 window.runPermission = async (name) => {
-  try { return { ok: true, value: await within(Promise.resolve().then(PERMISSIONS[name])), activation: navigator.userActivation?.isActive ?? null }; }
-  catch (error) { return { ok: false, error: describe(error), focused: document.hasFocus() }; }
+  const policy = document.permissionsPolicy || document.featurePolicy;
+  const feature = POLICY_FEATURE[name];
+  // The document's own Permissions-Policy verdict: false is the response
+  // header refusing the feature for this page.
+  const policyAllows = feature && policy?.allowsFeature ? policy.allowsFeature(feature) : null;
+  const before = { active: navigator.userActivation?.isActive === true, focused: document.hasFocus(), policyAllows };
+  try { return { ok: true, value: await within(Promise.resolve().then(PERMISSIONS[name])), before }; }
+  catch (error) { return { ok: false, error: describe(error), before }; }
 };
 `;
   return `<!doctype html><html><head><meta charset="utf-8"><title>leak</title></head><body><p id="status">ready</p><script>${script}</script></body></html>`;
+}
+
+/**
+ * One RTCPeerConnection per ICE server, so every transport is observed on
+ * its own: the gathering must end ("complete") or the server must report an
+ * error; a transport still silent at the deadline is recorded as
+ * "timeout" (never a pass). TURN runs relay-only, so only the relay path is
+ * tried. Shared by the preview page and the unrestricted control page.
+ */
+const TRANSPORTS_SOURCE = String.raw`
+async function probeTransports(servers) {
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const results = {};
+  for (const [name, server] of Object.entries(servers)) {
+    const startedAt = performance.now();
+    const pc = new RTCPeerConnection({ iceServers: [server], iceTransportPolicy: /^turns?:/.test(server.urls) ? "relay" : "all" });
+    const candidates = [];
+    const errors = [];
+    pc.onicecandidate = event => { if (event.candidate) candidates.push({ type: event.candidate.type, protocol: event.candidate.protocol }); };
+    pc.onicecandidateerror = event => errors.push({ code: event.errorCode, text: String(event.errorText || "").slice(0, 80) });
+    const done = new Promise(resolve => { pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === "complete") resolve("complete"); }; });
+    pc.createDataChannel("x");
+    await pc.setLocalDescription(await pc.createOffer());
+    const gathering = await Promise.race([done, wait(8000).then(() => "timeout")]);
+    // A moment more so a late send would still reach the collector.
+    await wait(300);
+    results[name] = { gathering, candidates, errors, ms: Math.round(performance.now() - startedAt) };
+    pc.close();
+  }
+  return results;
+}`;
+
+function controlPage(webrtc) {
+  return `<!doctype html><meta charset="utf-8"><script>${TRANSPORTS_SOURCE}\nwindow.runControl = () => probeTransports(${JSON.stringify(webrtc)});</script>`;
 }
 
 const TODO_PAGE = `<!doctype html>
@@ -206,4 +243,4 @@ const FILES = {
   "secret.pem": "fixture-only\n",
 };
 
-module.exports = { leakPage, FILES };
+module.exports = { leakPage, controlPage, FILES };

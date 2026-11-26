@@ -54,16 +54,3 @@ export function ChangesStatusLine({ line, count, phase, onRetry, retryDisabled }
   if (line === "failed") return <p className="m5-task-changes-working" role="status" data-line={line}>{t("m5.task.result.readFailed")} <button type="button" className="m5-link-button" disabled={retryDisabled} onClick={onRetry}>{t("m5.merge.inspectAgain")}</button></p>;
   return null;
 }
-
-/**
- * The preview tab's place (ADE 1차-나 L5). The isolated preview itself
- * (P3) comes later; until then the tab says so and points at the changes.
- */
-export function PreviewPlaceholder({ onChanges }: { onChanges: () => void }) {
-  const { t } = useI18n();
-  return <section className="m5-preview-empty" data-testid="preview-placeholder">
-    <strong>{t("m5.preview.notYet")}</strong>
-    <p>{t("m5.preview.notYetHelp")}</p>
-    <button type="button" className="m5-secondary" onClick={onChanges}>{t("m5.preview.toChanges")}</button>
-  </section>;
-}

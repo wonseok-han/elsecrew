@@ -2,6 +2,7 @@ import { createClaudeUsageReader } from "./claude-usage.ts";
 import { CLAUDE_USAGE_CHANNEL, validateClaudeUsageResult } from "../src/m5/contracts/provider-usage-v1.ts";
 import { randomUUID } from "node:crypto";
 import { installAppUpdateMenu } from "./app-update-menu.ts";
+import { installZoomGuardedMenu, zoomLevelAfter, type ZoomStep } from "./zoom-menu.ts";
 import { GitPreparationClient, isGitPreparation, WINDOWS_GIT_PREPARATION_ENABLED } from "./git-preparation.ts";
 import { GitSelectionStore } from "./git-selection.ts";
 import { GIT_SELECTION_CHANNEL, validateGitSelectionAction, validateGitSelection } from "../src/m5/contracts/git-selection-v1.ts";
@@ -12,7 +13,7 @@ import { MODEL_CHOICES_CHANNEL, validateModelChoicesRequest } from "../src/m5/co
 import { DEVICE_REPORT_CHANNEL } from "../src/m5/contracts/device-report-v1.ts";
 import { SESSION_DIAGNOSTICS_CHANNEL, classifySessionDiagnostics } from "../src/m5/contracts/session-diagnostics-v1.ts";
 import { readDeviceReport } from "./device-report.ts";
-import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, safeStorage, session, shell, WebContentsView } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, safeStorage, screen, session, shell, WebContentsView } from "electron";
 import { PREVIEW_CHANNEL_V1, PREVIEW_EVENT_CHANNEL_V1, validatePreviewIpcRequestV1 } from "../src/m5/contracts/preview-v1.ts";
 import { previewFlags } from "./preview-flag.ts";
 import { PreviewManagerV1 } from "./preview-manager.ts";
@@ -95,14 +96,15 @@ async function rendererReadyForUpdate(): Promise<boolean> {
     catch { finish(false); }
   });
 }
-/** Result preview (ADE 1차-나 F12): off unless the app starts with
- * `ELSECREW_PREVIEW=1`, until its independent review closes (plan 2.5). */
-const PREVIEW_FLAGS = previewFlags(app.isPackaged);
+/** Result preview (ADE 1차-나 F12): on by default on macOS, where its
+ * isolation and screen checks run; `ELSECREW_PREVIEW=0|1` decides elsewhere
+ * (electron/preview-flag.ts). */
+const PREVIEW_FLAGS = previewFlags(app.isPackaged, process.platform);
 const PREVIEW_ENABLED = PREVIEW_FLAGS.enabled;
 // T3 (plan 2.4): `<link rel=dns-prefetch>` resolves host names outside the
 // proxy, webRequest and CSP (seen in the isolation probe's net log). Blink's
-// DNS prefetching is off for every page of the app while the preview exists;
-// the app's own page is local and never needs it.
+// DNS prefetching is off for every page of the app while the preview is on
+// (the default); the app's own page is local and never needs it.
 // A `--blink-settings` given at launch (development, diagnosis) is kept: the
 // switch holds one value, so this setting is added to it, not put in its place.
 if (PREVIEW_ENABLED) {
@@ -115,6 +117,10 @@ const previewManager = new PreviewManagerV1({
   fromPartition: (partition) => session.fromPartition(partition),
   createView: (webPreferences) => new WebContentsView({ webPreferences }),
   window: () => mainWindow,
+  // The page's zoom (View menu) and its display's scale turn the page's CSS
+  // pixels into window coordinates (PR #9 review B1).
+  zoomFactor: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents.getZoomFactor() : 1),
+  displayScale: () => (mainWindow && !mainWindow.isDestroyed() ? screen.getDisplayMatching(mainWindow.getBounds()).scaleFactor : 1),
   sidecar: () => sidecar,
   send: (event) => {
     const window = mainWindow;
@@ -850,6 +856,12 @@ async function createMainWindow() {
     }
   });
   window.webContents.on("render-process-gone", () => previewManager.pageReplaced());
+  // A window about to change size hides the preview first; it shows again
+  // only where the page measures after the change (PR #9 re-review B1).
+  window.on("will-resize", () => previewManager.geometryChanged());
+  window.on("resize", () => previewManager.geometryChanged());
+  window.on("enter-full-screen", () => previewManager.geometryChanged());
+  window.on("leave-full-screen", () => previewManager.geometryChanged());
   // A minimized or hidden window hides the preview view drawn over it.
   window.on("minimize", () => previewManager.setWindowHidden(true));
   window.on("hide", () => previewManager.setWindowHidden(true));
@@ -864,6 +876,22 @@ async function createMainWindow() {
   }
 }
 
+/** The View menu's zoom: the preview is hidden before the page's zoom
+ * changes (PR #9 re-review B1). */
+function zoomPage(step: ZoomStep): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  previewManager.geometryChanged();
+  const contents = mainWindow.webContents;
+  contents.setZoomLevel(zoomLevelAfter(contents.getZoomLevel(), step));
+}
+
+/** The same order for a given factor (the preview UI smoke's zoom levels). */
+function setPageZoomFactor(factor: number): void {
+  if (!mainWindow || mainWindow.isDestroyed() || !Number.isFinite(factor) || factor <= 0) return;
+  previewManager.geometryChanged();
+  mainWindow.webContents.setZoomFactor(factor);
+}
+
 // Fresh Elsecrew profile: do not import the retired application data.
 const existingUserData = app.getPath("userData");
 app.setName("Elsecrew");
@@ -872,6 +900,7 @@ app.setPath("userData", existingUserData);
 app.whenReady().then(async () => {
   await protocol.handle(APP_SCHEME, serveAppAsset);
   registerIpcHandlers();
+  installZoomGuardedMenu(zoomPage);
   installAppUpdateMenu(async (install) => {
     if (!await rendererReadyForUpdate()) {
       const ko = app.getLocale().toLowerCase().startsWith("ko");
@@ -916,7 +945,9 @@ export {
   assertCurrentMainFrame,
   m5DataDirectory,
   previewManager,
+  setPageZoomFactor,
   sidecarLaunch,
+  zoomPage,
 };
 import { M5_BRIDGE_V7_CHANNELS } from "./ipc-channels.ts";
 import { M5_BRIDGE_V8_CHANNELS } from "./ipc-channels.ts";
