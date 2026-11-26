@@ -25,6 +25,7 @@
 - **남은 것**
   - B5·F5·F6 배너는 이미 상태 토큰 면이라 구조는 그대로 두었다.
   - G7(원본 반영 미리보기)은 사본 방식 작업에만 남은 화면이라 문구만 검사 대상이다.
+- **PR**: #16(https://github.com/wonseok-han/elsecrew/pull/16, base feature/ade, #14 위). 0e3b8af9 CI macOS·Windows·website·GitGuardian 통과. #14를 먼저 머지해야 diff가 U7·U8만 남는다.
 
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 화면 통일 U5(에이전트 연결·F11 안내)·U6(알림 패널) (`orca/ade-screens-u5-u8`, 기준 feature/ade e7965d97)
 설계 DESIGN 4.1 U5·U6, 목업 08·12. 범위가 커서 U5+U6(이 PR)과 U7+U8(다음 PR)로 나눈다. 현행 설명은 architecture "에이전트 연결·알림 패널".
@@ -43,7 +44,8 @@
   - 렌더 대비 다크·라이트 각 30화면 1208개 실패 0
   - 미리보기 UI 스모크 다크·라이트 각 2회 연속 PASS
   - 캡처 `~/Documents/elsecrew-ade-screens-u5-u8-2026-11-26/u5-u6/`(actual, compare)
-- **다음**: U7(오류·복구·확인·빈 상태 문구와 금지어 검사)·U8(죽은 CSS, electron 색 2곳, 업데이트 배너)을 이 PR 뒤 다음 PR로 한다.
+- **PR**: #14(https://github.com/wonseok-han/elsecrew/pull/14, base feature/ade). dfad3793 CI macOS·Windows·website·GitGuardian 통과.
+- **다음**: U7·U8은 PR #16(이 PR 위)으로 이어 했다.
 
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #12 독립 검토(차단 1·중요 6·경미 4) 전부 반영 (`orca/ade-screens-u2-u4`)
 검토 `~/Documents/elsecrew-ade-screens-u2-u4-2026-11-26/REVIEW-pr12.md`(대상 23365fad). 재현 시험은 `tests/m5-ade-screens-u2-u4.test.mts`(21개), 보안 하네스, 렌더러 스모크, 새 네이티브 시나리오(`ELSECREW_SMOKE_PROJECTS=1`)에 나눠 넣었다.
