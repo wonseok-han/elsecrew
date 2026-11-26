@@ -1122,6 +1122,20 @@ export const ko = {
   "m5.when.yesterday": "어제",
   "m5.when.forSeconds": "{n}초째",
   "m5.when.forMinutes": "{n}분째",
+  "m5.stage.label": "단계 진행",
+  "m5.stage.minutes": "{n}분",
+  "m5.stage.seconds": "{n}초",
+  "m5.stage.next": "다음",
+  "m5.stage.nextHelp": "총괄이 정해요",
+  "m5.stage.planning": "계획을 세우는 중",
+  "m5.stage.between": "결과를 읽고 다음 담당을 정하는 중",
+  "m5.stage.hidden": "앞 단계 {count}개",
+  "m5.stage.status.done": "끝남",
+  "m5.stage.status.now": "진행 중",
+  "m5.stage.status.failed": "멈춤",
+  "m5.stage.status.canceled": "중단됨",
+  "m5.stage.status.recovery": "확인 필요",
+  "m5.story.started": "시작 {time}",
 } as const;
 
 export type MessageKey = keyof typeof ko;
