@@ -13,6 +13,7 @@
 - **M1(코드 변경 없음)**: 5초 안 Git 상태만 바뀌면 보기에서 버튼이 잠시 살아 보일 수 있으나 수락·거절은 전체 검사로 거절되고 카드에 오류가 난다. native owner가 필요한 시험이라 이번에 넣지 않았다.
 - **재측정(엄격 판정 PASS, 작업 41·실행 120, 조건별 12회, p50/p95 ms)**: 파일 열기 쉬는 중 66/142·실행 중 67/90·봉인 시작 66/234·뒤 검사 중 69/149, 승인 목록 1.4/19.8, getChat 16~25/≤120. 종료 0/0, 엔진 시작 1/1(둘째 봉인), 부하 유지 12/12·12/12, 계측 버림 0. 증거 `~/Documents/elsecrew-ade-latency-2026-11-26/review-round/`.
 - **검증**: `npm test` 953/953, `pnpm build`, 하네스 시험 9/9, `cargo test -p elsecrew-sidecar --test stdio_process` 16, lib(latency_log·projection) 4, `git diff --check`.
+- **feature/ade(e641cffc, PR #11) 병합 뒤**: `npm test` 959/959, `pnpm build`, `cargo test -p elsecrew-sidecar --locked` lib 923·stdio_process 16 통과. 엄격 판정 재측정은 병합 전 코드에서 했다. CI(run 45816202040) macOS·Windows·website·GitGuardian 통과. history 539줄 → 머지된 PR #11·#12 엔트리를 아카이브로 옮김(보존 검사 누락 0).
 - **ade-stability와 겹치는 곳**: D1 보강(한도 초과 시 그 요청만 실패)은 이번에 바꾼 `electron/sidecar-client.ts`의 `TextStreamV1`(필드 `received`/`digest`로 바뀜)·`#acceptChunk`·`#registerStream`과 `tests/m5-electron-bridge.test.mts`의 작업 공간 스트림 시험 근처다. D2(관측 줄 128KiB)는 겹치지 않는다.
 
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 응답 지연 조사·수정: 파일 열기·승인 목록·getChat (`orca/ade-latency`, 기준 feature/ade 7378332a)
