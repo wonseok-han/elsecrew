@@ -1,29 +1,124 @@
+/* ===== 색·간격 토큰 (ADE 1차-나 L0, 2026-11-26) =====
+   2단 구조: 1단 원시 팔레트(--p-*)는 테마마다 바뀌는 값, 2단 의미 토큰은 화면
+   코드가 읽는 이름이다. 새로 쓰거나 다시 쓰는 구역은 의미 토큰만 쓴다(원시 값·hex 금지).
+   --m5-* 13개는 예전 이름의 별칭이라 기존 화면은 그대로다. 값은 다크만 있다.
+   라이트 테마(2차)는 아래 :root[data-theme="light"] 자리에 1단 값만 바꿔 넣고,
+   color-scheme도 그 블록에서 바꾼다. */
 :root {
-  --m5-bg: #111315;
-  --m5-surface: #191b1e;
-  --m5-raised: #24272b;
-  --m5-hover: #30343a;
-  --m5-border: #2c3035;
-  --m5-border-strong: #41464e;
-  --m5-text: #eceeed;
-  --m5-muted: #a4a8ae;
-  --m5-radius: 8px;
-  --m5-space: 12px;
+  /* 1단: 원시 팔레트 */
+  --p-gray-1000: #0c0d0f;
+  --p-gray-950: #111315;
+  --p-gray-900: #191b1e;
+  --p-gray-850: #1e2124;
+  --p-gray-820: #222529;
+  --p-gray-800: #24272b;
+  --p-gray-750: #2c3035;
+  --p-gray-700: #30343a;
+  --p-gray-600: #41464e;
+  --p-gray-400: #7f858d;
+  --p-gray-300: #a4a8ae;
+  --p-gray-100: #eceeed;
+  --p-coral-400: #e6a18a;
+  --p-coral-300: #f3b49f;
+  --p-ink: #161b22;
+  --p-blue-400: #5aa7ff;
+  --p-blue-300: #91c5ff;
+  --p-blue-950: #14233a;
+  --p-amber-400: #f4b453;
+  --p-amber-300: #ffd28c;
+  --p-amber-950: #2a2213;
+  --p-violet-400: #c9a7ff;
+  --p-violet-300: #d9c4ff;
+  --p-violet-950: #211a33;
+  --p-green-400: #5fc48a;
+  --p-green-300: #9fdcb7;
+  --p-green-950: #14251b;
+  --p-red-400: #ef7a6f;
+  --p-red-300: #f3a49b;
+  --p-red-950: #2e1a19;
+  --p-slate-500: #6f7d8e;
+
+  /* 2단: 의미 토큰 — 면 */
+  --bg-app: var(--p-gray-950);
+  --bg-pane: var(--p-gray-900);
+  --bg-raised: var(--p-gray-800);
+  --bg-sunken: var(--p-gray-1000);
+  --bg-hover: var(--p-gray-700);
+  --bg-selected: var(--p-gray-800);
+  /* 선 */
+  --line-subtle: var(--p-gray-820);
+  --line-default: var(--p-gray-750);
+  --line-strong: var(--p-gray-600);
+  /* 글자 */
+  --text-primary: var(--p-gray-100);
+  --text-secondary: var(--p-gray-300);
+  --text-tertiary: var(--p-gray-400);
+  /* 강조: "지금 해야 할 한 가지"에만 */
+  --action-bg: var(--p-coral-400);
+  --action-bg-hover: var(--p-coral-300);
+  --action-text: var(--p-ink);
+  /* 상태: task-status.ts taskPhaseTone과 같은 이름(1차-가와 공유) */
+  --status-running: var(--p-blue-400);
+  --status-running-text: var(--p-blue-300);
+  --status-running-bg: var(--p-blue-950);
+  --status-attention: var(--p-amber-400);
+  --status-attention-text: var(--p-amber-300);
+  --status-attention-bg: var(--p-amber-950);
+  --status-review: var(--p-violet-400);
+  --status-review-text: var(--p-violet-300);
+  --status-review-bg: var(--p-violet-950);
+  --status-done: var(--p-green-400);
+  --status-done-text: var(--p-green-300);
+  --status-done-bg: var(--p-green-950);
+  --status-danger: var(--p-red-400);
+  --status-danger-text: var(--p-red-300);
+  --status-danger-bg: var(--p-red-950);
+  --status-neutral: var(--p-slate-500);
+  /* 바뀐 줄 */
+  --diff-add: var(--p-green-400);
+  --diff-remove: var(--p-red-400);
+  /* 역할 색 8가지(role-colors.ts가 역할 ID 해시로 고름) */
+  --role-1: #7fb2f0; --role-2: #e8be62; --role-3: #6fc48d; --role-4: #c9a7ff;
+  --role-5: #ec9c84; --role-6: #5fc7c0; --role-7: #e58fb8; --role-8: #b4c36a;
+
+  /* 간격·모서리·글자 크기 */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px; --space-6: 32px;
+  --radius-s: 6px; --radius-m: 8px; --radius-l: 12px;
+  --text-xs: 11px; --text-s: 12px; --text-m: 13px; --text-l: 15px; --text-xl: 19px;
+  /* 레이아웃 치수(구간별로 task-layout 구역에서 바뀜) */
+  --topbar-h: 44px; --statusbar-h: 24px;
+  --left-w: 240px; --right-w: 400px; --center-max: 760px;
+
+  /* 예전 이름(별칭) — 새 코드에서는 쓰지 않는다 */
+  --m5-bg: var(--bg-app);
+  --m5-surface: var(--bg-pane);
+  --m5-raised: var(--bg-raised);
+  --m5-hover: var(--bg-hover);
+  --m5-border: var(--line-default);
+  --m5-border-strong: var(--line-strong);
+  --m5-text: var(--text-primary);
+  --m5-muted: var(--text-secondary);
+  --m5-radius: var(--radius-m);
+  --m5-space: var(--space-3);
+  --m5-control-bg: var(--bg-raised);
+  --m5-control-hover: var(--bg-hover);
+  --m5-control-text: var(--text-primary);
+  --m5-action-bg: var(--action-bg);
+  --m5-action-hover: var(--action-bg-hover);
+  --m5-action-text: var(--action-text);
+  --m5-pane-space: var(--space-2);
+  --m5-pane-row-height: 32px;
+
   color-scheme: dark;
   font-size: 13px;
   line-height: 1.45;
-  color: var(--m5-text);
-  background: var(--m5-bg);
+  color: var(--text-primary);
+  background: var(--bg-app);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --m5-control-bg: var(--m5-raised);
-  --m5-control-hover: var(--m5-hover);
-  --m5-control-text: var(--m5-text);
-  --m5-action-bg: #e6a18a;
-  --m5-action-hover: #f3b49f;
-  --m5-action-text: #161b22;
-  --m5-pane-space: 8px;
-  --m5-pane-row-height: 32px;
 }
+@media (min-width: 1500px) { :root { --left-w: 264px; --right-w: 520px; --center-max: 820px; } }
+@media (max-width: 1099px) { :root { --left-w: 56px; --right-w: 0px; } }
+/* :root[data-theme="light"] { 1단 --p-* 값만 다시 정의; color-scheme: light; } — 2차 */
 
 body {
   margin: 0;
@@ -1401,16 +1496,8 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-workspace-folder-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
 /* ===== ADE 1차-가: 믿을 수 있는 표시 =====
-   One task status (task-status.ts) drives these colours; 1차-나 folds them
-   into its semantic tokens. Status colour names are shared with it. */
-:root {
-  --status-running: #5aa7ff;
-  --status-attention: #f4b453;
-  --status-review: #c9a7ff;
-  --status-done: #5fc48a;
-  --status-danger: #ef7a6f;
-  --status-neutral: #6f7d8e;
-}
+   One task status (task-status.ts) drives these colours. The --status-*
+   tokens live in the token block at the top of this file (1차-나 L0). */
 
 /* Task list: one label per status. */
 .m5-chat-status.m5-chat-status-running, .m5-chat-chip.selected .m5-chat-status.m5-chat-status-running { color: #91c5ff; }

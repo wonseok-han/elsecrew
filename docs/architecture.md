@@ -514,3 +514,9 @@ macOS에서 사용량 조회가 만료된 access token을 발견하면 기존 Cl
 - **저장 schema V13**: V12 `event_source_index_requires_exact_event`의 답변 작성자 `IN (5역할)` 목록을 형식 검사(`text`, GLOB `[a-z][a-z0-9-]*`, 길이 2~32, `NOT GLOB '*[^a-z0-9-]*'`)로 바꾸고 metadata를 13으로 교체한다. 다른 DDL·기존 행은 그대로이며 단일 transaction, 취소/오류 시 롤백, V12에서만 진입한다. durable admission은 V10→V11→V12→V13 순서로 진행하고 V13 기존/출력 원장·compaction prefix를 재검증한다. 역할 소속 검사는 SQLite가 아니라 Rust 계약·workflow가 담당한다. V3 역할 설정은 V13에서만 저장된다. V13 DB는 이전 앱에서 열 수 없고 다운그레이드는 없다. 이후 schema(예: 채팅 내용 영구 삭제)는 V14로 이어 쌓는다.
 - 화면/bridge 비교: sidecar(serde_json, preserve_order 없음)는 객체 키를 알파벳순으로 내보내므로 역할 정의·설정 비교는 키 순서와 무관한 정규 JSON(`canonicalJson`)으로 한다. 역할 ID는 일반 객체 키로 쓰지 않는다(`constructor` 같은 ID). 이름 빈칸 판정은 Rust `str::trim`과 같은 Unicode White_Space 기준(U+FEFF는 빈칸 아님)이며 이름 칸은 UTF-8 바이트 수를 보여 준다.
 - 검증 범위: Rust/TS 계약·임시 DB 이관/재열기·fake 공급자 workflow 단위 시험까지이며 실제 공급자·설치본·사용자 데이터 이관은 확인하지 않았다.
+
+### 색·간격 토큰 2단 구조 (ADE 1차-나 L0, 2026-11-26)
+
+- `src/m5/styles.css` 맨 위 `:root`가 단일 출처다. 1단 원시 팔레트 `--p-*`(테마마다 바뀌는 값), 2단 의미 토큰(면 `--bg-app/pane/raised/sunken/hover/selected`, 선 `--line-subtle/default/strong`, 글자 `--text-primary/secondary/tertiary`, 강조 `--action-bg/-bg-hover/-text`, 상태 `--status-{running,attention,review,done,danger}` + `-text`·`-bg`, `--status-neutral`, `--diff-add/remove`, 역할 색 `--role-1~8`), 간격 `--space-1~6`(4/8/12/16/24/32), 모서리 `--radius-s/m/l`, 글자 크기 `--text-xs~xl`, 레이아웃 치수 `--topbar-h/--statusbar-h/--left-w/--right-w/--center-max`(창 폭 구간마다 바뀜).
+- 예전 `--m5-*` 이름은 의미 토큰의 별칭으로 남아 기존 화면 값이 그대로다. 상태 색 이름은 1차-가 `taskPhaseTone`과 같다.
+- 규칙: 1차-나가 새로 쓰거나 다시 쓰는 구역은 의미 토큰만 쓴다(hex·원시 `--p-*` 직접 사용 금지, 리뷰 규칙). 값은 다크만 있고, 라이트 테마·테마 선택(2차)은 `:root[data-theme="light"]` 주석 자리에 1단 값만 다시 정의한다.
