@@ -20,6 +20,8 @@ use std::time::{Duration, Instant};
 /// bound at once (PR #17 review I1). A connection waits, without reading more,
 /// until one is free: its provider then blocks writing, and nothing is lost.
 /// A holder always finishes or fails its line, so waiting never deadlocks.
+/// A provider that stops mid-line does not keep a slot either: see
+/// `LargeLineLimits` (PR #17 re-review).
 ///
 /// Memory this bounds: each held line is at most 8 MiB raw plus the read in
 /// progress (64 KiB), its parsed tree (string bytes up to the raw size, at most
@@ -58,6 +60,41 @@ impl Drop for LargeLineSlot {
         LARGE_LINES_HELD.fetch_sub(1, Ordering::AcqRel);
     }
 }
+
+/// Deadlines around the large-line slots (PR #17 re-review). Past any of
+/// them only that connection fails (its line is refused, its slot and buffer
+/// returned); every other run keeps going.
+#[derive(Debug, Clone, Copy)]
+struct LargeLineLimits {
+    /// Longest a connection may hold a slot for one line.
+    hold: Duration,
+    /// Longest a held line may go without growing while the provider has
+    /// nothing more to give (a read would block). A slow poll is not a stall:
+    /// the clock is only judged when the pipe is empty.
+    stall: Duration,
+    /// Longest a connection may wait for a slot. Longer than `hold`, so a
+    /// waiter outlasts at least one full hold of each slot.
+    wait: Duration,
+}
+
+const LARGE_LINE_LIMITS: LargeLineLimits = LargeLineLimits {
+    hold: Duration::from_secs(30),
+    stall: Duration::from_secs(10),
+    wait: Duration::from_secs(90),
+};
+
+/// A slot held for the line being read, with its progress clock.
+struct HeldLine {
+    _slot: LargeLineSlot,
+    since: Instant,
+    progress: Instant,
+    len: usize,
+}
+
+/// Tests that make lines over the observation bound share the process-wide
+/// slots; they take this lock so their timing and counts do not mix.
+#[cfg(test)]
+pub(crate) static LARGE_LINE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
 pub(crate) enum HookProbeRequest<'a> {
@@ -98,7 +135,10 @@ pub(crate) struct LoginIo {
     /// line is scanned once rather than again on every read.
     scanned: usize,
     /// Held while `pending` is over the observation line bound.
-    large_line: Option<LargeLineSlot>,
+    large_line: Option<HeldLine>,
+    /// Since when this connection has waited for a slot.
+    slot_wait: Option<Instant>,
+    limits: LargeLineLimits,
 }
 
 /// Only requests already admitted by the corresponding protocol state machine.
@@ -226,6 +266,12 @@ impl LoginIo {
         self.pending = Vec::new();
         self.scanned = 0;
         self.large_line = None;
+        self.slot_wait = None;
+    }
+
+    #[cfg(test)]
+    fn set_large_line_limits(&mut self, hold: Duration, stall: Duration, wait: Duration) {
+        self.limits = LargeLineLimits { hold, stall, wait };
     }
 
     fn stream_limit(&self) -> usize {
@@ -343,6 +389,8 @@ impl LoginIo {
             session_lines: None,
             scanned: 0,
             large_line: None,
+            slot_wait: None,
+            limits: LARGE_LINE_LIMITS,
         })
     }
 
@@ -592,8 +640,18 @@ impl LoginIo {
                 && self.large_line.is_none()
             {
                 match LargeLineSlot::try_take() {
-                    Some(slot) => self.large_line = Some(slot),
-                    None => return Ok(None),
+                    Some(slot) => {
+                        let now = Instant::now();
+                        self.slot_wait = None;
+                        self.large_line = Some(HeldLine { _slot: slot, since: now, progress: now, len: self.pending.len() });
+                    }
+                    None => {
+                        let since = *self.slot_wait.get_or_insert_with(Instant::now);
+                        if since.elapsed() > self.limits.wait {
+                            return Err(refuse_line(true, "waited too long for a large-line slot"));
+                        }
+                        return Ok(None);
+                    }
                 }
             }
             // A session reads larger pieces so a multi-megabyte line arrives in
@@ -608,8 +666,25 @@ impl LoginIo {
                         return Err(failure());
                     }
                     self.pending.extend_from_slice(&chunk[..count]);
+                    if let Some(held) = self.large_line.as_mut() {
+                        if self.pending.len() > held.len {
+                            held.len = self.pending.len();
+                            held.progress = Instant::now();
+                        }
+                        if held.since.elapsed() > self.limits.hold {
+                            return Err(refuse_line(true, "a large line took too long"));
+                        }
+                    }
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if let Some(held) = &self.large_line {
+                        if held.since.elapsed() > self.limits.hold {
+                            return Err(refuse_line(true, "a large line took too long"));
+                        }
+                        if held.progress.elapsed() > self.limits.stall {
+                            return Err(refuse_line(true, "a large line stopped arriving"));
+                        }
+                    }
                     return Ok(None);
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
@@ -820,6 +895,7 @@ mod tests {
 
     #[test]
     fn a_session_reads_many_large_image_lines_and_keeps_going() {
+        let _slots = LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let cancel = AtomicBool::new(false);
         let mut child = fixture(Some(&large_image_lines_script(10)));
         let mut io = LoginIo::attach(&mut child.0).unwrap();
@@ -843,6 +919,7 @@ mod tests {
     /// and every session still gets every line.
     #[test]
     fn concurrent_large_lines_share_the_process_wide_slots() {
+        let _slots = LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let cancel = AtomicBool::new(false);
         let mut children = Vec::new();
         let mut ios = Vec::new();
@@ -878,6 +955,7 @@ mod tests {
     /// the slot and the buffer's memory.
     #[test]
     fn a_refused_large_line_returns_its_slot() {
+        let _slots = LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let cancel = AtomicBool::new(false);
         let script = "printf '{\"type\":\"user\",\"items\":['; i=0; while [ $i -lt 4000 ]; do \
             printf '1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,'; i=$((i+1)); done; printf '1]}\\n'; read hold";
@@ -887,6 +965,98 @@ mod tests {
         assert!(io.receive(Duration::from_secs(10), &cancel).is_err());
         assert!(io.large_line.is_none());
         assert_eq!(io.pending.capacity(), 0);
+    }
+
+    /// A provider that writes past the observation bound and then stops,
+    /// keeping its pipe open (it never sends the newline).
+    const STUCK_LINE: &str = "printf '{\"type\":\"user\",\"pad\":\"'; head -c 200000 /dev/zero | tr '\\0' A; read hold";
+
+    fn stuck_holders(stall: Duration) -> (Vec<Fixture>, Vec<LoginIo>) {
+        let cancel = AtomicBool::new(false);
+        let mut children = Vec::new();
+        let mut ios = Vec::new();
+        for _ in 0..LARGE_LINE_SLOTS {
+            let mut child = fixture(Some(STUCK_LINE));
+            let mut io = LoginIo::attach(&mut child.0).unwrap();
+            io.admit_session_lines(OversizedLinePolicy::ClaudeStreamJson).unwrap();
+            io.set_large_line_limits(Duration::from_secs(30), stall, Duration::from_secs(60));
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while io.large_line.is_none() {
+                assert!(Instant::now() < deadline, "the stuck provider never reached a slot");
+                assert!(io.poll_observed(&cancel, &mut || Ok(())).unwrap().is_none());
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            children.push(child);
+            ios.push(io);
+        }
+        assert_eq!(LARGE_LINES_HELD.load(Ordering::Acquire), LARGE_LINE_SLOTS);
+        (children, ios)
+    }
+
+    /// PR #17 re-review: two unfinished lines hold both slots and stop. They
+    /// are refused once they stop growing, their slots come back, and a third
+    /// run with large lines proceeds within the deadline.
+    #[test]
+    fn stuck_large_lines_release_their_slots_and_another_run_proceeds() {
+        let _slots = LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let cancel = AtomicBool::new(false);
+        let (_stuck_children, mut stuck) = stuck_holders(Duration::from_millis(300));
+        let mut child = fixture(Some(&large_image_lines_script(3)));
+        let mut third = LoginIo::attach(&mut child.0).unwrap();
+        third.admit_session_lines(OversizedLinePolicy::ClaudeStreamJson).unwrap();
+        third.set_large_line_limits(Duration::from_secs(30), Duration::from_secs(10), Duration::from_secs(5));
+        let started = Instant::now();
+        let mut frames = 0;
+        let mut refused = [false; LARGE_LINE_SLOTS];
+        while frames < 4 {
+            assert!(started.elapsed() < Duration::from_secs(5), "the third run did not proceed ({frames} frames)");
+            for (index, io) in stuck.iter_mut().enumerate() {
+                if !refused[index] && io.poll_observed(&cancel, &mut || Ok(())).is_err() {
+                    refused[index] = true;
+                    assert!(io.large_line.is_none(), "a refused line returns its slot");
+                }
+            }
+            if third.poll_observed(&cancel, &mut || Ok(())).unwrap().is_some() {
+                frames += 1;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(refused, [true; LARGE_LINE_SLOTS], "both stuck lines were refused");
+        assert!(!third.failed && third.large_line.is_none());
+        assert_eq!(LARGE_LINES_HELD.load(Ordering::Acquire), 0);
+    }
+
+    /// PR #17 re-review: a connection that cannot get a slot in time fails on
+    /// its own; the holders and their runs are untouched.
+    #[test]
+    fn a_session_waiting_too_long_for_a_slot_fails_alone() {
+        let _slots = LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let cancel = AtomicBool::new(false);
+        let (_stuck_children, mut stuck) = stuck_holders(Duration::from_secs(30));
+        let mut child = fixture(Some(&large_image_lines_script(1)));
+        let mut waiter = LoginIo::attach(&mut child.0).unwrap();
+        waiter.admit_session_lines(OversizedLinePolicy::ClaudeStreamJson).unwrap();
+        waiter.set_large_line_limits(Duration::from_secs(30), Duration::from_secs(10), Duration::from_millis(300));
+        let started = Instant::now();
+        let failed = loop {
+            assert!(started.elapsed() < Duration::from_secs(5), "the waiter never gave up");
+            match waiter.poll_observed(&cancel, &mut || Ok(())) {
+                Ok(None) => {
+                    assert!(waiter.pending.len() <= PROVIDER_OBSERVATION_LINE_MAX_BYTES + 64 * 1024);
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Ok(Some(_)) => panic!("the waiter got a line without a slot"),
+                Err(_) => break started.elapsed(),
+            }
+        };
+        assert!(failed >= Duration::from_millis(300));
+        assert!(waiter.failed && waiter.pending.capacity() == 0 && waiter.slot_wait.is_none());
+        for io in &mut stuck {
+            assert!(io.poll_observed(&cancel, &mut || Ok(())).unwrap().is_none(), "the holders keep going");
+            assert!(io.large_line.is_some() && !io.failed);
+        }
+        drop(stuck);
+        assert_eq!(LARGE_LINES_HELD.load(Ordering::Acquire), 0);
     }
 
     #[test]
@@ -900,6 +1070,7 @@ mod tests {
 
     #[test]
     fn a_session_still_fails_on_an_oversized_permission_request_or_runaway_line() {
+        let _slots = LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let cancel = AtomicBool::new(false);
         let script = "printf '{\"type\":\"control_request\",\"request_id\":\"r\",\"request\":{\"input\":{\"content\":\"'; \
             head -c 200000 /dev/zero | tr '\\0' x; printf '\"}}}\\n'; read hold";

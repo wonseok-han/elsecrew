@@ -853,6 +853,7 @@ mod tests {
     fn large_image_session(admit: bool) -> (Result<Vec<&'static str>, SidecarError>, bool) {
         use elsecrew_core::provider::vendor_observation::claude_events::Projection;
         use elsecrew_core::provider::vendor_observation::claude_session::Event;
+        let _slots = crate::provider_login_io::LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().canonicalize().unwrap();
         let storage = Storage::open(&root.join("elsecrew.sqlite3")).unwrap();

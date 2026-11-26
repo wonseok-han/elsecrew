@@ -2,6 +2,21 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #17 재확인(B1 해소, 새 중요 1건) 반영: 큰 줄 자리 기한 (`orca/ade-stability`)
+재확인 `~/Documents/elsecrew-ade-stability-2026-11-26/REVIEW-pr17-2.md`: B1 해소. 새 중요: 끝나지 않는 줄 두 개가 큰 줄 자리 2개를 기한 없이 잡으면 다른 실행도 막힐 수 있다.
+
+- **수정** (`provider_login_io.rs` `LargeLineLimits`):
+  - 자리를 잡은 줄은 총 30초(`hold`) 안에 끝나야 한다.
+  - 10초 동안 늘지 않으면(`stall`) 그 줄을 거부한다. 무진행은 파이프가 비었을 때만 판정한다. 그래서 sidecar 폴링이 늦어진 것을 멈춤으로 오인하지 않는다.
+  - 자리를 기다리는 연결은 90초(`wait`, `hold`보다 길게)를 넘으면 그 세션만 실패한다.
+  - 어느 경우든 해당 연결만 실패하고 버퍼와 자리를 돌려준다.
+  - 거부 이유는 고정 진단 이름이다("a large line stopped arriving", "a large line took too long", "waited too long for a large-line slot").
+- **시험**: `stuck_large_lines_release_their_slots_and_another_run_proceeds`, `a_session_waiting_too_long_for_a_slot_fails_alone`.
+  - 첫째: 미완성 줄 두 개가 자리를 잡고 멈추면 무진행 기한에 거부되고 자리가 돌아온다. 세 번째 실행은 5초 안에 큰 줄 3개를 모두 받는다.
+  - 둘째: 대기 상한을 넘은 연결만 실패한다. 자리 보유자는 계속 진행한다.
+  - 시험 기한은 연결별로 줄여 쓴다(`set_large_line_limits`, 시험 전용). 자리를 쓰는 시험들은 `LARGE_LINE_TEST_LOCK`으로 서로 겹치지 않게 했다(Claude 세션 시험 포함).
+- **검증**: sidecar 관련 묶음 15 통과. 전체 Rust·CI는 다음 줄에 덧붙인다.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #17 Codex 검토(차단 1·중요 4·경미 2) 반영 (`orca/ade-stability`)
 검토 `~/Documents/elsecrew-ade-stability-2026-11-26/REVIEW-pr17.md`(대상 d9562788). 원칙(조정자): 승인에 쓰는 값(화면 표시·지문·되돌려 보내는 입력)은 원문만 쓰고, 축약은 관측·표시 전용으로 둔다.
 
@@ -178,7 +193,7 @@
   - 앱 전용 로그인은 프로필 안에 있다(Codex `…/m5/codex-profile-v1/auth.json`, Claude는 설정 폴더 경로 해시로 구분된 Keychain 항목). 그래서 임시 `--user-data-dir`로는 실제 실행이 안 된다.
   - 개발 앱 창이 다른 창에 완전히 가려지면 macOS Electron이 `hide`를 보내 미리보기가 숨고, rAF도 멈춘다. CDP 측정 중 "뷰가 안 보임"은 이것부터 의심한다(창을 앞으로 가져오면 다시 보인다).
   - main 디버거(`--inspect=<port>`)에서는 `require.cache[".../.vite/build/main.cjs"].exports.previewManager`로 미리보기 상태(`currentLayout`·`visibility`·`refusedMeasurements`)를 읽을 수 있다.
-  - 큰 도구 결과(이미지)가 Claude 출력 한 줄 128KiB를 넘으면 실행이 멈췄다(D2). 이제 세션 모드에서 8MiB까지 읽고 줄여 관측한다. **승인에 쓰는 값은 원문만**: Claude 권한 요청 줄은 줄이지 않고(허용 응답이 입력을 되돌려 보냄), Codex는 메서드별로 명시한 폐기 필드만 줄인다(`item/started`의 `command`·`cwd`가 승인 보완·완료 대조에 쓰임). 큰 줄은 프로세스 전체 2자리로 동시 처리 메모리를 묶는다(`provider_login_io.rs` `LARGE_LINE_SLOTS`).
+  - 큰 도구 결과(이미지)가 Claude 출력 한 줄 128KiB를 넘으면 실행이 멈췄다(D2). 이제 세션 모드에서 8MiB까지 읽고 줄여 관측한다. **승인에 쓰는 값은 원문만**: Claude 권한 요청 줄은 줄이지 않고(허용 응답이 입력을 되돌려 보냄), Codex는 메서드별로 명시한 폐기 필드만 줄인다(`item/started`의 `command`·`cwd`가 승인 보완·완료 대조에 쓰임). 큰 줄은 프로세스 전체 2자리로 동시 처리 메모리를 묶는다(`provider_login_io.rs` `LARGE_LINE_SLOTS`). 자리 보유는 총 30초·무진행 10초, 대기는 90초가 상한이며 넘으면 그 연결만 실패한다(`LargeLineLimits`).
   - 동시 스트림 16개를 넘으면 엔진이 재시작됐다(D1). 누수는 PR #15, 한도 초과를 그 요청만의 실패로 바꾼 것은 ade-stability.
 
 - **색은 토큰 블록 두 곳에만(2026-11-26, 화면 통일 U0·U1)**: `styles.css`의 다크 `:root`와 라이트 `:root[data-theme="light"]` 밖에는 hex·`rgb()`를 쓰지 않는다. 화면 코드에도 색 리터럴을 쓰지 않는다(Monaco는 `theme.ts`가 토큰에서 읽음). `tests/m5-style-tokens.test.mts`가 대비(다크·라이트 각 95쌍)·블록 밖 색 0·정의되지 않은 토큰 0을 막는다. 라이트 값은 1단 `--p-*`만 바꾼다. 새 화면은 공용 컴포넌트 클래스(`.m5-btn-*`·`.m5-badge`·`.m5-banner`·`.m5-card`·`.m5-group`·`.m5-empty-state`·`.m5-steps`·`.m5-recover`)를 쓴다.
