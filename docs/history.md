@@ -15,6 +15,7 @@
 - **경미**: `task-inbox-model.ts` 끝 빈 줄 제거.
 - **검증**: `cargo test --workspace` core 267·protocol 75·sidecar 961·통합 16 실패 0, `npm test` 1016/1016, `pnpm build`, `git diff --check`, 네이티브 스모크 PASS(25·재시작 10, `pr-b/native-review`).
   - 실제 동시 실행 재시험(`pr-b/real-review/real-run.json`, ps로 다른 Elsecrew 앱 없음 확인, 시험 프로젝트 삭제, 자기 PID만): Claude 2 + Codex 2 모두 성공, 최고 동시 4, Claude 54초·Codex 304초 겹침, 도중·뒤 Claude 확인 `connected`, 모델 목록 5·10.
+  - 렌더러 스모크 다크·라이트 36화면 대비 실패 0(`pr-b/smoke-review`). CI(04656952) macOS·Windows·website·GitGuardian 통과.
   - 함정: 수신함 결과 계약이 바뀌면 Electron 메인 번들(`.vite/build/main.cjs`)도 다시 빌드해야 한다. 예전 번들은 `workingTasks`를 모르는 필드로 거절했다(`invalid project catalog fields`). `pnpm build`는 렌더러만 빌드하므로 `m5:smoke:multiproject`(`--build`)로 메인·프리로드를 함께 빌드했다.
 
 ### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — ADE multi-project PR-B: 한 에이전트의 여러 실행·차례 기다리기·전체 수신함 (`orca/ade-multiproject-b`)
