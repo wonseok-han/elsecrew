@@ -21,6 +21,7 @@
 - **검증**
   - `cargo test -p elsecrew-sidecar` 단위 939, 통합 16 통과.
   - `npm test` 1008/1008, build, 렌더러 스모크 69/69.
+  - CI(d9fc2071) macOS·Windows·website·GitGuardian 모두 통과.
 
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #18 독립 검토(차단 2·중요 3·경미 1) 반영 (`orca/ade-multiproject-a`)
 검토 `~/Documents/elsecrew-ade-multiproject-2026-11-26/REVIEW-pr18.md`(대상 82284ace). PR-B(`orca/ade-multiproject-b`, 로컬 WIP 커밋)는 이 수정이 머지될 때까지 멈췄다.
