@@ -12,7 +12,11 @@ import { MODEL_CHOICES_CHANNEL, validateModelChoicesRequest } from "../src/m5/co
 import { DEVICE_REPORT_CHANNEL } from "../src/m5/contracts/device-report-v1.ts";
 import { SESSION_DIAGNOSTICS_CHANNEL, classifySessionDiagnostics } from "../src/m5/contracts/session-diagnostics-v1.ts";
 import { readDeviceReport } from "./device-report.ts";
-import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, safeStorage, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, safeStorage, session, shell, WebContentsView } from "electron";
+import { PREVIEW_CHANNEL_V1, PREVIEW_EVENT_CHANNEL_V1, validatePreviewIpcRequestV1 } from "../src/m5/contracts/preview-v1.ts";
+import { previewFlags } from "./preview-flag.ts";
+import { PreviewManagerV1 } from "./preview-manager.ts";
+import { PREVIEW_SCHEME, PREVIEW_SCHEME_PRIVILEGES } from "./preview-policy.ts";
 import { StorageSealStore } from "./storage-seal.ts";
 import { LOGIN_CHANNEL, validateLoginRequest, validateLoginStatus } from "../src/m5/contracts/provider-login-v1.ts";
 import { classifyLoginFailure } from "../src/m5/provider-login-diagnostic.ts";
@@ -91,6 +95,33 @@ async function rendererReadyForUpdate(): Promise<boolean> {
     catch { finish(false); }
   });
 }
+/** Result preview (ADE 1차-나 F12): off unless the app starts with
+ * `ELSECREW_PREVIEW=1`, until its independent review closes (plan 2.5). */
+const PREVIEW_FLAGS = previewFlags(app.isPackaged);
+const PREVIEW_ENABLED = PREVIEW_FLAGS.enabled;
+// T3 (plan 2.4): `<link rel=dns-prefetch>` resolves host names outside the
+// proxy, webRequest and CSP (seen in the isolation probe's net log). Blink's
+// DNS prefetching is off for every page of the app while the preview exists;
+// the app's own page is local and never needs it.
+// A `--blink-settings` given at launch (development, diagnosis) is kept: the
+// switch holds one value, so this setting is added to it, not put in its place.
+if (PREVIEW_ENABLED) {
+  const existing = app.commandLine.getSwitchValue("blink-settings");
+  app.commandLine.appendSwitch("blink-settings", existing ? `${existing},dnsPrefetchingEnabled=false` : "dnsPrefetchingEnabled=false");
+}
+const previewManager = new PreviewManagerV1({
+  enabled: PREVIEW_ENABLED,
+  devTools: PREVIEW_FLAGS.devTools,
+  fromPartition: (partition) => session.fromPartition(partition),
+  createView: (webPreferences) => new WebContentsView({ webPreferences }),
+  window: () => mainWindow,
+  sidecar: () => sidecar,
+  send: (event) => {
+    const window = mainWindow;
+    if (window && !window.isDestroyed()) window.webContents.send(PREVIEW_EVENT_CHANNEL_V1, event);
+  },
+  log: (label) => console.info(`m5: ${label}`),
+});
 /** Stopping agent processes takes up to about 8 seconds each (terminate, then kill). */
 const ENGINE_EXIT_WAIT_MS = 12_000;
 /** Development only, never in a packaged app: an automated test names the
@@ -156,6 +187,8 @@ const quitCoordinator = new QuitCoordinatorV1({
   },
   onQuitStarted: () => {
     quitStarted = true;
+    // The preview closes at once; its pending reads find it closed.
+    previewManager.shutdown();
     // Look closed at once; running work stops in the background.
     for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.hide();
   },
@@ -170,6 +203,9 @@ protocol.registerSchemesAsPrivileged([
       supportFetchAPI: true,
     },
   },
+  // Privileges only: the handler exists on each preview's own session, never
+  // on the app's default session (plan 2.2, T14).
+  ...(PREVIEW_ENABLED ? [{ scheme: PREVIEW_SCHEME, privileges: { ...PREVIEW_SCHEME_PRIVILEGES } }] : []),
 ]);
 
 function rendererDirectory() {
@@ -490,12 +526,16 @@ function writeAdmissionFailure(client: SidecarClientV1): void {
 }
 
 async function prepareQuit(): Promise<PrepareQuitResultV1> {
+  // Every quit preparation (an update install included, which does not pass
+  // through `before-quit`) closes the preview and stops its reads first; a
+  // preparation called off lets it open again (PR #6 review I4).
+  previewManager.suspend();
   await gitPreparation?.close();
   try {
     const result = await quitCoordinator.prepareQuit();
-    if (!result.safeToQuit) gitPreparation?.reopen();
+    if (!result.safeToQuit) { gitPreparation?.reopen(); previewManager.resume(); }
     return result;
-  } catch (error) { gitPreparation?.reopen(); throw error; }
+  } catch (error) { gitPreparation?.reopen(); previewManager.resume(); throw error; }
 }
 
 function registerIpcHandlers(): void {
@@ -511,6 +551,12 @@ function registerIpcHandlers(): void {
     if (!item?.enabled) throw new Error("app update is unavailable");
     await item.click(undefined, undefined, undefined);
   });
+  // Result preview: the page names a chat, never a workspace, token or URL.
+  ipcMain.handle(PREVIEW_CHANNEL_V1, quietAfterQuit(async (event, ...args: unknown[]) => {
+    assertCurrentMainFrame(event);
+    if (args.length !== 1) throw new Error("preview takes one request");
+    return previewManager.request(validatePreviewIpcRequestV1(args[0]));
+  }));
   ipcMain.handle(SESSION_DIAGNOSTICS_CHANNEL, async (event, ...args: unknown[]) => {
     assertCurrentMainFrame(event);
     if (args.length !== 0) throw new Error("session diagnostics takes no input");
@@ -786,6 +832,7 @@ async function createMainWindow() {
   });
   window.on("closed", () => {
     if (mainWindow !== window) return;
+    previewManager.windowClosed();
     mainWindow = undefined;
     if (quitCoordinator.exitAllowed) return;
     if (eventCredit.outstanding !== 0) sidecar?.failRendererDisconnected();
@@ -796,8 +843,18 @@ async function createMainWindow() {
   // deliveries in between and start the credit afresh. The page reads its
   // state anew, so what was not delivered meanwhile is not lost.
   window.webContents.on("did-start-navigation", (details: { isMainFrame?: boolean; isSameDocument?: boolean }) => {
-    if (details?.isMainFrame && !details.isSameDocument) eventCredit.pause();
+    if (details?.isMainFrame && !details.isSameDocument) {
+      eventCredit.pause();
+      // The new page never learns the old preview: close it and any open on its way.
+      previewManager.pageReplaced();
+    }
   });
+  window.webContents.on("render-process-gone", () => previewManager.pageReplaced());
+  // A minimized or hidden window hides the preview view drawn over it.
+  window.on("minimize", () => previewManager.setWindowHidden(true));
+  window.on("hide", () => previewManager.setWindowHidden(true));
+  window.on("restore", () => previewManager.setWindowHidden(false));
+  window.on("show", () => previewManager.setWindowHidden(false));
   window.webContents.on("did-finish-load", () => eventCredit.resume());
   window.webContents.on("did-fail-load", () => eventCredit.resume());
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
@@ -858,6 +915,7 @@ export {
   SIDECAR_READY_TIMEOUT_MS,
   assertCurrentMainFrame,
   m5DataDirectory,
+  previewManager,
   sidecarLaunch,
 };
 import { M5_BRIDGE_V7_CHANNELS } from "./ipc-channels.ts";

@@ -728,6 +728,7 @@ impl SidecarSession {
                     .chain(std::iter::once(&"run.approval"))
                     .chain(std::iter::once(&"project.catalog"))
                     .chain(std::iter::once(&"provider.install"))
+                    .chain(elsecrew_protocol::preview_v1::PREVIEW_METHODS_V1.iter())
                     .map(|value| (*value).to_string())
                     .collect(),
                 sidecar_instance_id,
@@ -1865,6 +1866,39 @@ impl Sidecar {
                         &self.storage,
                         &address,
                         param_string(params, "path").map_err(invalid_params)?,
+                    )
+                    .map(|action| addressed_action(action, &address))
+            }
+            // Result preview (read-only). The address comes from the chat
+            // binding at resolve; each read re-checks it (project/preview.rs).
+            "preview.resolve" => {
+                let params = require_exact_params(&request.params, &["projectId", "chatId", "entry"])
+                    .map_err(invalid_params)?;
+                self.projects.preview_resolve(
+                    &self.storage,
+                    param_string(params, "projectId").map_err(invalid_params)?,
+                    param_string(params, "chatId").map_err(invalid_params)?,
+                    param_nullable_string(params, "entry").map_err(invalid_params)?,
+                )
+            }
+            "preview.readAsset" => {
+                let params = require_exact_params(
+                    &request.params,
+                    &["chatId", "projectId", "worktreeId", "workspaceIdentity", "previewHandle", "path", "offset"],
+                )
+                .map_err(invalid_params)?;
+                let address = workspace_address(params).map_err(invalid_params)?;
+                let offset = param_u64(params, "offset").map_err(invalid_params)?;
+                if offset >= elsecrew_protocol::preview_v1::PREVIEW_ASSET_MAX_BYTES_V1 {
+                    return Err(invalid_params("preview read offset is out of range".into()));
+                }
+                self.projects
+                    .preview_read_asset(
+                        &self.storage,
+                        param_string(params, "previewHandle").map_err(invalid_params)?,
+                        &address,
+                        param_string(params, "path").map_err(invalid_params)?,
+                        offset,
                     )
                     .map(|action| addressed_action(action, &address))
             }

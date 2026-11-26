@@ -10,6 +10,9 @@ pub(crate) const WINDOWS_GIT_EXECUTION_ENABLED: bool = false;
 #[cfg(not(any(unix, windows)))]
 use crate::process_spawn::SpawnGuarded as _;
 mod app_roles;
+mod preview;
+#[cfg(test)]
+pub(crate) use preview::set_preview_test_hook;
 mod latest_apply;
 mod app_connections;
 mod empty_project;
@@ -519,6 +522,8 @@ pub struct ProjectManager {
     application_job: Option<application_review::intent::execution::ApplicationJob>,
     #[cfg(any(unix, windows))]
     application_confirmations: application_review::confirmation::Confirmations,
+    /// Result preview roots verified at `preview.resolve` (identity only, no handle kept).
+    preview_roots: preview::PreviewRoots,
     data_root: PathBuf,
     data_dir: Dir,
     worktrees_root: PathBuf,
@@ -1090,6 +1095,7 @@ impl ProjectManager {
             application_job: None,
             #[cfg(any(unix, windows))]
             application_confirmations: Default::default(),
+            preview_roots: Default::default(),
             data_root,
             data_dir,
             worktrees_root,
@@ -4139,6 +4145,21 @@ impl ProjectManager {
         lifecycle: &str,
         admission: WorkspaceLockAdmission,
     ) -> Result<ActiveProject, ProjectFailure> {
+        self.validate_workspace_binding_with_lock_handle(storage, address, lifecycle, admission)
+            .map(|(active, _)| active)
+    }
+
+    /// The binding check, keeping the workspace directory handle it verified
+    /// (Git link or snapshot marker). A caller that reads files afterwards
+    /// reads through this handle, never a second open of the same path
+    /// (PR #6 review B1).
+    fn validate_workspace_binding_with_lock_handle(
+        &self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+        lifecycle: &str,
+        admission: WorkspaceLockAdmission,
+    ) -> Result<(ActiveProject, Dir), ProjectFailure> {
         let earlier_record_allowed = matches!(admission, WorkspaceLockAdmission::Discard | WorkspaceLockAdmission::Cleanup);
         let chat = storage
             .projection_record("chat", &address.chat_id)?
@@ -4266,7 +4287,7 @@ impl ProjectManager {
                     return Err(error);
                 }
             }
-            return Ok(active);
+            return Ok((active, worktree));
         }
         let marker = read_bounded_json(&open_real_child_dir(&worktree, ".git")?, SNAPSHOT_MARKER)?;
         if marker != snapshot_identity(&active)? {
@@ -4274,7 +4295,7 @@ impl ProjectManager {
                 "workspace Git marker differs from the durable chat binding",
             ));
         }
-        Ok(active)
+        Ok((active, worktree))
     }
 
     pub(crate) fn verify_discard_workspace(

@@ -7,6 +7,7 @@ use std::fmt::{self, Display};
 pub mod agent_adapter_v1;
 pub mod lifecycle_g5d_v1;
 pub mod lifecycle_v1;
+pub mod preview_v1;
 pub mod project_v1;
 pub mod run_recovery_v1;
 pub mod storage_lifetime_v1;
@@ -76,6 +77,8 @@ pub const METHODS_V1: &[&str] = &[
     "recovery.markResolved",
     "recovery.resolveAgent",
     "storage.status",
+    "preview.resolve",
+    "preview.readAsset",
 ];
 
 pub const EVENTS_V1: &[&str] = &[

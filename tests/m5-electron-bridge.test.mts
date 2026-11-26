@@ -2218,3 +2218,80 @@ test("a run that failed with a failure diagnostic is delivered and never ends th
     assert.match(invalid.client.failure?.message ?? "", /failure|field: detail/, `${name} is refused for its failure diagnostic`);
   }
 });
+
+test("result preview: an optional pair after installation, validated answers, never without the baseline", async () => {
+  const suffix = ["chat.appendMessage", "provider.login", "run.approval", "project.catalog", "provider.install", "preview.resolve", "preview.readAsset"];
+  const { child, client } = createClient();
+  const started = client.start();
+  const ready = JSON.parse(g5dReadyLine());
+  ready.payload.capabilities.push(...suffix);
+  child.stdout.write(`${JSON.stringify(ready)}\n`);
+  assert.deepEqual((await started).capabilities.slice(-3), ["provider.install", "preview.resolve", "preview.readAsset"]);
+  const status = client.getSystemStatus();
+  const result = g5dStatus("ready") as any;
+  result.sidecar.capabilities.push(...suffix);
+  child.stdout.write(responseLine(JSON.parse(child.writes.at(-1)!).requestId, result));
+  assert.deepEqual((await status).sidecar.capabilities, result.sidecar.capabilities);
+
+  const resolving = client.previewResolve({ projectId: "project_1", chatId: "chat_1", entry: null });
+  const sent = JSON.parse(child.writes.at(-1)!);
+  assert.equal(sent.method, "preview.resolve");
+  assert.deepEqual(sent.params, { projectId: "project_1", chatId: "chat_1", entry: null });
+  const resolved = { chatId: "chat_1", projectId: "project_1", worktreeId: "worktree_1", workspaceIdentity: "workspace_1", previewHandle: "ph_cccccccccccccccccccccccccccccccc", entry: "index.html", refusal: null };
+  child.stdout.write(responseLine(sent.requestId, resolved));
+  assert.deepEqual(await resolving, resolved);
+  const read = { chatId: "chat_1", projectId: "project_1", worktreeId: "worktree_1", workspaceIdentity: "workspace_1", previewHandle: "ph_cccccccccccccccccccccccccccccccc", path: "index.html", offset: 0 };
+  const reading = client.previewReadAsset(read);
+  const readSent = JSON.parse(child.writes.at(-1)!);
+  assert.equal(readSent.method, "preview.readAsset");
+  const { previewHandle: _handle, ...echo } = read;
+  const body = { ...echo, outcome: "ok", byteLength: 2, version: `sha256:${"a".repeat(64)}`, bytesBase64: Buffer.from("hi").toString("base64") };
+  child.stdout.write(responseLine(readSent.requestId, body));
+  assert.deepEqual(await reading, { ...body, previewHandle: read.previewHandle });
+  assert.deepEqual(readSent.params, read);
+  // An answer for another workspace ends the connection (strict validation).
+  const wrong = client.previewReadAsset(read);
+  const wrongSent = JSON.parse(child.writes.at(-1)!);
+  child.stdout.write(responseLine(wrongSent.requestId, { ...body, workspaceIdentity: "workspace_2" }));
+  await assert.rejects(wrong);
+  assert.equal(client.failureCode, "protocolInvalid");
+
+  // The pair without the installation baseline is not negotiated.
+  const bare = createClient();
+  const bareStarted = bare.client.start();
+  const rejected = assert.rejects(bareStarted);
+  const bareReady = JSON.parse(g5dReadyLine());
+  bareReady.payload.capabilities.push("chat.appendMessage", "preview.resolve", "preview.readAsset");
+  bare.child.stdout.write(`${JSON.stringify(bareReady)}\n`);
+  await rejected;
+
+  // An older engine without the pair: the preview is unavailable, nothing is sent.
+  const old = createClient();
+  const oldStarted = old.client.start();
+  const oldReady = JSON.parse(g5dReadyLine());
+  oldReady.payload.capabilities.push(...suffix.slice(0, -2));
+  old.child.stdout.write(`${JSON.stringify(oldReady)}\n`);
+  await oldStarted;
+  const writes = old.child.writes.length;
+  await assert.rejects(old.client.previewResolve({ projectId: "project_1", chatId: "chat_1", entry: null }), /preview unavailable/);
+  assert.equal(old.child.writes.length, writes);
+});
+
+test("the preview flag reads exactly two names and keeps developer tools out of packaged apps", async () => {
+  const { previewFlagsFromEnvironment } = await import("../electron/preview-flag.ts");
+  assert.deepEqual(previewFlagsFromEnvironment({}, false), { enabled: false, devTools: false });
+  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "true" }, false), { enabled: false, devTools: false });
+  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "1" }, false), { enabled: true, devTools: false });
+  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "1", ELSECREW_PREVIEW_DEVTOOLS: "1" }, false), { enabled: true, devTools: true });
+  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "1", ELSECREW_PREVIEW_DEVTOOLS: "1" }, true), { enabled: true, devTools: false });
+  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW_DEVTOOLS: "1" }, false), { enabled: false, devTools: false });
+  const flagSource = source("electron/preview-flag.ts");
+  assert.deepEqual([...flagSource.matchAll(/ELSECREW_[A-Z_]+/g)].map(match => match[0]).filter((name, index, all) => all.indexOf(name) === index), ["ELSECREW_PREVIEW", "ELSECREW_PREVIEW_DEVTOOLS"]);
+  // The preview view never gets a preload; the app window's isolation is unchanged.
+  const { previewWebPreferences } = await import("../electron/preview-manager.ts");
+  for (const devTools of [false, true]) assert.equal("preload" in previewWebPreferences({} as never, devTools), false);
+  const main = source("electron/main.ts");
+  assert.match(main, /contextIsolation: true,\n\s+sandbox: true,/);
+  assert.match(main, /window\.webContents\.on\("will-attach-webview", \(event\) => event\.preventDefault\(\)\)/);
+  assert.equal(readFileSync("src/m5/index.html", "utf8").includes("elsecrew-preview"), false, "the app CSP is not widened");
+});

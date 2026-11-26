@@ -13,6 +13,8 @@ use tempfile::TempDir;
 mod claude_native;
 mod durable_output;
 mod erasure;
+#[cfg(unix)]
+mod preview;
 
 #[test]
 fn legacy_cancel_returns_exact_durable_run_outside_chat_page() {

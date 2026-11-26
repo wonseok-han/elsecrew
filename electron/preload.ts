@@ -1,3 +1,4 @@
+import { PREVIEW_CHANNEL_V1 as M5_PREVIEW_CHANNEL, PREVIEW_EVENT_CHANNEL_V1 as M5_PREVIEW_EVENT_CHANNEL, validatePreviewEventV1, validatePreviewIpcRequestV1, validatePreviewIpcResultV1, type M5PreviewBridgeV1, type PreviewEventV1 } from "../src/m5/contracts/preview-v1.ts";
 import { CLAUDE_USAGE_CHANNEL as M5_CLAUDE_USAGE_CHANNEL, validateClaudeUsageResult } from "../src/m5/contracts/provider-usage-v1.ts";
 import { GIT_SELECTION_CHANNEL as M5_GIT_SELECTION_CHANNEL, validateGitSelectionAction, validateGitSelection, type GitSelectionAction } from "../src/m5/contracts/git-selection-v1.ts";
 import { SAVE_RECOVERY_RESOLVE_CHANNEL as M5_SAVE_RECOVERY_RESOLVE_CHANNEL, validateSaveRecoveryResolveRequest, validateSaveRecoveryResolveResult } from "../src/m5/contracts/save-recovery-v1.ts";
@@ -233,3 +234,28 @@ contextBridge.exposeInMainWorld("m5AppUpdate", appUpdateApi);
 contextBridge.exposeInMainWorld("m5ClaudeUsage", Object.freeze({
   read: async () => validateClaudeUsageResult(await ipcRenderer.invoke(M5_CLAUDE_USAGE_CHANNEL)),
 }));
+
+// Result preview (ADE 1차-나 F12). Main refuses all but `status` unless the
+// app started with `ELSECREW_PREVIEW=1`. The page shown in a preview never
+// gets this bridge: its view has no preload at all.
+const previewListeners = new Set<(event: PreviewEventV1) => void>();
+ipcRenderer.on(M5_PREVIEW_EVENT_CHANNEL, (_event, payload: unknown) => {
+  let event: PreviewEventV1;
+  try { event = validatePreviewEventV1(payload); } catch { return; }
+  for (const listener of previewListeners) listener(event);
+});
+async function previewCall<T>(input: unknown): Promise<T> {
+  const request = validatePreviewIpcRequestV1(input);
+  return validatePreviewIpcResultV1(await ipcRenderer.invoke(M5_PREVIEW_CHANNEL, request), request) as T;
+}
+type PreviewBridgeResult<K extends keyof M5PreviewBridgeV1> = Awaited<ReturnType<M5PreviewBridgeV1[K]>>;
+const previewBridge: M5PreviewBridgeV1 = Object.freeze({
+  status: () => previewCall<PreviewBridgeResult<"status">>({ action: "status" }),
+  open: (input: Parameters<M5PreviewBridgeV1["open"]>[0]) => previewCall<PreviewBridgeResult<"open">>({ ...input, action: "open" }),
+  layout: (input: Parameters<M5PreviewBridgeV1["layout"]>[0]) => previewCall<PreviewBridgeResult<"layout">>({ ...input, action: "layout" }),
+  reload: (input: { previewId: string }) => previewCall<PreviewBridgeResult<"reload">>({ ...input, action: "reload" }),
+  hide: (input: { previewId: string }) => previewCall<PreviewBridgeResult<"hide">>({ ...input, action: "hide" }),
+  close: (input: { previewId: string }) => previewCall<PreviewBridgeResult<"close">>({ ...input, action: "close" }),
+  onEvent: (listener: (event: PreviewEventV1) => void) => subscribe(previewListeners, listener),
+});
+contextBridge.exposeInMainWorld("m5Preview", previewBridge);
