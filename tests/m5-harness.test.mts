@@ -11,7 +11,7 @@ const canonicalScripts = [
   "m5:test:electron", "m5:test:core", "m5:test:contracts", "m5:test:storage",
   "m5:test:project", "m5:test:editor", "m5:test:run-recovery", "m5:test:bounded-storage",
   "m5:test:storage-scheduler", "m5:test:storage-status", "m5:test:storage-compaction",
-  "m5:test:security", "m5:test:preview-isolation", "m5:test:preview-ui", "m5:test:package", "m5:test:performance",
+  "m5:test:security", "m5:test:preview-isolation", "m5:test:preview-ui", "m5:test:latency", "m5:test:package", "m5:test:performance",
 ];
 const cumulativeAliases = [
   "m5:test:contracts:node", "m5:test:storage:node", "m5:test:project:node",

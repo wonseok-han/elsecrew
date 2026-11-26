@@ -82,8 +82,8 @@ const gates = [
   {
     id: "g6-release",
     description: "보안, 패키징, 성능과 M5.0 완료 게이트",
-    scripts: ["m5:test:security", "m5:test:preview-isolation", "m5:test:preview-ui", "m5:test:package", "m5:test:performance"],
-    cumulativeScripts: ["m5:test:security", "m5:test:preview-isolation", "m5:test:preview-ui", "m5:test:package", "m5:test:performance"],
+    scripts: ["m5:test:security", "m5:test:preview-isolation", "m5:test:preview-ui", "m5:test:latency", "m5:test:package", "m5:test:performance"],
+    cumulativeScripts: ["m5:test:security", "m5:test:preview-isolation", "m5:test:preview-ui", "m5:test:latency", "m5:test:package", "m5:test:performance"],
   },
 ];
 
