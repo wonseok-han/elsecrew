@@ -13,6 +13,7 @@
 | I2 종료 이벤트 읽기 실패 시 예산 | 출력 처리 직후에도 종료가 확인되면 대기열을 비운다(`release_unanswerable`). 소유자가 버려질 때(drop)는 대기열과 함께 예산이 반환된다. | `requests_of_an_ended_run_give_back_their_budget`(종료 → 반환, 대기열 drop → 반환) |
 
 - **검증**: core 267, sidecar 관련 묶음, `npm test` 1011/1011, `pnpm build`. 전체 Rust·CI는 아래에 덧붙인다.
+- **전체 검증(e96fee95)**: `cargo test --workspace` core 267·protocol 75·sidecar lib 949·stdio_process 16 실패 0. CI(run 45862588223) macOS·Windows·website·GitGuardian 모두 통과. 남은 것: 노예 확인과 머지.
 
 ### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #19 검토(차단 1·중요 2·경미 1) 반영과 Codex '명령 실행 허용' 일치 (`orca/ade-d3-bigwrite`)
 검토 `~/Documents/elsecrew-ade-stability-2026-11-26/REVIEW-pr19.md`(대상 f65683fd). 조정자 지시: 큰 입력은 전체를 본 뒤에만 허용, 모든 경로에서 예산 회수 증명, 명령 허용을 끄면 Codex도 매번 묻게.
