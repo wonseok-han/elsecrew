@@ -531,10 +531,11 @@ fn serve_stdio_sealed<R: Read + Send + 'static, W: Write>(
             ));
         };
         let started = Instant::now();
-        let logged = latency.enabled().then(|| request.clone());
+        // Only the protocol's name for the method, never anything the request carried.
+        let method = latency.enabled().then(|| latency_log::known_method(&request.method));
         let handled = timings.measure("request", || sidecar.handle_request(request))?;
-        if let Some(request) = logged {
-            latency.request(&request, received, started, Instant::now());
+        if let Some(method) = method {
+            latency.request(method, received, started, Instant::now());
         }
         if sidecar.safe_to_quit() { timings.emit(); }
         write_responses(&mut session, &mut output, handled.response)?;
