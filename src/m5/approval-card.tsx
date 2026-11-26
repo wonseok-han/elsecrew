@@ -1,26 +1,84 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentRunCancelRequestV1 } from "./contracts/agent-adapter-v1.ts";
-import { validateApprovalResult, visibleApprovalText, type ApprovalInspection, type ApprovalSummary } from "./contracts/approval-v1.ts";
+import { validateApprovalResult, type ApprovalInspection, type ApprovalSummary } from "./contracts/approval-v1.ts";
+import { approvalFields, approvalHeadline, canAcceptApproval, withdrawnRequests } from "./approval-display.ts";
 
 import { useI18n } from "../i18n.tsx";
 
-/** Ephemeral requests only. No approval state is restored from local storage. */
-export function ApprovalCard({ identity, onCancel }: { identity: AgentRunCancelRequestV1; onCancel(): void }) {
+/** A request the agent took back before anyone answered it. */
+export interface WithdrawnApproval {
+  /** The task (conversation) the request belonged to: shown only there. */
+  chatId: string;
+  approvalId: string; kind: ApprovalSummary["kind"]; summary: string | null;
+  /** The person answered, but the run ended before the answer was taken. */
+  answerFailed?: boolean;
+}
+
+const FIELD_KEYS = {
+  command: "m5.approval.command", cwd: "m5.approval.cwd", reason: "m5.approval.reason", toolInput: "m5.approval.toolInput",
+  grantRoot: "m5.approval.grantRoot", host: "m5.approval.host", protocol: "m5.approval.protocol",
+} as const;
+const READ_TRIES = 3;
+
+/**
+ * Ephemeral requests only. No approval state is restored from local storage.
+ *
+ * Each waiting request is read on its own (one at a time): its first line
+ * summarises what is asked and why. Allowing needs the person to open that
+ * request's full content, shown exactly as the engine reported it.
+ */
+export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn }: { identity: AgentRunCancelRequestV1; onCancel(): void;
+  /** How many requests wait for the person (the task shows "needs you"). */
+  onPendingChange?: (count: number) => void;
+  /** Requests the agent took back before anyone answered them, as seen here
+   * or still waiting when this run's card goes away. The conversation keeps
+   * the short notice, so it outlives this card (review #8). */
+  onWithdrawn?: (items: WithdrawnApproval[]) => void }) {
   const { t } = useI18n();
+  /** The last list the engine answered; an error never empties it. */
   const [pending, setPending] = useState<ApprovalSummary[]>([]);
   const [error, setError] = useState(false);
   const [sending, setSending] = useState(false);
   const [queued, setQueued] = useState(false);
-  const [inspection, setInspection] = useState<ApprovalInspection | null>(null);
+  /** Full content per request, read from the engine for that exact request. */
+  const [inspections, setInspections] = useState<ReadonlyMap<string, ApprovalInspection>>(() => new Map());
+  /** Requests whose full content the person opened on this card. */
+  const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
+  /** Requests whose content could not be read after a few tries. */
+  const [unreadable, setUnreadable] = useState<ReadonlySet<string>>(() => new Set());
+  /** Requests the engine confirmed as answered (allowed or declined). */
+  const decided = useRef(new Set<string>());
+  /** Requests being answered right now (not yet confirmed). */
+  const deciding = useRef(new Set<string>());
+  const tries = useRef(new Map<string, number>());
+  const pendingRef = useRef<ApprovalSummary[]>([]);
+  const inspectionsRef = useRef(inspections);
+  inspectionsRef.current = inspections;
+  const withdrawnCallback = useRef(onWithdrawn);
+  withdrawnCallback.current = onWithdrawn;
   const live = useRef(false);
   const busy = useRef(false);
   const epoch = useRef(0);
   const key = JSON.stringify(identity);
+
+  /** A new list from the engine: say what was taken back, forget what is gone. */
+  const takeList = (next: ApprovalSummary[]) => {
+    const gone = withdrawnRequests(pendingRef.current, next, new Set([...decided.current, ...deciding.current]));
+    pendingRef.current = next;
+    setPending(next);
+    const still = new Set(next.map(item => item.approvalId));
+    setInspections(current => [...current.keys()].every(id => still.has(id)) ? current : new Map([...current].filter(([id]) => still.has(id))));
+    setOpened(current => [...current].every(id => still.has(id)) ? current : new Set([...current].filter(id => still.has(id))));
+    if (!gone.length) return;
+    withdrawnCallback.current?.(gone.map(item => ({ chatId: identity.chatId, approvalId: item.approvalId, kind: item.kind, summary: inspectionsRef.current.has(item.approvalId) ? approvalHeadline(inspectionsRef.current.get(item.approvalId)!).target : null })));
+  };
+
   useEffect(() => {
     live.current = true;
     epoch.current++;
     busy.current = false;
-    setPending([]); setError(false); setSending(false); setQueued(false); setInspection(null);
+    setPending([]); setError(false); setSending(false); setQueued(false); setInspections(new Map()); setOpened(new Set()); setUnreadable(new Set());
+    decided.current = new Set(); deciding.current = new Set(); tries.current = new Map(); pendingRef.current = [];
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
     const bridge = window.m5Approval;
@@ -31,81 +89,123 @@ export function ApprovalCard({ identity, onCancel }: { identity: AgentRunCancelR
         const revision = epoch.current;
         try {
           const result = validateApprovalResult(await bridge.request(request), request);
-          if (!disposed && revision === epoch.current) { setPending(result.pending); setError(false); setInspection(current => current && result.pending.some(item=>item.approvalId===current.approvalId && item.kind===current.kind) ? current : null); }
+          if (!disposed && revision === epoch.current) { takeList(result.pending); setError(false); }
         } catch {
-          if (!disposed && revision === epoch.current) { setPending([]); setError(true); setInspection(null); }
+          // Keep the last list for comparison; nothing can be answered meanwhile.
+          if (!disposed && revision === epoch.current) setError(true);
         }
       }
       if (!disposed) timer = setTimeout(() => void poll(), 750);
     }
     if (bridge) void poll();
-    return () => { disposed = true; live.current = false; epoch.current++; clearTimeout(timer); };
+    return () => {
+      disposed = true; live.current = false; epoch.current++; clearTimeout(timer);
+      // The run ended with requests still waiting: the agent no longer asks them.
+      const left = pendingRef.current.filter(item => !decided.current.has(item.approvalId) && !deciding.current.has(item.approvalId));
+      if (left.length) withdrawnCallback.current?.(left.map(item => ({ chatId: identity.chatId, approvalId: item.approvalId, kind: item.kind, summary: inspectionsRef.current.has(item.approvalId) ? approvalHeadline(inspectionsRef.current.get(item.approvalId)!).target : null })));
+    };
     // The complete immutable identity is the lifecycle key, not object allocation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
   async function decide(approvalId: string, action: "decline" | "acceptOnce") {
     if (busy.current || !window.m5Approval) return;
-    if (action === "acceptOnce" && inspection?.approvalId !== approvalId) return;
+    if (action === "acceptOnce" && !canAcceptApproval({ approvalId, inspectedId: inspections.get(approvalId)?.approvalId ?? null, openedIds: opened, sending, error })) return;
     busy.current = true;
+    deciding.current.add(approvalId);
+    const asked = pendingRef.current.find(item => item.approvalId === approvalId);
+    const shown = inspections.get(approvalId);
     const revision = ++epoch.current;
     setSending(true);
-    setInspection(null);
     const request = { action, identity, approvalId };
     try {
       const result = validateApprovalResult(await window.m5Approval.request(request), request);
-      if (live.current && revision === epoch.current) { setPending(result.pending); setQueued(true); setError(false); }
+      // Only an answer the engine confirmed counts as answered.
+      decided.current.add(approvalId);
+      if (live.current && revision === epoch.current) { takeList(result.pending); setQueued(true); setError(false); }
     } catch {
-      if (live.current && revision === epoch.current) { setPending([]); setError(true); }
+      if (live.current && revision === epoch.current) setError(true);
+      // The run ended while this answer was on its way, and it was not
+      // taken: the conversation says so, apart from a request taken back.
+      else if (!live.current && asked) withdrawnCallback.current?.([{ chatId: identity.chatId, approvalId, kind: asked.kind, summary: shown ? approvalHeadline(shown).target : null, answerFailed: true }]);
     } finally {
+      deciding.current.delete(approvalId);
       if (live.current && revision === epoch.current) { busy.current = false; setSending(false); }
     }
   }
 
   async function inspect(approvalId: string) {
     if (busy.current || !window.m5Approval) return;
-    if (inspection?.approvalId === approvalId) { setInspection(null); return; }
     busy.current = true;
     const revision = ++epoch.current;
-    setSending(true); setInspection(null);
-    const request = {action:"inspect" as const, identity, approvalId};
+    setSending(true);
+    const request = { action: "inspect" as const, identity, approvalId };
     try {
       const result = validateApprovalResult(await window.m5Approval.request(request), request);
-      if (live.current && revision === epoch.current) { setPending(result.pending); setInspection(result.inspection ?? null); setError(false); }
+      if (live.current && revision === epoch.current) {
+        takeList(result.pending);
+        const inspection = result.inspection ?? null;
+        if (inspection) setInspections(current => new Map(current).set(approvalId, inspection));
+        setError(false);
+      }
     } catch {
-      if (live.current && revision === epoch.current) { setPending([]); setInspection(null); setError(true); }
+      if (live.current && revision === epoch.current) setError(true);
     } finally {
       if (live.current && revision === epoch.current) { busy.current = false; setSending(false); }
     }
   }
 
+  // Read each waiting request in turn, a few tries each, then say it could not.
+  useEffect(() => {
+    if (sending || error) return;
+    for (const request of pending) {
+      if (inspections.has(request.approvalId) || unreadable.has(request.approvalId)) continue;
+      const count = tries.current.get(request.approvalId) ?? 0;
+      if (count >= READ_TRIES) { setUnreadable(current => new Set(current).add(request.approvalId)); return; }
+      tries.current.set(request.approvalId, count + 1);
+      void inspect(request.approvalId);
+      return;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending, error, sending, inspections, unreadable]);
+  useEffect(() => { onPendingChange?.(pending.length); }, [pending.length, onPendingChange]);
+  useEffect(() => () => onPendingChange?.(0), [onPendingChange]);
+
   if (!pending.length && !error) return null;
   return <section className="m5-approval-card" aria-label={t("m5.approval.title")}>
     <strong>{t("m5.approval.title")}</strong>
-    {pending.length > 0 && <p>{t("m5.approval.help")}</p>}
-    {pending.map((request, index) => <div key={request.approvalId}><span>{t("m5.approval.pending", { index: index + 1, kind: t(`m5.approval.kind.${request.kind}`) })} </span><button type="button" disabled={sending || error} aria-expanded={inspection?.approvalId === request.approvalId} onClick={() => void inspect(request.approvalId)}>{t(inspection?.approvalId === request.approvalId ? "m5.approval.close" : "m5.approval.view")}</button><button type="button" disabled={sending || error} onClick={() => void decide(request.approvalId, "decline")} aria-label={t("m5.approval.declineLabel", { kind: t(`m5.approval.kind.${request.kind}`) })}>{t("m5.approval.decline")}</button>
-      {inspection?.approvalId === request.approvalId && <div aria-label={t("m5.approval.details")}><p className="m5-approval-summary">{visibleApprovalText(approvalTarget(inspection))}</p><details><summary>{t("m5.feedback.details")}</summary><p>{t("m5.approval.warning")}</p><dl>{([[t("m5.approval.command"),inspection.command],[t("m5.approval.cwd"),inspection.cwd],[t("m5.approval.reason"),inspection.reason],[t("m5.approval.toolInput"),inspection.toolInput ?? null],[t("m5.approval.grantRoot"),inspection.grantRoot],[t("m5.approval.host"),inspection.host],[t("m5.approval.protocol"),inspection.protocol]] as const).map(([label,value])=>value !== null && <div key={label}><dt>{label}</dt><dd><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{visibleApprovalText(value)}</pre></dd></div>)}</dl></details></div>}
-      {inspection?.approvalId === request.approvalId && <div>
-        <p>{t("m5.approval.acceptWarning")}</p>
-        <button type="button" disabled={sending || error} onClick={() => void decide(request.approvalId, "acceptOnce")}>{t("m5.approval.acceptOnce")}</button>
-      </div>}
-    </div>)}
+    {pending.map(request => {
+      const shown = inspections.get(request.approvalId) ?? null;
+      const headline = shown ? approvalHeadline(shown) : null;
+      const accept = canAcceptApproval({ approvalId: request.approvalId, inspectedId: shown?.approvalId ?? null, openedIds: opened, sending, error });
+      return <div key={request.approvalId} className="m5-approval-request" data-approval-id={request.approvalId}>
+        <p className="m5-approval-line"><span className="m5-approval-kind">{t(`m5.approval.kind.${request.kind}`)}</span>
+          {headline ? <code className="m5-approval-target" dir="auto">{headline.target}</code>
+            : <span className="m5-approval-reading">{t(unreadable.has(request.approvalId) ? "m5.approval.unreadable" : "m5.approval.reading")}</span>}</p>
+        {headline?.reason && <p className="m5-approval-why" dir="auto">{t("m5.approval.why", { reason: headline.reason })}</p>}
+        {shown && <details key={`full:${request.approvalId}`} className="m5-approval-details" aria-label={t("m5.approval.details")}
+          onToggle={event => { if (event.currentTarget.open) setOpened(current => current.has(request.approvalId) ? current : new Set(current).add(request.approvalId)); }}>
+          <summary>{t("m5.approval.fullContent")}</summary>
+          <p>{t("m5.approval.warning")}</p>
+          <dl>{approvalFields(shown).map(item => <div key={item.field}><dt>{t(FIELD_KEYS[item.field])}</dt><dd><pre className="m5-approval-verbatim">{item.text}</pre></dd></div>)}</dl>
+        </details>}
+        {shown && <p className="m5-approval-accept-note">{t(opened.has(request.approvalId) ? "m5.approval.acceptWarning" : "m5.approval.openFirst")}</p>}
+        <div className="m5-approval-actions">
+          {shown && <button type="button" disabled={!accept} onClick={() => void decide(request.approvalId, "acceptOnce")}>{t("m5.approval.acceptOnce")}</button>}
+          <button type="button" className="m5-secondary" disabled={sending || error} onClick={() => void decide(request.approvalId, "decline")} aria-label={t("m5.approval.declineLabel", { kind: t(`m5.approval.kind.${request.kind}`) })}>{t("m5.approval.decline")}</button>
+          {!shown && <button type="button" className="m5-secondary" disabled={sending || error} onClick={() => { tries.current.delete(request.approvalId); setUnreadable(current => { const next = new Set(current); next.delete(request.approvalId); return next; }); void inspect(request.approvalId); }}>{t("m5.approval.view")}</button>}
+        </div>
+      </div>;
+    })}
+    {pending.length > 0 && <details className="m5-approval-help"><summary>{t("m5.approval.helpTitle")}</summary><p>{t("m5.approval.help")}</p></details>}
     {queued && <p role="status">{t("m5.approval.queued")}</p>}
     {error && <p role="alert">{t("m5.approval.error")}</p>}
-    <button type="button" className="m5-secondary" onClick={onCancel}>{t("m5.approval.cancel")}</button>
+    {(pending.length > 0 || error) && <button type="button" className="m5-secondary" onClick={onCancel}>{t("m5.approval.cancel")}</button>}
   </section>;
 }
 
-function approvalTarget(inspection: ApprovalInspection): string {
-  if (inspection.kind === "tool" && inspection.toolInput) {
-    try {
-      const input: unknown = JSON.parse(inspection.toolInput);
-      if (input && typeof input === "object" && !Array.isArray(input)) {
-        const fields = input as Record<string, unknown>;
-        const target = fields.file_path ?? fields.path ?? fields.command;
-        if (typeof target === "string") return `${inspection.reason ?? ""} · ${target}`;
-      }
-    } catch { /* The original bounded text remains available in details. */ }
-  }
-  return inspection.command ?? inspection.grantRoot ?? inspection.host ?? inspection.reason ?? "";
+/** "The agent took the request back", with what it was when known. */
+export function ApprovalWithdrawnNote({ item }: { item: WithdrawnApproval }) {
+  const { t } = useI18n();
+  return <p role="status" className="m5-approval-withdrawn">{t(item.answerFailed ? "m5.approval.answerFailed" : "m5.approval.withdrawn")}{item.summary ? <> · <code dir="auto">{item.summary}</code></> : <> · {t(`m5.approval.kind.${item.kind}`)}</>}</p>;
 }

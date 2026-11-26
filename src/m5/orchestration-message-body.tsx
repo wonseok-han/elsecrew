@@ -4,12 +4,12 @@ import { orchestratorDelegation, orchestratorMessage } from "./orchestrator-mess
 import { roleLabel } from "./role-names.ts";
 import type { RoleDefinitionV3 } from "./contracts/run-recovery-v1.ts";
 
-export function OrchestrationMessageBody({ text, role, definitions }: { text: string; role: string | null; definitions?: readonly RoleDefinitionV3[] }) {
+export function OrchestrationMessageBody({ text, role, definitions, fold = false }: { text: string; role: string | null; definitions?: readonly RoleDefinitionV3[]; fold?: boolean }) {
   const { t } = useI18n();
   const team = definitions?.map(definition => definition.roleId);
   const delegated = orchestratorDelegation(text, role, team);
   return <>
-    <MessageBody text={orchestratorMessage(text, role, team)} />
+    <MessageBody text={orchestratorMessage(text, role, team)} fold={fold} />
     {delegated && <details className="m5-delegation-details"><summary>{t("m5.chat.delegatedTask", { role: roleLabel(delegated.role, definitions, t) })}</summary><MessageBody text={delegated.instruction} /></details>}
   </>;
 }

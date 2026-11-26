@@ -1,5 +1,6 @@
 import type { SystemStatusG5DV1 } from "./contracts/lifecycle-g5d-v1.ts";
 import type { AgentRunRecordV1 } from "./contracts/agent-adapter-v1.ts";
+import { succeededRunNoticeKey, type TaskPhase } from "./task-status.ts";
 
 /** Collapse only older confirmed terminal records, never live/recovery work. */
 const chronological = (a: AgentRunRecordV1, b: AgentRunRecordV1) =>
@@ -34,14 +35,16 @@ export function runDurationSeconds(run: Pick<AgentRunRecordV1, "createdAt" | "up
 
 /** Display only. A clean exit is not a successful task or permission to apply.
  * A read-only role changes no files, so its card never points at changes. */
-export function runOutcomeNotice(run: Pick<AgentRunRecordV1, "state" | "terminationOutcome"> & { selectedProfile?: { permission: string } }) {
+/** `phase`: the task's single status (task-status.ts); a finished task's runs
+ * ask for a review only while the task waits for one. */
+export function runOutcomeNotice(run: Pick<AgentRunRecordV1, "state" | "terminationOutcome"> & { selectedProfile?: { permission: string } }, phase: TaskPhase | null = null) {
   if (run.state === "recoveryRequired" || run.terminationOutcome === "recoveryRequired") return "m5.run.help.recovery" as const;
   if (!["succeeded", "failed", "canceled"].includes(run.state)) return null;
   if (run.terminationOutcome !== "cleanExit") return "m5.run.help.unconfirmed" as const;
   if (run.state === "failed") return "m5.run.help.failedClean" as const;
   const readOnly = run.selectedProfile?.permission === "readOnly";
   if (run.state === "canceled") return readOnly ? "m5.run.help.canceledReadOnly" as const : "m5.run.help.canceledClean" as const;
-  return readOnly ? "m5.run.help.succeededReadOnly" as const : "m5.run.help.succeededClean" as const;
+  return readOnly ? "m5.run.help.succeededReadOnly" as const : succeededRunNoticeKey(phase);
 }
 
 export interface WorkStatusSummary { total: number; ids: string[]; omitted: number }

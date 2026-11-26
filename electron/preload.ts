@@ -33,6 +33,7 @@ import { validateProjectIdentityV1 } from "../src/m5/contracts/project-v1.ts";
 import { validateTeamMessageV1 } from "../src/m5/contracts/run-recovery-v1.ts";
 import { validateWorkspaceEventV1 } from "../src/m5/contracts/workspace-addressing-v1.ts";
 import { validateStorageStatusRequestV1 } from "../src/m5/contracts/storage-lifetime-v1.ts";
+import { EXTERNAL_LINK_CHANNEL as M5_EXTERNAL_LINK_CHANNEL, validateExternalLink, validateExternalLinkResult } from "../src/m5/contracts/external-link-v1.ts";
 import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS, M5_BRIDGE_V6_CHANNELS } from "./ipc-channels.ts";
 import {
   validateChatCreateInput, validateChatGetInput, validateChatListInput, validateFixtureRunStartInput,
@@ -124,6 +125,13 @@ contextBridge.exposeInMainWorld("m5Projects", Object.freeze({
   request: async (input: ProjectCatalogRequest) => {
     const request = validateProjectCatalogRequest(input);
     return validateProjectCatalogResult(await ipcRenderer.invoke(M5_PROJECT_CATALOG_CHANNEL, request), request);
+  },
+}));
+contextBridge.exposeInMainWorld("m5ExternalLink", Object.freeze({
+  open: async (input: string) => {
+    const url = validateExternalLink(input);
+    if (!url) throw new Error("invalid external link");
+    return validateExternalLinkResult(await ipcRenderer.invoke(M5_EXTERNAL_LINK_CHANNEL, url));
   },
 }));
 contextBridge.exposeInMainWorld("m5Approval", Object.freeze({

@@ -16,6 +16,9 @@
 | **M5 작업 공간 전환 설계** | [`proposals/m5-real-worktrees.md`](proposals/m5-real-worktrees.md) | 독립 복사본을 실제 git worktree(작업당 브랜치)와 git 없는 폴더의 그림자 git으로 바꾸는 설계·바뀌는 안전 원칙·구현 순서·열린 결정; 아직 제품 동작 아님 |
 | **M5 Orca 벤치마킹** | [`proposals/m5-orca-benchmark.md`](proposals/m5-orca-benchmark.md) | 에이전트 실행·권한·실제 git worktree·변경 관리를 Orca와 비교하고 가져올 점·기존 원칙과 충돌·진행 순서 제안; 아직 제품 동작 아님 |
 | **M5 프로젝트·작업 삭제** | [`proposals/m5-project-deletion.md`](proposals/m5-project-deletion.md) | 목록 삭제를 숨기기 대신 삭제 표시+앱 소유 파일 삭제로, 같은 폴더 재추가는 새 ID로 시작; 원장 행은 남김 |
+| **M5 ADE 고도화 전 진단(2026-11-25)** | [`proposals/m5-ade-diagnosis-2026-11-25.md`](proposals/m5-ade-diagnosis-2026-11-25.md) | 작업대 디자인 문제 D1~D13·기능 공백 F1~F14·방향 A/B/C·1~3차 로드맵; 스크린샷은 원본 폴더 경로만 |
+| **M5 ADE 1차-나 레이아웃 계획** | [`proposals/m5-ade-layout-plan.md`](proposals/m5-ade-layout-plan.md) | 방향 A 뼈대 + C 미리보기 + B 상태별 목록의 3영역 레이아웃·결과 미리보기 안전 설계·작업 묶음과 1차-가 충돌 표; 아직 제품 동작 아님 |
+| **M5 사용자 정의 팀 역할 계획** | [`proposals/m5-custom-roles-plan.md`](proposals/m5-custom-roles-plan.md) | 역할 동적화 조사·설계·구현 순서와 1차-가·1차-나와의 경계; 아직 제품 동작 아님 |
 
 > ⚠️ **`proposals/`는 구현된 것이 아니다.** 여기 있는 내용을 현재 동작으로 인용하지 말 것. 이 경계가 이 분류의 존재 이유다.
 

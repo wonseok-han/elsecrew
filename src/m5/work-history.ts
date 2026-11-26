@@ -47,3 +47,28 @@ export const WORK_OUTCOME_KEYS = {
   refused: "m5.output.activity.refused",
   failed: "m5.output.activity.failed",
 } as const;
+
+/**
+ * One activity line as shown: a Korean verb for the kind of work and, where
+ * it names a place in the workspace (a file, a search), that place. A
+ * command's target is the agent's own words about it, so it folds away as
+ * the original text instead of reading as the line.
+ */
+export function activityLine(activity: WorkActivity): { label: typeof WORK_ACTION_KEYS[WorkAction] | "m5.output.activity.searchFiles" | "m5.output.activity.searchText"; target: string | null; original: string | null } {
+  const label = activity.action === "search" && activity.tool === "Glob" ? "m5.output.activity.searchFiles" as const
+    : activity.action === "search" && activity.tool === "Grep" ? "m5.output.activity.searchText" as const
+    : WORK_ACTION_KEYS[activity.action];
+  const described = activity.action === "command" || activity.action === "other";
+  return { label, target: described ? null : activity.target ?? null, original: described ? activity.target ?? null : null };
+}
+
+/** Consecutive identical rows read once, with how many times they happened. */
+export function collapseRepeats<T>(rows: readonly T[], same: (a: T, b: T) => boolean): { row: T; count: number }[] {
+  const out: { row: T; count: number }[] = [];
+  for (const row of rows) {
+    const last = out[out.length - 1];
+    if (last && same(last.row, row)) last.count++;
+    else out.push({ row, count: 1 });
+  }
+  return out;
+}

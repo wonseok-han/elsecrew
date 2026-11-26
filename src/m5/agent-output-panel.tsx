@@ -8,7 +8,7 @@ import type { AgentRunRecordV1 } from "./contracts/agent-adapter-v1.ts";
 import type { RoleDefinitionV3 } from "./contracts/run-recovery-v1.ts";
 import { roleLabel } from "./role-names.ts";
 import { decodeOutputPage, type OutputPage, type OutputPageRequest } from "./contracts/agent-output-pages.ts";
-import { parseWorkActivity, WORK_ACTION_KEYS, WORK_OUTCOME_KEYS } from "./work-history.ts";
+import { activityLine, collapseRepeats, parseWorkActivity, WORK_OUTCOME_KEYS } from "./work-history.ts";
 
 function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -19,26 +19,39 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-/** One tool use, as a compact line; unreadable rows are left out. */
-const WorkActivityRow = memo(function WorkActivityRow({ text }: { text: string }) {
+/** One tool use, as a compact line: a Korean verb and the place it worked
+ * on. The agent's own words about a command fold under the line. Unreadable
+ * rows are left out. */
+const WorkActivityRow = memo(function WorkActivityRow({ text, count = 1 }: { text: string; count?: number }) {
   const { t } = useI18n();
   const activity = parseWorkActivity(text);
   if (!activity) return null;
-  return <p className="m5-activity-row" data-action={activity.action} data-outcome={activity.outcome}>
+  const line = activityLine(activity);
+  const head = <>
     <span className="m5-activity-mark" aria-hidden="true" />
-    <span className="m5-activity-label">{t(activity.action === "search" && activity.tool === "Glob" ? "m5.output.activity.searchFiles"
-      : activity.action === "search" && activity.tool === "Grep" ? "m5.output.activity.searchText"
-      : WORK_ACTION_KEYS[activity.action], { tool: activity.tool ?? "" })}</span>
-    {activity.target && <span className="m5-activity-target">{activity.target}</span>}
+    <span className="m5-activity-label">{t(line.label, { tool: activity.tool ?? "" })}</span>
+    {line.target && <span className="m5-activity-target">{line.target}</span>}
+    {count > 1 && <span className="m5-activity-count">{t("m5.output.activity.repeat", { count })}</span>}
     {activity.outcome && <span className="m5-activity-outcome">{t(WORK_OUTCOME_KEYS[activity.outcome])}</span>}
-  </p>;
+  </>;
+  return line.original
+    ? <details className="m5-activity-row m5-activity-folded" data-action={activity.action} data-outcome={activity.outcome}><summary>{head}</summary><p className="m5-activity-original" dir="auto">{line.original}</p></details>
+    : <p className="m5-activity-row" data-action={activity.action} data-outcome={activity.outcome}>{head}</p>;
 });
 
-const LiveOutputRow = memo(function LiveOutputRow({ row, truncatedLabel, role, team }: {
-  row: OutputDisplayRow; truncatedLabel: string; role: string; team?: readonly string[];
+/** The agent thinking aloud between tool uses: one line, the rest folded. */
+function OutputNote({ text }: { text: string }) {
+  const first = text.trim().split("\n")[0] ?? "";
+  const short = Array.from(first).length > 90 ? `${Array.from(first).slice(0, 89).join("")}…` : first;
+  if (short === text.trim()) return <p className="m5-output-note" dir="auto">{short}</p>;
+  return <details className="m5-output-note"><summary dir="auto">{short}</summary><pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{text}</pre></details>;
+}
+
+const LiveOutputRow = memo(function LiveOutputRow({ row, truncatedLabel, role, team, count }: {
+  row: OutputDisplayRow; truncatedLabel: string; role: string; team?: readonly string[]; count: number;
 }) {
-  if (row.channel === "activity") return <WorkActivityRow text={row.text} />;
-  return <article>{row.truncated && <small>{truncatedLabel}</small>}<pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{orchestratorMessage(row.text, role, team)}</pre></article>;
+  if (row.channel === "activity") return <WorkActivityRow text={row.text} count={count} />;
+  return <article>{row.truncated && <small>{truncatedLabel}</small>}<OutputNote text={orchestratorMessage(row.text, role, team)} /></article>;
 });
 
 /** One selected run/window at a time; switching never starts or cancels a run.
@@ -243,7 +256,8 @@ export function AgentOutputPanel({ runs, definitions, posted = [] }: {
     </>}
     {!historyActive && view?.binding.runId === binding.runId && <>
       {view.hasEarlier && <p>{t("m5.output.window")}</p>}
-      {view.rows.filter(row => row.channel === "activity" || !shown.has(row.text.trim())).map(row => <LiveOutputRow key={row.key} row={row} role={run.selectedProfile.roleId} team={team} truncatedLabel={t("m5.output.truncated")} />)}
+      {collapseRepeats(view.rows.filter(row => row.channel === "activity" || !shown.has(row.text.trim())), (a, b) => a.channel === "activity" && b.channel === "activity" && a.text === b.text)
+        .map(({ row, count }) => <LiveOutputRow key={row.key} row={row} count={count} role={run.selectedProfile.roleId} team={team} truncatedLabel={t("m5.output.truncated")} />)}
     </>}
     </div>
     {!historyActive && newOutput && <button type="button" onClick={showLatest}>{t("m5.chat.newMessages")}</button>}
