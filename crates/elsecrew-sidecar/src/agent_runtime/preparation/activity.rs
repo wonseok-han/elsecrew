@@ -329,6 +329,14 @@ fn codex_start(
     }
 }
 
+/// A file change's line counts, only when they are known.
+fn put_lines(value: &mut Value, change: &elsecrew_core::provider::vendor_observation::codex_events::stream::FileChange) {
+    if let Some((added, removed)) = change.lines {
+        value["added"] = json!(added);
+        value["removed"] = json!(removed);
+    }
+}
+
 fn file_action(kind: &str) -> &'static str {
     match kind { "add" => "write", "delete" => "delete", _ => "edit" }
 }
@@ -382,7 +390,7 @@ pub(super) fn codex(
             for (index, mut value) in start.rows.into_iter().enumerate() {
                 // The same file by its path, not by its place in the list.
                 let change = start.paths.get(index).and_then(|path| detail.changes.iter().find(|change| &change.path == path));
-                if let (Some(change), None) = (change, outcome) { value["added"] = json!(change.added); value["removed"] = json!(change.removed); }
+                if let (Some(change), None) = (change, outcome) { put_lines(&mut value, change); }
                 rows.push(finish(value));
             }
             // Files the end names that the start did not.
@@ -391,7 +399,7 @@ pub(super) fn codex(
                 let mut value = row(file_action(&change.kind), display_path(&change.path, cwd), None, None);
                 value["id"] = json!(format!("{base}:{next}"));
                 next += 1;
-                if outcome.is_none() { value["added"] = json!(change.added); value["removed"] = json!(change.removed); }
+                if outcome.is_none() { put_lines(&mut value, change); }
                 rows.push(finish(value));
             }
             // A start that named no file is replaced by the files the end names.
@@ -596,7 +604,7 @@ mod tests {
     fn codex_file_changes_name_each_file_and_keep_their_place() {
         use elsecrew_core::provider::vendor_observation::codex_events::stream::{FileChange, ToolDetail, ToolKind, ToolPhase};
         let cwd = Path::new("/work/copy");
-        let change = |path: &str, kind: &str, added, removed| FileChange { path: path.into(), kind: kind.into(), added, removed };
+        let change = |path: &str, kind: &str, added, removed| FileChange { path: path.into(), kind: kind.into(), lines: Some((added, removed)) };
         let mut tools = CodexTools::default();
         let start = ToolDetail { changes: vec![change("/work/copy/src/app.ts", "update", 0, 0), change("/work/copy/new.md", "add", 0, 0), change("/work/copy/old.md", "delete", 0, 0)], ..Default::default() };
         assert_eq!(codex(&mut tools, &event(ToolKind::FileChange, ToolPhase::Started, None, start), cwd), vec![

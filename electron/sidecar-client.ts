@@ -208,6 +208,20 @@ const MAX_ACTIVE_STREAMS = 16;
 const chunkEncoder = new TextEncoder();
 const MAX_ACTIVE_STREAM_BYTES = 160 * 1024 * 1024;
 const MAX_STREAM_EVENTS = 256;
+/** Refused streams whose remaining chunks are still expected (counted, never kept). */
+const MAX_DISCARDED_STREAMS = 64;
+
+/**
+ * The client refused one more text stream because too many were still open.
+ * Only that request fails: the descriptor itself was valid, so this is not a
+ * protocol violation and must not restart the engine (2026-11-26 D1).
+ */
+export class SidecarStreamCapacityError extends Error {
+  constructor() {
+    super("sidecar active stream bound exceeded");
+    this.name = "SidecarStreamCapacityError";
+  }
+}
 
 export interface SidecarLaunchV1 {
   command: string;
@@ -260,6 +274,19 @@ interface TextStreamV1 {
   received: number;
   digest: Hash;
   events: number;
+  /** The chunk event this stream's descriptor implies, and for a task
+   * workspace the address its chunks must carry (PR #17 review I3). */
+  event: "blob.chunk" | "workspace.blob.chunk";
+  workspace: ChatWorkspaceRefV1 | null;
+  /** Refused for capacity: checked exactly like the others, then dropped. */
+  refused: boolean;
+}
+
+type StreamBindingV1 = Pick<TextStreamV1, "event" | "workspace">;
+const PROJECT_STREAM: StreamBindingV1 = { event: "blob.chunk", workspace: null };
+function workspaceStream(value: ChatWorkspaceRefV1): StreamBindingV1 {
+  const { chatId, projectId, worktreeId, workspaceIdentity } = value;
+  return { event: "workspace.blob.chunk", workspace: { chatId, projectId, worktreeId, workspaceIdentity } };
 }
 
 type AgentRunObservedStateV1 = "preparing" | "running" | "cancelling" | "terminal";
@@ -292,6 +319,7 @@ export class SidecarClientV1 {
   readonly #agentRunStreams = new Map<string, string>();
   readonly #agentStreamRuns = new Map<string, string>();
   readonly #streams = new Map<string, TextStreamV1>();
+  #refusedStreams = 0;
   #streamBytes = 0;
   readonly #decoder = new TextDecoder("utf-8", { fatal: true });
   #process: SidecarProcessV1 | undefined;
@@ -850,7 +878,12 @@ export class SidecarClientV1 {
       // Task-workspace reads and diffs register their streams too: their
       // chunks must settle them, or after 16 opened files the next read
       // exceeded the active-stream bound and failed the engine (2026-11-26).
-      if (envelope.event === "blob.chunk" || envelope.event === "workspace.blob.chunk") this.#acceptChunk(envelope);
+      // A task-workspace chunk is held to its contract whether or not its
+      // stream was refused (PR #17 review I3).
+      if (envelope.event === "workspace.blob.chunk") validateWorkspaceEventV1(envelope);
+      // A refused stream's chunk is checked like any other, then dropped: no
+      // listener and no renderer delivery on either path (review I2).
+      if ((envelope.event === "blob.chunk" || envelope.event === "workspace.blob.chunk") && !this.#acceptChunk(envelope)) return;
       if (["file.changed", "file.conflict", "diff.changed"].includes(envelope.event)) {
         const watch = validateWatchEventV1(envelope.payload);
         for (const listener of this.#projectListeners) listener(watch, envelope);
@@ -986,7 +1019,17 @@ export class SidecarClientV1 {
       pending.resolve(status);
       return;
     }
-    const result = this.#validateResult(pending, response);
+    let result: unknown;
+    try {
+      result = this.#validateResult(pending, response);
+    } catch (error) {
+      // Capacity is the client's own limit, not a broken sidecar: fail only
+      // this request. Every other validation error is still a protocol failure.
+      if (!(error instanceof SidecarStreamCapacityError)) throw error;
+      this.#pending.delete(response.requestId);
+      pending.reject(error);
+      return;
+    }
     this.#pending.delete(response.requestId);
     pending.resolve(result);
   }
@@ -1019,7 +1062,7 @@ export class SidecarClientV1 {
         const value = validateFileReadDescriptorV1(response.result);
         assertResponseField(value, pending.params, "projectId");
         assertResponseField(value, pending.params, "path");
-        this.#registerStream(value.byteLength, value.stream, value.version, MAX_FILE_STREAM_BYTES);
+        this.#registerStream(value.byteLength, value.stream, value.version, MAX_FILE_STREAM_BYTES, PROJECT_STREAM);
         return value;
       }
       case "diff.getSummary": {
@@ -1033,7 +1076,7 @@ export class SidecarClientV1 {
         assertResponseField(value, pending.params, "path");
         // The immutable G4 diff descriptor has no digest for its rendered patch
         // stream. Its size and protocol sequence are still bounded and checked.
-        this.#registerStream(value.byteLength, value.stream, null, MAX_DIFF_STREAM_BYTES);
+        this.#registerStream(value.byteLength, value.stream, null, MAX_DIFF_STREAM_BYTES, PROJECT_STREAM);
         return value;
       }
       case "file.watch": return isWatchResult(response.result) ? response.result : failResult("file.watch result is invalid");
@@ -1050,7 +1093,7 @@ export class SidecarClientV1 {
       case "workspace.file.read": {
         const value = validateWorkspaceFileReadDescriptorV1(response.result);
         assertWorkspaceResponse(value, pending.params); assertResponseField(value, pending.params, "path");
-        this.#registerStream(value.byteLength, value.stream, value.version, MAX_FILE_STREAM_BYTES);
+        this.#registerStream(value.byteLength, value.stream, value.version, MAX_FILE_STREAM_BYTES, workspaceStream(value));
         return value;
       }
       case "workspace.file.watch": {
@@ -1062,7 +1105,7 @@ export class SidecarClientV1 {
       case "workspace.diff.getFile": {
         const value = validateWorkspaceDiffFileDescriptorV1(response.result);
         assertWorkspaceResponse(value, pending.params); assertResponseField(value, pending.params, "path");
-        this.#registerStream(value.byteLength, value.stream, null, MAX_DIFF_STREAM_BYTES);
+        this.#registerStream(value.byteLength, value.stream, null, MAX_DIFF_STREAM_BYTES, workspaceStream(value));
         return value;
       }
       case "workspace.resolveSaveRecovery": {
@@ -1261,31 +1304,49 @@ export class SidecarClientV1 {
     assertPreparedResponse(prepared, input);
   }
 
-  #registerStream(byteLength: number, stream: { streamId: string } | null, expectedVersion: FileVersionV1 | null, limit: number): void {
+  #registerStream(byteLength: number, stream: { streamId: string } | null, expectedVersion: FileVersionV1 | null, limit: number, binding: StreamBindingV1): void {
     if (!stream) return;
     if (byteLength > limit) throw new Error(`sidecar text stream exceeds ${limit / 1024 / 1024} MiB client bound`);
-    if (this.#streams.size >= MAX_ACTIVE_STREAMS || this.#streamBytes + byteLength > MAX_ACTIVE_STREAM_BYTES) {
-      throw new Error("sidecar active stream bound exceeded");
-    }
     if (this.#streams.has(stream.streamId)) throw new Error("duplicate sidecar text stream");
     const empty = new Uint8Array();
     if (byteLength === 0 && expectedVersion && sha256FileVersionV1(empty) !== expectedVersion) {
       throw new Error("empty text stream hash does not match declared version");
     }
+    // An empty stream has no chunks and holds no slot.
     if (byteLength === 0) return;
+    const active = this.#streams.size - this.#refusedStreams;
+    const refused = active >= MAX_ACTIVE_STREAMS || this.#streamBytes + byteLength > MAX_ACTIVE_STREAM_BYTES;
+    // The sidecar sends a refused stream's chunks right after the response.
+    // They are checked like any other (size, count, hash, kind, address) but
+    // never kept or delivered; only their running digest is held.
+    if (refused && this.#refusedStreams >= MAX_DISCARDED_STREAMS) throw new Error("sidecar refused stream bound exceeded");
     this.#streams.set(stream.streamId, {
       byteLength,
       expectedVersion,
       received: 0,
       digest: createHash("sha256"),
       events: 0,
+      ...binding,
+      refused,
     });
+    if (refused) {
+      this.#refusedStreams += 1;
+      throw new SidecarStreamCapacityError();
+    }
     this.#streamBytes += byteLength;
   }
 
-  #acceptChunk(event: EventV1): void {
+  /** False when the chunk belonged to a refused stream and was dropped. */
+  #acceptChunk(event: EventV1): boolean {
     const stream = this.#streams.get(event.streamId);
     if (!stream) throw new Error("blob.chunk references an unknown or completed stream");
+    if (event.event !== stream.event) throw new Error("blob.chunk kind does not match its stream");
+    if (stream.workspace) {
+      const payload = event.payload as Record<string, unknown>;
+      for (const key of ["chatId", "projectId", "worktreeId", "workspaceIdentity"] as const) {
+        if (payload[key] !== stream.workspace[key]) throw new Error("workspace.blob.chunk address does not match its stream");
+      }
+    }
     const text = event.payload.text;
     if (typeof text !== "string") throw new Error("blob.chunk text is invalid");
     if (++stream.events > MAX_STREAM_EVENTS) throw new Error("blob.chunk exceeds 256 events per stream");
@@ -1297,8 +1358,10 @@ export class SidecarClientV1 {
     if (stream.received === stream.byteLength) {
       if (stream.expectedVersion && `sha256:${stream.digest.digest("hex")}` !== stream.expectedVersion) throw new Error("blob.chunk hash does not match declared version");
       this.#streams.delete(event.streamId);
-      this.#streamBytes -= stream.byteLength;
+      if (stream.refused) this.#refusedStreams -= 1;
+      else this.#streamBytes -= stream.byteLength;
     }
+    return !stream.refused;
   }
 
   #fail(error: Error, code: NonNullable<SidecarClientV1["failureCode"]>): void {
@@ -1321,6 +1384,7 @@ export class SidecarClientV1 {
     this.#agentRunStreams.clear();
     this.#agentStreamRuns.clear();
     this.#streams.clear();
+    this.#refusedStreams = 0;
     this.#streamBytes = 0;
     this.#terminateOnce();
     for (const listener of this.#failureListeners) {

@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 pub mod vendor_observation;
+pub mod oversized_line;
 mod unique_json;
 
 pub const PROVIDER_OBSERVATION_LINE_MAX_BYTES: usize = 128 * 1024;
@@ -156,6 +157,11 @@ impl BoundedObservation {
             return fail("provider observation contains an oversized line");
         }
         Ok(Self { bytes })
+    }
+
+    /// Size only, as `Debug` already shows; the bytes themselves stay private.
+    pub fn byte_len(&self) -> usize {
+        self.bytes.len()
     }
 
     fn text(&self) -> Result<&str, ProviderError> {
