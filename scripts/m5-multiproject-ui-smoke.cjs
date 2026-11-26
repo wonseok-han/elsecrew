@@ -7,6 +7,9 @@
 // 2. Switching to project B is one click while A works; A shows "working".
 // 3. B's task starts an agent too: two projects work at once.
 // 4. Back in A: its task is there, still working.
+// 5. (MP_STAGE=reopen, same app data) After the app was closed with both at
+//    work: both runs ended as stopped (not lost, not running), both tasks
+//    open, and switching between them works.
 //
 // Requires current .vite/build output and target/debug/elsecrew-sidecar.
 // Run: electron scripts/m5-multiproject-ui-smoke.cjs [capture-folder]
@@ -21,13 +24,15 @@ const sidecar = path.join(repoRoot, 'target/debug/elsecrew-sidecar');
 const originalSpawn = cp.spawn;
 cp.spawn = function (command, args, options) {
   if (typeof command === 'string' && path.basename(command) === 'elsecrew-sidecar') {
-    if (path.resolve(command) !== sidecar || JSON.stringify(args) !== '["--stdio"]') throw new Error('unexpected sidecar launch');
-    return Reflect.apply(originalSpawn, this, [command, ['--stdio-agent-fixture', 'cancel-clean'], options]);
+    // After a clean close the app adds that close's seal (`--storage-seal <value>`).
+    if (path.resolve(command) !== sidecar || args[0] !== '--stdio' || (args.length !== 1 && !(args.length === 3 && args[1] === '--storage-seal'))) throw new Error('unexpected sidecar launch');
+    return Reflect.apply(originalSpawn, this, [command, ['--stdio-agent-fixture', 'cancel-clean', ...args.slice(1)], options]);
   }
   return Reflect.apply(originalSpawn, this, arguments);
 };
 
-const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'elsecrew-multiproject-')));
+const reopen = process.env.MP_STAGE === 'reopen';
+const root = reopen ? fs.realpathSync(process.env.MP_ROOT) : fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'elsecrew-multiproject-')));
 const captures = process.argv.find((arg, index) => index > 1 && !arg.startsWith('-') && !arg.endsWith('.cjs')) ?? path.join(root, 'captures');
 fs.mkdirSync(captures, { recursive: true });
 const repo = name => {
@@ -38,8 +43,8 @@ const repo = name => {
   for (const args of [['init', '-q', '--template='], ['add', '.'], ['-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Smoke', '-c', 'user.email=smoke@example.invalid', 'commit', '-qm', 'fixture']]) cp.execFileSync('/usr/bin/git', args, { cwd: dir, env });
   return dir;
 };
-const alpha = repo('alpha');
-const beta = repo('beta');
+const alpha = reopen ? path.join(root, 'alpha') : repo('alpha');
+const beta = reopen ? path.join(root, 'beta') : repo('beta');
 app.setPath('userData', path.join(root, 'userdata'));
 const picks = [alpha, beta];
 dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [picks.shift() ?? alpha] });
@@ -53,7 +58,7 @@ function finish(error, details = {}) {
   finished = true;
   clearTimeout(timer);
   const result = { root, captures, error: error?.message, checks, ...details, status: error ? 'FAIL' : 'PASS' };
-  fs.writeFileSync(path.join(captures, 'result.json'), JSON.stringify(result, null, 2));
+  fs.writeFileSync(path.join(captures, reopen ? 'result-reopen.json' : 'result.json'), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result));
   app.once('will-quit', () => app.exit(error ? 1 : 0));
   app.quit();
@@ -78,9 +83,13 @@ app.on('browser-window-created', (_event, window) => {
     const switchTo = async name => {
       await run(`document.querySelector('[data-testid=project-switcher]').open=true`);
       await wait(`Boolean(document.querySelector('.m5-switcher-projects li[data-path$="/${name}"] .m5-project-row'))`, `switcher lists ${name}`);
+      // A request on its way (opening the task just switched to) holds the
+      // switch a moment; a working team never does.
+      await wait(`!(document.querySelector('.m5-switch-blocked')?.textContent ?? '').includes('처리하는 중')`, 'no request on its way');
       const reason = await run(`document.querySelector('.m5-switch-blocked')?.textContent ?? null`);
       if (reason && !reason.includes('추가')) throw new Error(`switching is blocked: ${reason}`);
-      if (await run(`document.querySelector('.m5-switcher-projects li[data-path$="/${name}"] .m5-project-row').disabled`)) throw new Error(`${name} cannot be chosen`);
+      // Opening a task (the last one, after a restart) holds the list a moment.
+      await wait(`!document.querySelector('.m5-switcher-projects li[data-path$="/${name}"] .m5-project-row').disabled`, `${name} can be chosen`);
       await run(`document.querySelector('.m5-switcher-projects li[data-path$="/${name}"] .m5-project-row').click()`);
       await wait(`(${openProject})?.endsWith('/${name}') && Boolean(document.querySelector('[data-testid=task-layout]'))`, `switched to ${name}`);
     };
@@ -111,6 +120,42 @@ app.on('browser-window-created', (_event, window) => {
       return started.runId;
     })()`);
     const runState = chatId => run(`window.m5.getChat({ chatId: ${JSON.stringify(chatId)}, afterEventSequence: 0, cursor: null, limit: 1 }).then(d => (d.agentRuns ?? []).map(r => r.state))`);
+    if (reopen) {
+      try {
+        // The last project comes back on its own (or the home lists both).
+        await wait(`Boolean(document.querySelector('[data-testid=task-layout]')) || document.querySelectorAll('.m5-home:not([hidden]) li[data-path]').length === 2`, 'app back', 40000);
+        const states = await run(`(async()=>{
+          const list = await window.m5Projects.request({action:'list',cursor:null});
+          const out = {};
+          for (const project of list.projects) {
+            const chats = await window.m5.listChats({ projectId: project.projectId, cursor: null, limit: 10 });
+            for (const chat of chats.items) {
+              const detail = await window.m5.getChat({ chatId: chat.chatId, afterEventSequence: 0, cursor: null, limit: 1 });
+              out[chat.goal] = { chat: detail.chat.state, runs: (detail.agentRuns ?? []).map(r => r.state) };
+            }
+          }
+          return out;
+        })()`);
+        for (const goal of ['Alpha task', 'Beta task']) {
+          const state = states[goal];
+          if (!state || state.runs.length !== 1 || ['preparing', 'running', 'cancelling'].includes(state.runs[0])) throw new Error('after the restart ' + goal + ' is ' + JSON.stringify(state));
+        }
+        checks.push('both runs settled after the restart: ' + JSON.stringify(states));
+        if (!await run(`Boolean(document.querySelector('[data-testid=task-layout]'))`)) {
+          await run(`document.querySelector('.m5-home li[data-path$="/alpha"] .m5-project-row')?.click()`);
+          await wait(`(${openProject})?.endsWith('/alpha')`, 'alpha opened from the home', 30000);
+        }
+        const first = (await run(openProject)).endsWith('/alpha') ? 'beta' : 'alpha';
+        await switchTo(first);
+        await switchTo(first === 'alpha' ? 'beta' : 'alpha');
+        await shot('05-after-restart');
+        finish(null, { states });
+      } catch (error) {
+        try { await shot('failure-reopen'); } catch { /* best effort */ }
+        finish(error);
+      }
+      return;
+    }
     try {
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='프로젝트 선택'&&!b.disabled)`, 'first run');
       await run(require('./m5-smoke-complete-team.cjs'));

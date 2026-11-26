@@ -34,5 +34,14 @@ const electron = createRequire(import.meta.url)("electron");
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 const captures = args.find(arg => !arg.startsWith("--"));
-const result = spawnSync(electron, [join(repoRoot, "scripts", "m5-multiproject-ui-smoke.cjs"), ...(captures ? [resolve(captures)] : [])], { cwd: repoRoot, env, stdio: "inherit" });
-process.exit(result.status ?? 1);
+const script = join(repoRoot, "scripts", "m5-multiproject-ui-smoke.cjs");
+const extra = captures ? [resolve(captures)] : [];
+// 1-4: two projects at work; the app then closes with both working.
+const first = spawnSync(electron, [script, ...extra], { cwd: repoRoot, env, stdio: ["inherit", "pipe", "inherit"], encoding: "utf8" });
+process.stdout.write(first.stdout ?? "");
+if (first.status !== 0) process.exit(first.status ?? 1);
+const root = (first.stdout ?? "").split("\n").map(line => { try { return JSON.parse(line); } catch { return null; } }).find(value => value?.root)?.root;
+if (!root) { console.error("no app data folder from the first run"); process.exit(1); }
+// 5: the same app data opened again.
+const second = spawnSync(electron, [script, ...extra], { cwd: repoRoot, env: { ...env, MP_STAGE: "reopen", MP_ROOT: root }, stdio: "inherit" });
+process.exit(second.status ?? 1);

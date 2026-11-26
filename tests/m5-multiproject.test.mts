@@ -52,8 +52,7 @@ test("switching projects leaves the team at work and keeps unsaved text for its 
   const blocked = workbench.slice(workbench.indexOf("const switchBlockedReason"), workbench.indexOf("const addBlockedReason"));
   assert.doesNotMatch(blocked, /teamWorking|isTeamWorking/, "a working team does not hold the switch");
   // The update restart still waits for the open task's team.
-  assert.match(workbench, /chatController\.canLeaveProjectView\(\) && !chatController\.isTeamWorking\(\);/);
-  assert.match(workbench, /<UpdateBanner teamWorking=\{chatController\.isTeamWorking\(\)\}/);
+  assert.match(workbench, /chatController\.canLeaveProjectView\(\) && !chatController\.isTeamWorking\(\) && !appWorking;/);
   const chat = source("chat-state.ts");
   const can = chat.slice(chat.indexOf("canLeaveProjectView(): boolean"), chat.indexOf("isTeamWorking(): boolean"));
   assert.doesNotMatch(can, /agentRuns|runs\.some/, "runs are not checked for leaving");
@@ -107,4 +106,53 @@ test("the project list counts each project's open requests and the switcher mark
   assert.match(switcher, /m5-switcher-others-\$\{mark\}/);
   for (const dict of [ko, en]) for (const key of ["m5.catalog.attention", "m5.catalog.working", "m5.switch.othersWorking", "m5.switch.othersAttention", "m5.switch.busy", "m5.switch.unsavedHeld"]) assert.ok(dict[key as keyof typeof dict], key);
   tracker.dispose();
+});
+
+// PR #18 review I2: a waiting request is announced even when its task could
+// not be read the first time (one failed `chat.get` used to drop it for good).
+test("an approval whose task read failed once is announced on the next list", async () => {
+  const { NotificationCenter } = await import("../src/m5/notifications.ts");
+  const { startNotificationFeed } = await import("../src/m5/notification-feed.ts");
+  const center = new NotificationCenter(null);
+  const listeners: ((event: any) => void)[] = [];
+  let reads = 0;
+  const bridge = {
+    onAgentRunStateChanged: (listener: (event: any) => void) => { listeners.push(listener); return () => {}; },
+    onAgentPublicEvent: (listener: (event: any) => void) => { listeners.push(listener); return () => {}; },
+    getChat: async () => { reads++; if (reads === 1) throw new Error("synthetic read failure"); return { chat: { chatId: "chat_b", projectId: "project_b", goal: "B", state: "running" } }; },
+  };
+  const approvals = { request: async () => ({ pending: [{ approvalId: "approval_b" }] }) };
+  const realSetInterval = globalThis.setInterval;
+  let tick: (() => void) | null = null;
+  (globalThis as any).setInterval = (fn: () => void) => { tick = fn; return 1; };
+  const stop = startNotificationFeed(bridge, center, approvals, () => {}, 1);
+  (globalThis as any).setInterval = realSetInterval;
+  listeners[0]!({ run: { runId: "run_b", chatId: "chat_b", taskId: "t", projectId: "project_b", worktreeId: "w", workspaceIdentity: "i", state: "running", selectedProfile: { roleId: "coding" } } });
+  tick!();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(center.snapshot().length, 0, "the first read failed");
+  tick!();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(center.snapshot()[0]?.id, "approval:approval_b");
+  assert.equal(center.snapshot()[0]?.projectId, "project_b");
+  // A question whose task read fails once is read again.
+  reads = 0;
+  listeners[1]!({ eventId: "question_b", chatId: "chat_b", kind: "question", text: "계속할까요?" });
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.ok(center.snapshot().some(item => item.id === "question:question_b"));
+  stop();
+});
+
+// PR #18 review I1·I3·M1 at the source.
+test("the switch keeps drafts before it lets go; the update waits for every project; a stage on another page opens it", () => {
+  const workbench = source("workbench.tsx");
+  const leave = workbench.slice(workbench.indexOf("const leaveProject = async"), workbench.indexOf("// Adding a folder keeps"));
+  assert.ok(leave.indexOf("prepareLeaveKeepingDrafts()") < leave.indexOf('action: "releaseView"'), "drafts are kept before the watch is released");
+  assert.match(leave, /setDraftsHold\(true\); return false;/);
+  assert.match(workbench, /&& !chatController\.isTeamWorking\(\) && !appWorking;/);
+  assert.match(workbench, /<UpdateBanner teamWorking=\{chatController\.isTeamWorking\(\) \|\| appWorking\}/);
+  assert.match(workbench, /action: "workStatus" as const/);
+  assert.match(source("stage-bar.tsx"), /if \(!card\) \{ onReveal\?\.\(runId\); return; \}/);
+  assert.match(source("task-story.tsx"), /onReveal=\{revealStage\}/);
+  for (const dict of [ko, en]) for (const key of ["m5.switch.notKept", "m5.editorNotice.draftsNotKept"]) assert.ok(dict[key as keyof typeof dict], key);
 });

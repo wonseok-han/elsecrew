@@ -86,6 +86,8 @@ window.m5Projects = { request: async (input) => {
     return {schemaVersion: 1, action: input.action, inspection: preparationInspection};
   }
   if (input.action === "finishDeletions") return {schemaVersion: 1, action: input.action, pending: 0};
+  // ADE multi-project (PR #18 review I3): whether any project's team works.
+  if (input.action === "workStatus") return {schemaVersion: 1, action: "workStatus", working: Boolean(window.m5SmokeAppWorking)};
   if (input.action === "releaseView" && input.projectId === "smoke_project") return {schemaVersion: 1, action: "releaseView", projectId: input.projectId};
   // ADE U2 smoke (PR #12 review I3): the list cannot be read.
   if (input.action === "list" && window.m5SmokeCatalogFail) throw new Error("smoke: catalog unavailable");

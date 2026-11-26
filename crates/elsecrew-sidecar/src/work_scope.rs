@@ -3,10 +3,13 @@
 //! An agent writes only inside its own task's workspace (Codex: the run
 //! sandbox; Claude: the app's tool admission), and every Git write the app
 //! makes itself — step commits, merges, discards — runs on this one
-//! dispatcher thread. Two tasks therefore never write the same files at the
-//! same time, even two tasks of the same repository. A save, merge, discard,
-//! cleanup or content erasure waits only for its own task (a save to a
-//! project's own view: for the tasks of that project).
+//! dispatcher thread. A save, merge, discard, cleanup or content erasure
+//! therefore waits only for the busy tasks whose real write paths meet its
+//! own (PR #18 review B1): the same repository's Git folder, or folders
+//! inside one another — a workspace, a project's own folder — links
+//! resolved (`project::WriteScope`). Tasks of one repository so share one
+//! lock; tasks of separate repositories in separate folders go on side by
+//! side. A path that cannot be resolved meets everything.
 //!
 //! Writing a copy into the user's own folder (apply, restore, retire, backup
 //! cleanup, latest-wins apply) keeps the app-wide rule: it waits while any
@@ -71,14 +74,34 @@ impl Sidecar {
         BusyChats::Known(chats)
     }
 
-    /// A task of this project is busy. A chat whose record cannot be read
-    /// counts as this project's (fail closed).
-    fn project_busy(&self, busy: &BusyChats, project: &str) -> bool {
-        let BusyChats::Known(chats) = busy else { return true };
-        chats.iter().any(|chat| match self.storage.projection_record("chat", chat) {
-            Ok(Some(record)) => record.get("project_id").and_then(Value::as_str).is_none_or(|owner| owner == project),
-            _ => true,
+    /// The workspace address a task's record names.
+    fn chat_address(&self, chat: &str) -> Option<project::WorkspaceAddress> {
+        let record = self.storage.projection_record("chat", chat).ok()??;
+        let field = |key: &str| record["record"][key].as_str().map(str::to_owned);
+        Some(project::WorkspaceAddress {
+            chat_id: field("chatId")?,
+            project_id: field("projectId")?,
+            worktree_id: field("worktreeId")?,
+            workspace_identity: field("workspaceIdentity")?,
         })
+    }
+
+    /// The write scope of each busy task; `None` when any cannot be resolved.
+    fn busy_scopes(&self, busy: &BusyChats) -> Option<Vec<project::WriteScope>> {
+        let BusyChats::Known(chats) = busy else { return None };
+        chats.iter().map(|chat| {
+            let address = self.chat_address(chat)?;
+            self.projects.task_write_scope(&self.storage, &address).ok()
+        }).collect()
+    }
+
+    /// Whether a write to `target` meets something a busy task may be writing.
+    fn scope_busy(&self, busy: &BusyChats, target: Option<project::WriteScope>) -> bool {
+        if busy.is_empty() {
+            return false;
+        }
+        let (Some(target), Some(scopes)) = (target, self.busy_scopes(busy)) else { return true };
+        scopes.iter().any(|scope| scope.meets(&target))
     }
 
     /// Why this write must wait for a running task — the error code each
@@ -120,8 +143,9 @@ impl Sidecar {
         let busy = self.busy_chats();
         let blocked = match &target {
             Target::Everything => !busy.is_empty(),
-            Target::Chat(chat) => busy.contains(chat),
-            Target::Project(project) => self.project_busy(&busy, project),
+            Target::Chat(chat) => busy.contains(chat) || self.scope_busy(&busy,
+                self.chat_address(chat).and_then(|address| self.projects.task_write_scope(&self.storage, &address).ok())),
+            Target::Project(project) => self.scope_busy(&busy, self.projects.project_write_scope(&self.storage, project).ok()),
         };
         if !blocked {
             return None;

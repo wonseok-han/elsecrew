@@ -15,6 +15,8 @@ mod preview;
 pub(crate) use preview::set_preview_test_hook;
 mod latest_apply;
 mod app_connections;
+mod write_scope;
+pub(crate) use write_scope::WriteScope;
 mod empty_project;
 mod git_worktree;
 mod git_merge;
@@ -1230,6 +1232,10 @@ impl ProjectManager {
                 "picker-approved path is outside the capability-held Git root",
             ));
         }
+        // A project inside a task's workspace, or holding one, would let a
+        // merge into it and that task's agent write the same files (PR #18
+        // review B1).
+        self.refuse_workspace_overlap(storage, &source.canonical_root, "the project folder")?;
         let canonical_text = canonical_protocol_path(&source.canonical_root)?;
         let selected_text = canonical_protocol_path(selected)?;
         // A folder that belonged to a deleted project starts over under a new

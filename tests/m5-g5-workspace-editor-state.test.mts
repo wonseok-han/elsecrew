@@ -239,27 +239,68 @@ test("the draft store is bounded and tolerates unreadable or refusing storage", 
   const store = createEditorDraftStore(storage);
   const ref = (index: number): ChatWorkspaceRefV1 => ({ chatId: `chat_${index}`, projectId: "project_01", worktreeId: `worktree_${index}`, workspaceIdentity: `workspace_${index}` });
   const tab = (text: string) => ({ path: "src/a.ts", text, baseVersion: version, byteLength: text.length });
-  for (let index = 0; index < EDITOR_DRAFTS_MAX_WORKSPACES + 3; index += 1) store.save(ref(index), { activePath: null, tabs: [tab(`text ${index}`)] });
-  assert.equal(store.load(ref(0)), null, "the oldest tasks give way");
-  assert.equal(store.load(ref(EDITOR_DRAFTS_MAX_WORKSPACES + 2))?.tabs[0]?.text, `text ${EDITOR_DRAFTS_MAX_WORKSPACES + 2}`);
+  const kept: boolean[] = [];
+  for (let index = 0; index < EDITOR_DRAFTS_MAX_WORKSPACES + 3; index += 1) kept.push(store.save(ref(index), { activePath: null, tabs: [tab(`text ${index}`)] }));
+  // What is kept stays kept (PR #18 review B2): a ninth task is not kept instead.
+  assert.deepEqual(kept, [...Array(EDITOR_DRAFTS_MAX_WORKSPACES).fill(true), false, false, false]);
+  assert.equal(store.load(ref(0))?.tabs[0]?.text, "text 0", "the oldest task keeps its draft");
+  assert.equal(store.load(ref(EDITOR_DRAFTS_MAX_WORKSPACES)), null);
   assert.equal(JSON.parse(storage.items.get(EDITOR_DRAFTS_KEY)!).entries.length, EDITOR_DRAFTS_MAX_WORKSPACES);
+  // A kept task's own draft can still change.
+  assert.equal(store.save(ref(3), { activePath: null, tabs: [tab("text 3 again")] }), true);
+  assert.equal(store.load(ref(3))?.tabs[0]?.text, "text 3 again");
   // The same task in another workspace copy is not this workspace.
   assert.equal(store.load({ ...ref(5), workspaceIdentity: "workspace_other" }), null);
-  // A draft too large to keep is left out whole; smaller ones stay.
-  store.save(ref(1), { activePath: null, tabs: [tab("x".repeat(EDITOR_DRAFTS_MAX_CHARS + 1)), tab("small")].map((item, index) => ({ ...item, path: `f${index}` })) });
+  // A draft too large to keep is left out whole; smaller ones stay; the save says so.
+  assert.equal(store.save(ref(1), { activePath: null, tabs: [tab("x".repeat(EDITOR_DRAFTS_MAX_CHARS + 1)), tab("small")].map((item, index) => ({ ...item, path: `f${index}` })) }), false);
   assert.deepEqual(store.load(ref(1))?.tabs.map(item => item.text), ["small"]);
-  store.save(ref(1), null);
+  assert.equal(store.save(ref(1), null), true);
   assert.equal(store.load(ref(1)), null);
-  // Unreadable contents mean nothing was kept, never an error.
-  for (const raw of ["not json", "[]", '{"version":2,"entries":[]}', '{"version":1,"entries":[{"workspace":{"chatId":"../x"},"activePath":null,"tabs":[]}]}']) {
+  // Unreadable contents mean nothing was kept, never an error, and are never written over.
+  for (const raw of ["not json", "[]", '{"version":2,"entries":[]}']) {
     storage.items.set(EDITOR_DRAFTS_KEY, raw);
     assert.equal(store.load(ref(5)), null, raw);
+    assert.equal(store.save(ref(5), { activePath: null, tabs: [tab("new")] }), false, raw);
+    assert.equal(storage.items.get(EDITOR_DRAFTS_KEY), raw, raw);
   }
   const refusing = createEditorDraftStore(memoryStorage(true));
   assert.doesNotThrow(() => refusing.save(ref(1), { activePath: null, tabs: [tab("text")] }));
   assert.equal(refusing.load(ref(1)), null);
   assert.equal(createEditorDraftStore(null).load(ref(1)), null);
-  assert.doesNotThrow(() => createEditorDraftStore(null).save(ref(1), { activePath: null, tabs: [tab("text")] }));
+  assert.equal(createEditorDraftStore(null).save(ref(1), { activePath: null, tabs: [tab("text")] }), false);
+});
+
+// PR #18 review B2: no kept draft is lost, by any path.
+test("kept drafts survive other saves: an unreadable entry, a full store, a refusing write, another workspace of the same task", () => {
+  const storage = memoryStorage();
+  const store = createEditorDraftStore(storage);
+  const ref = (index: number, workspace = `workspace_${index}`): ChatWorkspaceRefV1 => ({ chatId: `chat_${index}`, projectId: "project_01", worktreeId: `worktree_${index}`, workspaceIdentity: workspace });
+  const tab = (text: string) => ({ path: "src/a.ts", text, baseVersion: version, byteLength: text.length });
+  // An entry written by an older or other app version is kept as it was.
+  const older = { workspace: { chatId: "chat_old" }, activePath: null, tabs: [], note: "older shape" };
+  storage.items.set(EDITOR_DRAFTS_KEY, JSON.stringify({ version: 1, entries: [older, { workspace: ref(1), activePath: null, tabs: [tab("one")] }] }));
+  assert.equal(store.save(ref(2), { activePath: null, tabs: [tab("two")] }), true);
+  const raw = JSON.parse(storage.items.get(EDITOR_DRAFTS_KEY)!);
+  assert.ok(raw.entries.some((item: unknown) => JSON.stringify(item) === JSON.stringify(older)), "the older entry is still there");
+  assert.equal(store.load(ref(1))?.tabs[0]?.text, "one");
+  // Another workspace of the same task does not replace it.
+  assert.equal(store.save(ref(1, "workspace_1_new"), { activePath: null, tabs: [tab("one, new copy")] }), true);
+  assert.equal(store.load(ref(1))?.tabs[0]?.text, "one");
+  // Two drafts that together pass the size bound: the second is not kept, the first stays.
+  const big = "y".repeat(EDITOR_DRAFTS_MAX_CHARS / 2 + 10);
+  assert.equal(store.save(ref(3), { activePath: null, tabs: [tab(big)] }), true);
+  assert.equal(store.save(ref(4), { activePath: null, tabs: [tab(big)] }), false);
+  assert.equal(store.load(ref(3))?.tabs[0]?.text.length, big.length);
+  assert.equal(store.load(ref(4)), null);
+  // Storage that refuses writes keeps what it had.
+  let refuse = false;
+  const flaky = { getItem: (key: string) => storage.getItem(key), setItem: (key: string, value: string) => { if (refuse) throw new Error("QuotaExceededError"); storage.setItem(key, value); }, removeItem: (key: string) => { if (refuse) throw new Error("refused"); storage.removeItem(key); } };
+  const flakyStore = createEditorDraftStore(flaky);
+  refuse = true;
+  assert.equal(flakyStore.save(ref(2), { activePath: null, tabs: [tab("two, changed")] }), false);
+  assert.equal(flakyStore.save(ref(1), null), false);
+  assert.equal(store.load(ref(2))?.tabs[0]?.text, "two");
+  assert.equal(store.load(ref(1))?.tabs[0]?.text, "one");
 });
 
 test("files an agent writes show up in the change and file lists without a manual refresh", async () => {
@@ -331,4 +372,30 @@ test("text that cannot be kept holds the project: a store that refuses, a save o
   release();
   await pending;
   saving.controller.dispose();
+});
+
+// PR #18 review B2·I1: switching never costs another task's kept draft, and
+// a draft that cannot be kept holds the view before anything is let go.
+test("leaving keeps another task's earlier draft; when the store is full the view stays and nothing kept is lost", async () => {
+  const storage = memoryStorage();
+  const store = createEditorDraftStore(storage);
+  const filler = (index: number): ChatWorkspaceRefV1 => ({ chatId: `chat_f${index}`, projectId: "project_01", worktreeId: `worktree_f${index}`, workspaceIdentity: `workspace_f${index}` });
+  // Task A left earlier with its edit kept.
+  assert.equal(store.save(a, { activePath: "src/a.ts", tabs: [{ path: "src/a.ts", text: "A's edit\n", baseVersion: version, byteLength: 9 }] }), true);
+  // The store fills up with other tasks' drafts.
+  for (let index = 0; index < EDITOR_DRAFTS_MAX_WORKSPACES - 1; index++) assert.equal(store.save(filler(index), { activePath: null, tabs: [{ path: "f.ts", text: `f${index}`, baseVersion: version, byteLength: 2 }] }), true);
+  // In task B, an edit that cannot be kept: the switch says no before letting go.
+  const { controller } = await opened(storage, b);
+  await controller.openFile("src/a.ts");
+  controller.updateText("src/a.ts", "B's edit\n");
+  controller.flushDrafts();
+  assert.equal(controller.prepareLeaveKeepingDrafts(), false);
+  assert.equal(controller.leaveProjectView(false, true), false);
+  assert.equal(controller.snapshot().tabs[0]?.text, "B's edit\n", "B's edit stays on screen");
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(controller.snapshot().noticeKey, "m5.editorNotice.draftsNotKept");
+  // A's kept edit is still there, and so is every other.
+  assert.equal(createEditorDraftStore(storage).load(a)?.tabs[0]?.text, "A's edit\n");
+  for (let index = 0; index < EDITOR_DRAFTS_MAX_WORKSPACES - 1; index++) assert.ok(createEditorDraftStore(storage).load(filler(index)), `filler ${index}`);
+  controller.dispose();
 });

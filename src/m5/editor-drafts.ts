@@ -2,7 +2,13 @@
  * hot exit works: quitting never asks and never loses what was typed. One
  * entry per task workspace, restored only into that exact workspace; saving,
  * reloading or discarding a tab removes it. Nothing here writes a project
- * file, and any storage problem only ever means "nothing was kept". */
+ * file.
+ *
+ * What is kept stays kept (PR #18 review B2): a save never drops another
+ * workspace's drafts to make room, never rewrites an entry it cannot read
+ * (an older or damaged one stays as it was), and when storage refuses a
+ * write nothing already kept is removed. A draft that does not fit is simply
+ * not kept, and `save` says so. */
 import type { FileVersionV1 } from "./contracts/file-v1.ts";
 import type { ChatWorkspaceRefV1 } from "./contracts/workspace-addressing-v1.ts";
 
@@ -22,14 +28,15 @@ export interface WorkspaceDrafts {
 }
 export interface EditorDraftStore {
   load(workspace: ChatWorkspaceRefV1): WorkspaceDrafts | null;
-  /** `null` forgets the workspace's drafts. */
-  save(workspace: ChatWorkspaceRefV1, drafts: Omit<WorkspaceDrafts, "workspace"> | null): void;
+  /** `null` forgets the workspace's drafts. True when the store now holds
+   * exactly what was given; false leaves every kept draft as it was. */
+  save(workspace: ChatWorkspaceRefV1, drafts: Omit<WorkspaceDrafts, "workspace"> | null): boolean;
 }
 
 export const EDITOR_DRAFTS_KEY = "elsecrew.editorDrafts.v1";
-/** Tasks left with unsaved edits and never reopened do not pile up. */
+/** At most this many workspaces have kept drafts; a ninth is not kept. */
 export const EDITOR_DRAFTS_MAX_WORKSPACES = 8;
-/** Browser storage is small; a draft beyond this is simply not kept. */
+/** Browser storage is small; drafts beyond this in all are not kept. */
 export const EDITOR_DRAFTS_MAX_CHARS = 2_000_000;
 
 type KeyValue = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -77,23 +84,32 @@ function same(left: ChatWorkspaceRefV1, right: ChatWorkspaceRefV1): boolean {
 const chars = (drafts: WorkspaceDrafts) => drafts.tabs.reduce((sum, tab) => sum + tab.text.length, 0);
 
 /** `storage` is the browser's own (null when unavailable: nothing is kept). */
+/** What the store holds: readable entries, and the raw entries it cannot
+ * read (kept as they are). `null` when the stored value itself is not one this
+ * store wrote: then nothing is rewritten over it. */
+interface Stored { entries: WorkspaceDrafts[]; unread: unknown[] }
+
 export function createEditorDraftStore(storage: KeyValue | null): EditorDraftStore {
-  const readAll = (): WorkspaceDrafts[] => {
+  const readStored = (): Stored | null => {
+    let raw: string | null | undefined;
+    try { raw = storage?.getItem(EDITOR_DRAFTS_KEY); } catch { return null; }
+    if (!raw) return { entries: [], unread: [] };
     try {
-      const raw = storage?.getItem(EDITOR_DRAFTS_KEY);
-      if (!raw) return [];
       const value: unknown = JSON.parse(raw);
-      if (!value || typeof value !== "object" || (value as { version?: unknown }).version !== 1) return [];
-      const entries = (value as { entries?: unknown }).entries;
-      if (!Array.isArray(entries)) return [];
-      // One unreadable entry never takes the others with it.
-      return entries.map(entry).filter((item): item is WorkspaceDrafts => item !== null);
-    } catch { return []; }
+      if (!value || typeof value !== "object" || (value as { version?: unknown }).version !== 1) return null;
+      const list = (value as { entries?: unknown }).entries;
+      if (!Array.isArray(list)) return null;
+      // One unreadable entry never takes the others with it, and is kept.
+      const entries: WorkspaceDrafts[] = [], unread: unknown[] = [];
+      for (const item of list) { const parsed = entry(item); if (parsed) entries.push(parsed); else unread.push(item); }
+      return { entries, unread };
+    } catch { return null; }
   };
-  const writeAll = (entries: WorkspaceDrafts[]): boolean => {
+  const readAll = (): WorkspaceDrafts[] => readStored()?.entries ?? [];
+  const writeAll = (entries: WorkspaceDrafts[], unread: unknown[]): boolean => {
     if (!storage) return false;
     try {
-      if (entries.length) storage.setItem(EDITOR_DRAFTS_KEY, JSON.stringify({ version: 1, entries }));
+      if (entries.length || unread.length) storage.setItem(EDITOR_DRAFTS_KEY, JSON.stringify({ version: 1, entries: [...entries, ...unread] }));
       else storage.removeItem(EDITOR_DRAFTS_KEY);
       return true;
     } catch { return false; }
@@ -104,23 +120,27 @@ export function createEditorDraftStore(storage: KeyValue | null): EditorDraftSto
       return readAll().find(item => same(item.workspace, workspace)) ?? null;
     },
     save(workspace, drafts) {
-      const others = readAll().filter(item => item.workspace.chatId !== workspace.chatId);
-      const entries = others.slice(0, EDITOR_DRAFTS_MAX_WORKSPACES - 1);
+      const stored = readStored();
+      // A value this store cannot read is never written over.
+      if (!stored) return false;
+      // Only this exact workspace's entry is replaced; every other stays,
+      // including another workspace of the same task.
+      const others = stored.entries.filter(item => !same(item.workspace, workspace));
+      const entries = [...others];
+      let whole = true;
       if (drafts?.tabs.length) {
-        // Newest first. Tabs that do not fit the budget are left out, whole.
-        let room = EDITOR_DRAFTS_MAX_CHARS;
+        // No room: nothing kept is given up for it. Tabs that do not fit
+        // what is left are not kept, whole; the rest is.
+        if (others.length + stored.unread.length + 1 > EDITOR_DRAFTS_MAX_WORKSPACES) return false;
+        const rawChars = stored.unread.reduce<number>((sum, item) => sum + (JSON.stringify(item)?.length ?? 0), 0);
+        let room = EDITOR_DRAFTS_MAX_CHARS - others.reduce((sum, item) => sum + chars(item), 0) - rawChars;
         const tabs = drafts.tabs.filter(tab => { if (tab.text.length > room) return false; room -= tab.text.length; return true; });
-        if (tabs.length) {
-          entries.unshift({ workspace: { chatId: workspace.chatId, projectId: workspace.projectId, worktreeId: workspace.worktreeId, workspaceIdentity: workspace.workspaceIdentity },
-            activePath: drafts.activePath, tabs });
-        }
-      }
-      // Older tasks give way first when the whole set is too large.
-      while (entries.length > 1 && entries.reduce((sum, item) => sum + chars(item), 0) > EDITOR_DRAFTS_MAX_CHARS) entries.pop();
-      if (writeAll(entries)) return;
-      // Storage refused (full or unavailable): keep the newest alone, or nothing
-      // rather than something stale.
-      if (!writeAll(entries.slice(0, 1))) { try { storage?.removeItem(EDITOR_DRAFTS_KEY); } catch { /* nothing kept */ } }
+        whole = tabs.length === drafts.tabs.length;
+        if (tabs.length) entries.unshift({ workspace: { chatId: workspace.chatId, projectId: workspace.projectId, worktreeId: workspace.worktreeId, workspaceIdentity: workspace.workspaceIdentity },
+          activePath: drafts.activePath, tabs });
+      } else if (others.length === stored.entries.length) return true;
+      // Storage refused: what was kept stays as it was.
+      return writeAll(entries, stored.unread) && whole;
     },
   };
 }

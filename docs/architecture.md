@@ -651,16 +651,32 @@ Keychain 호출은 모두 30초 제한이 있는 자식 프로세스(코어 덤�
 
 - **화면은 한 프로젝트, 일은 여러 프로젝트**: 실행과 팀 진행은 화면과 무관하게 sidecar에서 돈다(`poll_workflows`). 화면은 한 프로젝트만 보여 주고, 다른 프로젝트로 바꾸면 지금 프로젝트의 파일 감시만 떼고(`releaseView`) 실행은 그대로 둔다. 돌아오면 작업은 저장된 기록(`chat.get`)에서 다시 그려진다(같은 프로젝트 안의 작업 전환과 같은 방식).
   - `ChatUiController.canLeaveProjectView()`는 "오는 중인 요청이 없음"(시작·멈춤·메시지 전송·전환·복구 선택)만 본다. 팀이 일하는지는 `isTeamWorking()`이 따로 답하고, 업데이트 다시 시작 준비·업데이트 배너·작업 버리기 버튼은 그것을 쓴다.
-  - 저장하지 않은 편집: 작업 공간의 그냥 고친 글자는 `leaveProjectView(false, true)`가 초안 보관소(`editor-drafts.ts`)에 넣고 **읽어 확인한 뒤에만** 떠난다(보관소가 거절하면 그대로 머문다). 그 작업을 다시 열면 `bindChat`이 되살린다. 저장 중·충돌 탭과 작업 없이 연 프로젝트의 편집은 여전히 막는다(`canLeaveKeepingDrafts`).
+  - 저장하지 않은 편집: 작업 공간의 그냥 고친 글자는 초안 보관소(`editor-drafts.ts`)에 넣고 **읽어 확인한 뒤에만** 떠난다. 이 확인은 파일 감시를 떼기 전에 한다(`prepareLeaveKeepingDrafts`, PR #18 검토 I1). 보관하지 못하면 화면은 그대로이고 '보관할 공간이 없어 바꾸지 않았어요'를 보인다. 그 작업을 다시 열면 `bindChat`이 되살린다. 저장 중·충돌 탭과 작업 없이 연 프로젝트의 편집은 여전히 막는다(`canLeaveKeepingDrafts`).
+  - 초안 보관소는 **이미 보관한 것을 잃지 않는다**(PR #18 검토 B2). 자리를 만들려고 다른 작업의 초안을 지우지 않는다. 읽을 수 없는 항목(옛 형식·손상)은 그대로 남기고, 읽을 수 없는 저장값 위에는 쓰지 않는다. 저장이 거절돼도 있던 것을 지우지 않는다. 같은 작업의 다른 작업 공간 항목도 바꾸지 않는다. 9번째 작업이나 크기 한도를 넘는 초안은 보관하지 않고 `save`가 false를 돌려준다. 편집기는 '보관할 공간이 없어요' 안내를 한 번 보인다.
 - **알림과 배지**: 알림 피드는 앱 전체의 실행을 본다(`notification-feed.ts`, 이번 세션에서 시작을 본 실행의 승인 요청을 2초마다 조회). `project-activity.ts` `ProjectActivityTracker`가 실행 상태 알림으로 프로젝트별 '작업 중'을 셈한다(실행이 살아 있거나, 끝난 뒤 20초는 총괄이 다음 담당을 고르는 중으로 봄, 프로젝트를 열 때 그 목록에서 실제로 일하는 작업으로 맞춤: `listedWorking`, 시작하지 않은 초안은 제외). 전환 팝오버·홈의 프로젝트 줄에 '확인 필요 N'·'작업 중' 배지, 전환 단추에 다른 프로젝트의 상태 점(확인 필요가 우선)을 단다. 다른 프로젝트의 알림을 누르면 전환과 같은 한 동작으로 그 작업을 연다(PR #14 I4).
   - 한계: 앱을 다시 불러오기 전에 시작된 다른 프로젝트의 실행은 그 프로젝트를 한 번 열기 전까지 배지·승인 조회에 잡히지 않는다(PR-B 수신함에서 엔진 조회로 해결 예정).
-- **쓰기 차단은 작업 단위**(`crates/elsecrew-sidecar/src/work_scope.rs` `write_refusal`): 에이전트는 자기 작업 공간에만 쓰고(Codex 실행 샌드박스, Claude 앱 도구 허가), 앱의 git 쓰기(단계 커밋·합치기·버리기)는 모두 단일 dispatcher 스레드에서 차례로 일어난다. 그래서
-  - `workspace.file.save`·`mergeChatWorkspace`·`inspectChatDiscard`/`discardChatWorkspace`·`cleanupWorkspace`·`eraseChatContent`는 **그 작업**에 팀 진행·실행·시작/멈춤 요청이 있을 때만 거절한다. `file.save`(작업 없이 연 프로젝트 화면)는 같은 프로젝트의 작업이 일할 때 거절하고, 이어지는 조각·확정 요청은 `saveId`로 시작한 저장의 대상을 찾는다.
+- **쓰기 차단은 실제 쓰기 경로 단위**(`crates/elsecrew-sidecar/src/work_scope.rs` `write_refusal`, `project/write_scope.rs` `WriteScope`): 에이전트는 자기 작업 공간에만 쓰고(Codex 실행 샌드박스, Claude 앱 도구 허가), 앱의 git 쓰기(단계 커밋·합치기·버리기)는 모두 단일 dispatcher 스레드에서 차례로 일어난다. 작업 ID가 아니라 쓰는 경로로 판단한다(PR #18 검토 B1).
+  - 작업의 쓰기 범위는 실제 경로(링크 해석)로 구한 작업 공간·프로젝트 폴더·저장소 git 폴더다. 두 범위는 git 폴더가 같거나 폴더가 서로 안에 있으면 만난다. 그래서 **같은 저장소의 작업끼리는 한 잠금**이고, 다른 폴더의 다른 저장소는 따로 간다. 경로를 구할 수 없으면 모든 것과 만난다(fail closed).
+  - `workspace.file.save`·`mergeChatWorkspace`·`inspectChatDiscard`/`discardChatWorkspace`·`cleanupWorkspace`·`eraseChatContent`는 그 작업 자신이나, 범위가 만나는 작업이 일할 때 거절한다. `file.save`(작업 없이 연 프로젝트 화면)는 프로젝트 폴더 범위로 본다. 이어지는 조각·확정 요청은 `saveId`로 시작한 저장의 대상을 찾는다.
+  - 등록 때도 막는다. 작업 공간 안이나 작업 공간을 담은 폴더는 프로젝트로 등록할 수 없다(`open_verified_source` → `refuse_workspace_overlap`). 작업 공간 폴더 설정과 새 작업 폴더도 기존 작업 공간 안에 둘 수 없다. 기록된 작업 공간은 `lock` 기록의 `worktree_path`다.
   - 사본을 사용자 폴더에 넣는 쓰기(`openApplicationConfirmation`·`startApplication`·`restoreApplication`·`retireApplication`·`cleanupBackup`·`applyChatLatest`)는 예전처럼 **어느 팀이든 일하면** 거절하고, `application_running` 쓰기 슬롯도 전역이다.
   - 어느 작업에도 묶을 수 없는 일(정리 중인 공급자 확인 `discovery_cleanup`, 작업 이름이 이상한 확인 요청)이 있으면 모든 작업을 바쁜 것으로 본다(예전 전역 규칙으로 돌아감). 설정 화면의 모델 목록(작업 없음)은 아무것도 막지 않는다.
   - 거절 코드는 예전과 같다(저장·반영 `orchestrationBusy`, 합치기·버리기 `requestBlocked`, 정리·삭제 `invalidParams`).
-- **네이티브 시험**: `pnpm m5:smoke:multiproject`가 실제 sidecar(fixture `cancel-clean`)로 다음을 확인한다. A에서 에이전트가 일하는 중에 B로 한 번에 바꾸고 배지를 본다. B도 실행해 두 실행이 동시에 `running`인지 본다. A로 돌아와 그 작업이 그대로인지 본다. fixture 엔진 저장소는 첫 역할 구성이라 팀 진행은 sidecar 경합 시험이 맡는다.
-  - 경합 시험(`orchestration_dispatch.rs`): `other_tasks_save_merge_and_discard_while_a_team_writes_its_own_workspace`(A의 fake 개발자가 작업 공간에 3초 동안 200번 쓰는 동안, 같은 저장소의 작업 C와 다른 프로젝트의 작업 B를 실제로 합치고 버리기 확인·저장 시작을 하며 A 자신의 것은 거절, B의 사본 반영은 거절. 끝난 뒤 두 저장소 `git fsck`·깨끗한 상태, 각 합치기는 자기 파일만, A 파일은 마지막 회차), `work_in_flight_without_a_task_blocks_every_task`, `a_save_to_a_project_view_waits_only_for_that_projects_tasks`.
+- **네이티브 시험**: `pnpm m5:smoke:multiproject`가 실제 sidecar(fixture `cancel-clean`)로 다음을 확인한다.
+  - A에서 에이전트가 일하는 중에 B로 한 번에 바꾸고 배지를 본다.
+  - B도 실행해 두 실행이 동시에 `running`인지 본다.
+  - A로 돌아와 그 작업이 그대로인지 본다.
+  - 둘 다 일하는 중에 앱을 닫고 같은 앱 데이터로 다시 연다. 두 실행이 `canceled`로 정리되고 두 작업을 오갈 수 있는지 본다.
+  - fixture 엔진 저장소는 첫 역할 구성이라 팀 진행은 sidecar 경합 시험이 맡는다.
+  - 경합 시험(`orchestration_dispatch.rs`):
+    - `other_tasks_save_merge_and_discard_while_a_team_writes_its_own_workspace`: A의 fake 개발자가 3초 동안 작업 공간에 200번 쓰는 동안 다른 저장소의 작업을 실제로 처리한다. B는 합치기와 저장(시작·조각·확정), D는 버리기를 끝까지 한다. A 자신의 것, 같은 저장소의 작업 C, B의 사본 반영은 거절된다. A의 회차가 그 사이에 늘었는지 확인하고, 끝난 뒤 C를 합치고 두 저장소 `git fsck`·깨끗한 상태를 본다.
+    - `a_project_or_workspace_folder_overlapping_a_tasks_workspace_is_refused`(작업 공간 안의 저장소, 링크로 가리킨 같은 폴더, 작업 공간을 담은 폴더, 작업 공간 안의 작업 공간 폴더)
+    - `write_scopes_meet_on_a_shared_repository_or_nested_folders`
+    - `work_in_flight_without_a_task_blocks_every_task`(기록을 읽을 수 없는 바쁜 작업 포함)
+    - `a_save_to_a_project_view_waits_only_for_that_projects_tasks`
+- **업데이트 다시 시작**은 화면에 열린 프로젝트뿐 아니라 **모든 프로젝트**의 작업을 기다린다(PR #18 검토 I3). 엔진의 `project.catalog` `workStatus`(바쁜 작업이 하나라도 있는지)를 5초마다와 실행 알림 때 읽는다. 읽지 못하면 일하는 중으로 본다.
+- **승인 알림**: 승인 요청의 작업을 처음 읽지 못하면, 그 요청이 아직 기다리는 동안 다음 목록에서 다시 읽는다. 질문 알림은 몇 번 다시 읽는다(PR #18 검토 I2).
+- **단계 막대 → 지난 페이지**: 펼친 단계의 카드가 지금 대화 페이지에 없으면 그 페이지를 연 뒤 카드로 간다(PR #18 검토 M1).
 
 ### 에이전트 연결·알림 패널 (ADE 화면 통일 U5·U6, 2026-11-26)
 

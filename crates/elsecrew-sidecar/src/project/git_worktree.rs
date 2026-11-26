@@ -187,6 +187,14 @@ impl ProjectManager {
                 }
             }
         }
+        // Nor inside an existing task's workspace: a new task there would sit
+        // in a folder another task's agent writes (PR #18 review B1). Holding
+        // existing workspaces is the normal case (the default folder).
+        for workspace in self.recorded_workspace_folders(storage)? {
+            if canonical.starts_with(&workspace) {
+                return Err(ProjectFailure::manifest("the workspace folder is inside a task's workspace"));
+            }
+        }
         write_json_atomic(&settings, WORKSPACE_FOLDER_FILE, &json!({"path":canonical_protocol_path(&canonical)?}))?;
         self.workspace_folder()
     }
@@ -225,7 +233,14 @@ impl ProjectManager {
             }
         }
         let short: String = worktree_id.trim_start_matches("worktree_").chars().take(8).collect();
-        Ok(project_dir.join(format!("task-{short}")))
+        let task_dir = project_dir.join(format!("task-{short}"));
+        // Never inside, at or around another task's workspace (PR #18 review B1).
+        for workspace in self.recorded_workspace_folders(storage)? {
+            if project_dir.starts_with(&workspace) || task_dir.starts_with(&workspace) || workspace.starts_with(&task_dir) {
+                return Err(ProjectFailure::manifest("the new task's folder overlaps another task's workspace"));
+            }
+        }
+        Ok(task_dir)
     }
 
     /// The worktree's `.git` file names `<root>/.git/worktrees/<name>`, and

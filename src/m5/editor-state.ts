@@ -141,6 +141,7 @@ export class ProjectEditorController {
    * view of it. Only those are ever rewritten or forgotten: drafts kept for a
    * workspace that is still being opened (or failed to open) stay untouched. */
   #draftsLive = false;
+  #draftsNotKeptSaid = false;
   #pendingStreamBytes = 0;
   #pendingOverflowUntil = 0;
   #unsubscribers: (() => void)[] = [];
@@ -379,11 +380,17 @@ export class ProjectEditorController {
     if (!tabs.length && !this.#draftsLive) return;
     this.#draftsLive = tabs.length > 0;
     try {
-      this.#drafts.save(workspace, tabs.length ? {
+      const kept = this.#drafts.save(workspace, tabs.length ? {
         activePath: this.#state.activePath,
         tabs: tabs.map(tab => ({ path: tab.path, text: tab.text, baseVersion: tab.baseVersion, byteLength: tab.byteLength,
           ...(tab.baseTextLength === undefined ? {} : { baseTextLength: tab.baseTextLength }) })),
       } : null);
+      // Not kept (no room, or storage refused): said once, then again after a
+      // keep worked. Kept drafts of other tasks are never given up for it.
+      if (!kept && tabs.length && !this.#draftsNotKeptSaid) {
+        this.#draftsNotKeptSaid = true;
+        queueMicrotask(() => { if (!this.#disposed) this.#setNotice("m5.editorNotice.draftsNotKept"); });
+      } else if (kept) this.#draftsNotKeptSaid = false;
     } catch { /* Keeping a draft is best effort; editing goes on. */ }
   }
 
@@ -807,6 +814,13 @@ export class ProjectEditorController {
     if (this.canLeaveProject()) return true;
     return Boolean(this.#drafts && this.#state.workspace)
       && this.#state.tabs.every(tab => tab.saveState === "clean" || (tab.saveState === "dirty" && tab.mode === "text"));
+  }
+
+  /** Before the view lets go of anything (its file watch, PR #18 review I1):
+   * true when it can be left, its unsaved text now kept for its task. */
+  prepareLeaveKeepingDrafts(): boolean {
+    if (this.canLeaveProject()) return true;
+    return this.canLeaveKeepingDrafts() && this.#draftsKept();
   }
 
   /** Whether the store now holds exactly this view's unsaved text. */

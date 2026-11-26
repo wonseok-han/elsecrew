@@ -1717,6 +1717,13 @@ impl Sidecar {
                     }
                     deleted
                 }
+                Some("workStatus") => {
+                    // Any task of any project at work: a run, a start or stop on
+                    // its way, or a team between steps (the app update waits).
+                    require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
+                    let working = !self.busy_chats().is_empty();
+                    Ok(project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"workStatus","working":working}), ..Default::default() })
+                }
                 Some("finishDeletions") => {
                     require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
                     let pending = if self.deletion_idle() {

@@ -427,12 +427,16 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const recheckStandings = () => { setStandingNonce(value => value + 1); dispositions.revalidate(); dispositions.request(chat.chats.filter(item => item.chatId !== chat.activeChat?.chatId)); };
   // The built-in team names no model; a task starts only once every role has one.
   const unselectedRoles = chat.settings ? (() => { const team = roleSettingsAsV3(chat.settings); return team.roles.filter(role => !hasUsableModel(role.runtime, role.modelSelector)).map(role => roleLabel(role.roleId, team.roleDefinitions, t)); })() : [];
+  // Any project's team at work (PR #18 review I3): the update restart and its
+  // banner wait for every project, not only the one on screen. Kept current
+  // below from the engine and from run notices.
+  const [appWorking, setAppWorking] = useState(false);
   useEffect(() => window.m5AppUpdate?.onRestartCheck(() => {
     const ready = !settingsOpen && !appDefaultsOpen && !newChatOpen && !reloadDraft && !reloadingDraft
-      && !leavingProject && !leaveError && controller.canLeaveProject() && chatController.canLeaveProjectView() && !chatController.isTeamWorking();
+      && !leavingProject && !leaveError && controller.canLeaveProject() && chatController.canLeaveProjectView() && !chatController.isTeamWorking() && !appWorking;
     if (ready) flushSync(() => setUpdatePreparing(true));
     return ready;
-  }, () => setUpdatePreparing(false)), [settingsOpen, appDefaultsOpen, newChatOpen, reloadDraft, reloadingDraft, leavingProject, leaveError, controller, chatController]);
+  }, () => setUpdatePreparing(false)), [settingsOpen, appDefaultsOpen, newChatOpen, reloadDraft, reloadingDraft, leavingProject, leaveError, controller, chatController, appWorking]);
   const openDiffFile = useCallback((path: string) => { void controller.openFile(path); }, [controller]);
   const readDiff = useCallback((path: string) => controller.readDiff(path), [controller]);
   const discussDiff = useCallback((path: string, side?: "before" | "after", line?: number) => {
@@ -473,9 +477,17 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   }, [controller, chatController]);
   useEffect(() => { if (snapshot.project?.id !== chat.projectId) { if (snapshot.project) void chatController.openProject(snapshot.project.id); } }, [snapshot.project?.id, chat.projectId, chatController]);
   useEffect(() => { controller.setActionBlocked(!admissionReady || settingsOpen || leavingProject || leaveError || chat.switching || chatController.isActionBlocked(), !admissionReady ? { key: "m5.editorNotice.preparing" } : settingsOpen ? { key: "m5.editorNotice.settings" } : chat.switching ? { key: "m5.editorNotice.switching" } : { key: "m5.editorNotice.protected" }); }, [admissionReady, settingsOpen, leavingProject, leaveError, controller, chat.switching, chat.agentRecovery, chat.agentRecoveryResolving, chat.recoveries, chat.activeChat?.state]);
+  // The last switch stopped because unsaved text could not be kept; cleared when edits change.
+  const [draftsHold, setDraftsHold] = useState(false);
+  useEffect(() => { setDraftsHold(false); }, [snapshot.tabs]);
   const leaveProject = async (): Promise<boolean> => {
     const project = controller.snapshot().project;
-    if (!project || settingsOpen || !window.m5Projects || !admissionReady || controller.snapshot().actionBlocked || !controller.canLeaveKeepingDrafts() || !chatController.beginLeavingProjectView()) return false;
+    if (!project || settingsOpen || !window.m5Projects || !admissionReady || controller.snapshot().actionBlocked || !controller.canLeaveKeepingDrafts()) return false;
+    // Unsaved text is kept before anything is let go (PR #18 review I1): when
+    // it cannot be, the view stays as it is and says so.
+    if (!controller.prepareLeaveKeepingDrafts()) { setDraftsHold(true); return false; }
+    setDraftsHold(false);
+    if (!chatController.beginLeavingProjectView()) return false;
     controller.setActionBlocked(true);
     setLeavingProject(true);
     try {
@@ -583,6 +595,23 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     activity.reconcileProject(chat.projectId, chat.chats.filter(item => listedWorking(item.state)).map(item => item.chatId));
   }, [activity, chat.projectId, chat.settings?.projectId, chat.chats]);
   const activityOf = (projectId: string) => projectActivity(activity, notificationItems, projectId);
+  // The engine says whether any task of any project works; run notices and
+  // a short poll keep it current. An unreadable answer counts as working.
+  useEffect(() => {
+    if (!admissionReady || !window.m5Projects) return;
+    let live = true;
+    const read = () => {
+      const input = { action: "workStatus" as const };
+      void window.m5Projects!.request(input).then(raw => {
+        const result = validateProjectCatalogResult(raw, input);
+        if (live && result.action === "workStatus") setAppWorking(result.working || activity.workingProjects().length > 0);
+      }).catch(() => { if (live) setAppWorking(true); });
+    };
+    read();
+    const timer = window.setInterval(read, 5000);
+    const stop = activity.subscribe(read);
+    return () => { live = false; window.clearInterval(timer); stop(); };
+  }, [admissionReady, activity]);
   const [pendingOpen, setPendingOpen] = useState<{ projectId: string; chatId: string } | null>(null);
   const revealStoryRef = useRef<() => void>(() => {});
   /** Why a notification of another project could not be opened (PR #14 review I4). */
@@ -899,7 +928,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   // home screen has its own list, so there is one list on each screen (D4⑤).
   // A working team is no reason to stay (ADE multi-project P1): only what is
   // on its way right now, or text that cannot be kept, holds the switch.
-  const switchBlockedReason = !admissionReady || leavingProject ? null : !chatController.canLeaveProjectView() ? t("m5.switch.busy") : !controller.canLeaveKeepingDrafts() ? t(snapshot.workspace ? "m5.switch.unsavedHeld" : "m5.switch.unsaved") : null;
+  const switchBlockedReason = !admissionReady || leavingProject ? null : !chatController.canLeaveProjectView() ? t("m5.switch.busy") : !controller.canLeaveKeepingDrafts() ? t(snapshot.workspace ? "m5.switch.unsavedHeld" : "m5.switch.unsaved") : draftsHold ? t("m5.switch.notKept") : null;
   // Adding a folder keeps the open project until a folder is picked, so it waits for an open task or unsaved edits (PR #12 review I2).
   const addBlockedReason = !admissionReady || leavingProject ? null : snapshot.workspace ? t("m5.switch.addTaskOpen") : !controller.canLeaveProject() ? t("m5.switch.unsaved") : null;
   const projectSwitcherList = <ProjectCatalog switcher activity={activityOf} onCloseProject={() => void leaveProject()} closeDisabled={!admissionReady || settingsOpen || leavingProject || leaveError || !controller.canLeaveKeepingDrafts() || !chatController.canLeaveProjectView()} onRoles={() => openRoleSettings()} rolesDisabled={!admissionReady || settingsOpen || !projectDataReady || chat.preparing || chat.switching} onAdd={addProject} refreshKey={catalogRevision} removeDisabled={!canRemove} onRemove={projectRemoval} onManage={entry => { setManagedProject(entry); setPreferencesSection("project"); setPreferencesOpen(true); }} ready={admissionReady} controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || snapshot.selectionBlocked || leavingProject} onSwitch={entry => void switchProject(entry)} switchBlockedReason={switchBlockedReason} addBlockedReason={addBlockedReason} openedAt={openedAt} />;
@@ -1001,7 +1030,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           onSwitchRoles={snapshot.project && !projectDataReady ? undefined : () => navigatePreferences(() => { if (snapshot.project) { setPreferencesOpen(false); openRoleSettings(); } else { setPreferencesSection("roles"); setAppDefaultsOpen(true); } })} />
       </AppSettings>
       <StorageAdmissionNotice admission={admission} />
-      <UpdateBanner teamWorking={chatController.isTeamWorking()} onReveal={() => navigatePreferences(() => { setPreferencesSection("general"); setPreferencesOpen(true); })} />
+      <UpdateBanner teamWorking={chatController.isTeamWorking() || appWorking} onReveal={() => navigatePreferences(() => { setPreferencesSection("general"); setPreferencesOpen(true); })} />
       {engineRestarted && <section className="m5-admission" role="status"><strong>{t("m5.admission.restarted")}</strong><p>{t("m5.admission.restartedHelp")}</p><button type="button" className="m5-secondary" onClick={() => window.location.reload()}>{t("m5.admission.refresh")}</button></section>}
       {/* Home and first run: why opening a project stopped (a switch whose target could not open lands here, PR #12 review I2). */}
       {!snapshot.project && snapshot.error && !resumingProject && <section className="m5-banner m5-banner-danger m5-home-error" role="alert" data-testid="home-error"><div><strong>{t(snapshot.error.messageKey)}</strong>

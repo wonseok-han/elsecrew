@@ -17,7 +17,7 @@ import { stageCells, stageNow, type StageCell } from "./task-story-model.ts";
  * opens every stage of the task in one row that scrolls sideways, ending on
  * the newest; a finished stage then takes the story to that member's card.
  */
-export function StageBar({ runs, working, definitions }: { runs: readonly AgentRunRecordV1[]; working: boolean; definitions?: readonly RoleDefinitionV3[] }) {
+export function StageBar({ runs, working, definitions, onReveal }: { runs: readonly AgentRunRecordV1[]; working: boolean; definitions?: readonly RoleDefinitionV3[]; onReveal?: (runId: string) => void }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
@@ -56,10 +56,11 @@ export function StageBar({ runs, working, definitions }: { runs: readonly AgentR
   };
   const current = stageNow(cells);
   const announce = current ? `${title(current)} · ${current.kind === "run" ? t(`m5.stage.status.${current.status}`) : meta(current)}` : "";
-  // A finished stage takes the story to its member's card (when that card is on this page).
+  // A stage takes the story to its member's card; on another page of the
+  // story, the story opens that page first (`onReveal`).
   const reveal = (runId: string) => {
     const card = document.querySelector<HTMLElement>(`[data-testid="member-card"][data-run-id="${CSS.escape(runId)}"]`);
-    if (!card) return;
+    if (!card) { onReveal?.(runId); return; }
     card.scrollIntoView({ block: "start", behavior: "smooth" });
     card.focus({ preventScroll: true });
   };
