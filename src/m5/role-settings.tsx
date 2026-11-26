@@ -67,7 +67,7 @@ async function readAppDefaults(): Promise<{ team: TeamDraft; revision: number } 
   return result.action === request.action ? { team: teamDraftFrom(result.settings), revision: result.settings.revision } : null;
 }
 
-export function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, onReload, onClose, returnToDraft = false, projectName, scope = "project", activeTasks = 0 }: { navigationGuard?: RoleNavigationGuard; scope?: "project" | "app"; settings: NonNullable<ReturnType<ChatUiController["snapshot"]>["settings"]>; activeChat: ReturnType<ChatUiController["snapshot"]>["activeChat"]; disabled: boolean; feedback: ReactNode; onSave: (roles: readonly RoleProfileV1[], roleDefinitions: readonly RoleDefinitionV3[]) => Promise<void>; onReload: () => Promise<void>; onClose: () => void; returnToDraft?: boolean; projectName: string; activeTasks?: number }) {
+export function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, onReload, onClose, returnToDraft = false, projectName, scope = "project", activeTasks = 0, onAppDefaultsSaved }: { navigationGuard?: RoleNavigationGuard; scope?: "project" | "app"; settings: NonNullable<ReturnType<ChatUiController["snapshot"]>["settings"]>; activeChat: ReturnType<ChatUiController["snapshot"]>["activeChat"]; disabled: boolean; feedback: ReactNode; onSave: (roles: readonly RoleProfileV1[], roleDefinitions: readonly RoleDefinitionV3[]) => Promise<void>; onReload: () => Promise<void>; onClose: () => void; returnToDraft?: boolean; projectName: string; activeTasks?: number; onAppDefaultsSaved?: () => void }) {
   const { t, lang } = useI18n();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const initial = useMemo(() => teamDraftFrom(settings), [settings]);
@@ -336,7 +336,8 @@ export function RoleSettings({ navigationGuard, settings, disabled, feedback, on
       if (!defaults || !window.m5Projects) { setAppDefaults("error"); return; }
       const request = { action: "updateAppRoleDefaults" as const, expectedRevision: defaults.revision, roles: team.roles, roleDefinitions: team.roleDefinitions };
       validateProjectCatalogResult(await window.m5Projects.request(request), request);
-      setAppDefaults("saved");
+      // Saving the project remounts this screen: the workbench keeps the notice.
+      setAppDefaults("saved"); onAppDefaultsSaved?.();
     } catch { setAppDefaults("error"); return; }
     await onSave(team.roles, team.roleDefinitions);
   };

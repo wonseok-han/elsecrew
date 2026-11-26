@@ -209,6 +209,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   useEffect(() => { if (newChatOpen) setSetupConfirmed(false); }, [newChatOpen]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appDefaultsOpen, setAppDefaultsOpen] = useState(false);
+  const [appDefaultsAlsoSaved, setAppDefaultsAlsoSaved] = useState(false);
   const roleNavigation = useRef<((next: () => void) => void) | null>(null);
   const navigatePreferences = (next: () => void) => roleNavigation.current ? roleNavigation.current(next) : next();
   const [updatePreparing, setUpdatePreparing] = useState(false);
@@ -605,6 +606,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     : null;
   const openRoleSettings = (fromNewChat = false) => {
     if (!admissionReady || !projectDataReady || settingsOpen || chat.preparing || chat.switching) return;
+    setAppDefaultsAlsoSaved(false);
     setReturnToNewChat(fromNewChat);
     restoreSettingsFocus.current = false;
     setNewChatOpen(false);
@@ -915,7 +917,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         {!admissionReady && <StorageAdmissionNotice admission={admission} />}
         {chat.notice && <p className="m5-notice" role="status">{formatChatNotice(chat, lang)}</p>}
         {chat.error && <section className="m5-error" role="alert"><strong>{t(chat.error.messageKey)}</strong><details><summary>{t("m5.feedback.details")}</summary><pre>{chat.error.detail}</pre></details></section>}
-      </>} onSave={(roles, roleDefinitions) => chatController.updateSettings(roles, roleDefinitions)} onReload={() => chatController.reloadSettings()} onClose={closeRoleSettings} returnToDraft={returnToNewChat} projectName={snapshot.project?.name ?? chat.settings.projectId} activeTasks={chat.chats.filter(item => teamWorking(item.state)).length} />}
+        {appDefaultsAlsoSaved && <p role="status">{t("m5.roles.appDefaultsAlsoSaved")}</p>}
+      </>} onAppDefaultsSaved={() => setAppDefaultsAlsoSaved(true)} onSave={(roles, roleDefinitions) => chatController.updateSettings(roles, roleDefinitions)} onReload={() => chatController.reloadSettings()} onClose={closeRoleSettings} returnToDraft={returnToNewChat} projectName={snapshot.project?.name ?? chat.settings.projectId} activeTasks={chat.chats.filter(item => teamWorking(item.state)).length} />}
 
       {snapshot.project && <TaskLayout band={layoutBandNow} rightTab={rightTab} onRightTab={selectRightTab} rightCollapsed={rightCollapsed} previewCovered={previewCovered}
         approvalNotice={approvalCovered({ waiting: approvalWaitingNow, sheetOpen, drawerOpen: bandUsesDrawer(layoutBandNow) && drawerOpen })

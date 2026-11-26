@@ -1912,7 +1912,7 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-team-pane .m5-role-team-tools { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .m5-team-pane .m5-role-team-tools button { padding: var(--space-1) var(--space-2); font-size: var(--text-xs); }
 /* Menus float over the list; they never push rows around. */
-.m5-team-menu { position: absolute; z-index: 5; right: 0; top: calc(100% + 2px); display: grid; gap: 1px; min-width: 220px; max-width: 320px; max-height: 420px; overflow: auto; padding: var(--space-1); border: 1px solid var(--line-strong); border-radius: var(--radius-m); background: var(--bg-raised); box-shadow: 0 12px 32px #0008; }
+.m5-team-menu { position: absolute; z-index: 5; right: 0; top: calc(100% + 2px); display: grid; gap: 1px; min-width: 220px; max-width: 320px; max-height: min(420px, 50vh); overflow: auto; padding: var(--space-1); border: 1px solid var(--line-strong); border-radius: var(--radius-m); background: var(--bg-raised); box-shadow: 0 12px 32px #0008; }
 .m5-team-foot .m5-team-menu { left: 0; right: auto; top: auto; bottom: calc(100% + 4px); }
 .m5-team-menu button { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); width: 100%; padding: var(--space-2); border: 0; background: transparent; color: var(--text-primary); text-align: left; font-size: var(--text-s); font-weight: 400; }
 .m5-team-menu button:hover:not(:disabled), .m5-team-menu button:focus-visible { background: var(--bg-hover); outline: none; }
@@ -1926,7 +1926,8 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-team-menu-note { margin: var(--space-1) var(--space-2); color: var(--status-attention-text); font-size: var(--text-xs); }
 /* The editor on the right. */
 .m5-role-editor { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3) var(--space-4); min-width: 0; padding: var(--space-4); border: 1px solid var(--line-default); border-radius: var(--radius-l); background: var(--bg-pane); }
-.m5-role-editor > header { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.m5-role-editor > header { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: var(--space-2); }
+.m5-role-editor > header details { margin-left: auto; }
 .m5-role-editor > header .m5-role-icon { width: 28px; height: 28px; font-size: var(--text-m); }
 .m5-role-editor > header h3 { margin: 0; overflow-wrap: anywhere; font-size: var(--text-l); }
 .m5-role-editor > header small, .m5-role-editor > header details { color: var(--text-tertiary); font-size: var(--text-xs); }
@@ -1960,4 +1961,6 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-team-actions .m5-team-save:hover:not(:disabled) { background: var(--action-bg-hover); }
 /* App defaults inside the settings page: same editor, one column when narrow. */
 .m5-settings-inline .m5-team-intro { display: none; }
+.m5-settings-inline .m5-team-editor { grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); }
+.m5-settings-inline .m5-role-editor { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @media (max-width: 1100px) { .m5-team-editor { grid-template-columns: minmax(0, 1fr); } .m5-role-editor { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
