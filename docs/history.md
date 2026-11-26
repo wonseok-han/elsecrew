@@ -2,6 +2,19 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #15 독립 검토(차단 1·중요 3·경미 2) 반영 (`orca/ade-latency`)
+검토서 `~/Documents/elsecrew-ade-v-2026-11-26/REVIEW-pr15.md`(대상 60e4e0d1). 무결성(projection 손상 검출·승인 전체 재검사·D1 정리)은 유지 판정.
+
+- **B1 거짓 통과 → G6에서 뺌 + 판정 엄격화**: 조정자 지시("빨리 확실하게 못 하면 빼라")대로 `m5:test:latency`를 g6-release·하네스 시험에서 빼고 `pnpm m5:measure:latency`(진단)로 남겼다. fake 공급자에는 승인 큐가 없어 G6 근거로 부족하다. 그래도 `--check`는 `scripts/m5-latency-judge.mjs`로 바꿔 단계별 종료 코드 0·엔진 시작 1회(재시작 없음)·둘째 단계 봉인 시작·시드 완료·요청 표본 수·**표본마다 부하 유지**(실행 중 = 표본 앞뒤로 run이 running, 뒤 검사 중 = 앞뒤로 복사본 검사 중)·클릭 1회를 모두 확인한 뒤에만 목표치를 본다. 시험 `tests/m5-latency-judge.test.mts`(검토서의 거짓 통과 보고서가 FAIL, 조건 하나씩 빠질 때 FAIL).
+- **I1 구간 매칭**: 같은 메서드 시간 창 매칭을 없앴다. 라운드마다 sidecar가 본 같은 메서드 요청 전체(화면 폴링 포함)의 대기·처리를 집계한다(`round.engine`). 파일 열기 시계는 행 찾기(폴더 펼침·스크롤) 뒤, 클릭을 보내기 직전에 시작한다(첫 재측정에서 시계를 탐색 앞에 둬 봉인 시작 p95 588ms가 나왔던 것을 바로잡음). 승인 처리 시간은 fake에서 0.018ms로, 승인 경로(5초 Git 재사용) 개선은 측정으로 입증하지 못했다고 문서·PR에 명시.
+- **I2 계측**: `latency_log.rs`가 채널로 쓰기 스레드에 넘긴다(루프는 파일 I/O를 기다리지 않음, 가득 차면 버리고 `dropped`). 요청 ID·action은 쓰지 않고 메서드는 프로토콜 목록에 있는 이름만(그 밖 `other`). 요청 복제 제거. 시험 `timing_log_writes_only_known_names_and_numbers_off_the_loop`, `a_full_timing_queue_drops_records_instead_of_waiting`.
+- **I3 큰 스트림**: `#acceptChunk`가 청크마다 누적 문자열 전체를 다시 인코딩하던 것을, 그 청크만 인코딩하고 바이트 수·SHA-256(node `createHash`)을 순차 갱신하게 바꿨다(`TextStreamV1.received/digest`). 시험 `task-workspace streams of many chunks settle, each chunk encoded once`(40청크 ~1.9MiB 파일·diff 20쌍, 수정 전 코드에서 실패 확인).
+- **M2**: 작업 공간 경로의 해시 불일치·선언 크기 초과·빈 파일(등록 없음) 시험 `task-workspace streams still refuse a wrong hash, and an empty file opens no stream`.
+- **M1(코드 변경 없음)**: 5초 안 Git 상태만 바뀌면 보기에서 버튼이 잠시 살아 보일 수 있으나 수락·거절은 전체 검사로 거절되고 카드에 오류가 난다. native owner가 필요한 시험이라 이번에 넣지 않았다.
+- **재측정(엄격 판정 PASS, 작업 41·실행 120, 조건별 12회, p50/p95 ms)**: 파일 열기 쉬는 중 66/142·실행 중 67/90·봉인 시작 66/234·뒤 검사 중 69/149, 승인 목록 1.4/19.8, getChat 16~25/≤120. 종료 0/0, 엔진 시작 1/1(둘째 봉인), 부하 유지 12/12·12/12, 계측 버림 0. 증거 `~/Documents/elsecrew-ade-latency-2026-11-26/review-round/`.
+- **검증**: `npm test` 953/953, `pnpm build`, 하네스 시험 9/9, `cargo test -p elsecrew-sidecar --test stdio_process` 16, lib(latency_log·projection) 4, `git diff --check`.
+- **ade-stability와 겹치는 곳**: D1 보강(한도 초과 시 그 요청만 실패)은 이번에 바꾼 `electron/sidecar-client.ts`의 `TextStreamV1`(필드 `received`/`digest`로 바뀜)·`#acceptChunk`·`#registerStream`과 `tests/m5-electron-bridge.test.mts`의 작업 공간 스트림 시험 근처다. D2(관측 줄 128KiB)는 겹치지 않는다.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 응답 지연 조사·수정: 파일 열기·승인 목록·getChat (`orca/ade-latency`, 기준 feature/ade 7378332a)
 증상: 주인님 "파일을 열어 보려니까 한참 뒤에 열린다", 11-25 실측 approval list 7초·getChat 10초(권한 카드가 내용을 보이기 전에 사라짐, 통합 검증 D3). 증거·표: `~/Documents/elsecrew-ade-latency-2026-11-26/`.
 
@@ -117,7 +130,7 @@
   - 상태 색 CSS 변수 이름은 `--status-running/attention/review/done/danger`(1차-나 토큰과 공유).
 - **설정의 "저장하지 않은 변경" 규칙(2026-11-25)**: `src/m5/settings-draft.ts`. 화면이 스스로 하는 보정(추천 모델 채우기 등)은 불러온 값에도 같이 적용해 미저장으로 세지 않는다. 사람이 누른 "추천 모델 채우기"는 편집이다. 역할 편집 재작성은 이 함수를 그대로 쓴다.
 - **보고 렌더러 안전 규칙(2026-11-25)**: `src/m5/markdown.ts`는 HTML을 해석하지 않고, React 요소로만 그린다. 링크는 자격 증명 없는 http(s)/mailto만, `href` 없이 그리며 누르면 main(`m5:external-link:v1`)이 주소를 다시 검사하고 네이티브 확인 창을 띄운 뒤에만 연다. 이미지는 설명 글자만 보인다.
-- **권한 요청 화면과 sidecar 지연(2026-11-25 실측)**: 검증 단계 실행 중 approval `list` 7초, `getChat` 10초가 걸렸다. Claude CLI는 권한 요청을 3초 안에 스스로 거둬들이므로, 카드가 내용을 읽기 전에 요청이 사라진다(진단 보고서의 "누르기 전에 사라짐"의 원인). 화면은 이제 "거둬들였어요"로 남기고 알림도 해소하지만, sidecar 응답 지연 자체는 미조사다. **2026-11-26 원인 확인(응답 지연 작업)**: 7~10초 규모의 대기는 엔진 재시작이었다. 작업 공간 파일·diff를 16번 열면 main이 `workspace.blob.chunk` 스트림을 지우지 않아 17번째에 `sidecar active stream bound exceeded` → `protocolInvalid` → 재시작(저장소 확인 포함 약 10초)이 났다(통합 검증 D1, `sidecar-client.ts`에서 수정). 그 밖에 승인 목록·보기가 매번 Git 검사 전체와 projection 전체 파싱을 두 번씩 했다(viewing은 5초 안 Git 검사 재사용으로 수정). 측정은 `pnpm m5:test:latency`. 실제 Claude 권한 요청으로 D3가 줄었는지는 실계정 확인이 남았다.
+- **권한 요청 화면과 sidecar 지연(2026-11-25 실측)**: 검증 단계 실행 중 approval `list` 7초, `getChat` 10초가 걸렸다. Claude CLI는 권한 요청을 3초 안에 스스로 거둬들이므로, 카드가 내용을 읽기 전에 요청이 사라진다(진단 보고서의 "누르기 전에 사라짐"의 원인). 화면은 이제 "거둬들였어요"로 남기고 알림도 해소하지만, sidecar 응답 지연 자체는 미조사다. **2026-11-26 원인 확인(응답 지연 작업)**: 7~10초 규모의 대기는 엔진 재시작이었다. 작업 공간 파일·diff를 16번 열면 main이 `workspace.blob.chunk` 스트림을 지우지 않아 17번째에 `sidecar active stream bound exceeded` → `protocolInvalid` → 재시작(저장소 확인 포함 약 10초)이 났다(통합 검증 D1, `sidecar-client.ts`에서 수정). 그 밖에 승인 목록·보기가 매번 Git 검사 전체와 projection 전체 파싱을 두 번씩 했다(viewing은 5초 안 Git 검사 재사용으로 수정). 측정은 `pnpm m5:measure:latency`(진단, G6 아님 — PR #15 검토 B1). 실제 Claude 권한 요청으로 D3가 줄었는지는 실계정 확인이 남았다.
 - **개발 앱 시험 함정(2026-11-25)**: `workbench.tsx`에서 컴포넌트가 아닌 것을 export하면 Fast Refresh가 깨져 저장할 때마다 화면 전체가 다시 로딩된다. 실행 중에 다시 로딩되면 팀 작업은 sidecar에서 계속되고, 그 실행이 끝날 때까지 프로젝트 열기가 잠긴다. 셸에서 `cd`는 scm_breeze 때문에 실패해도 다음 명령이 실행된다 — 시험 폴더를 만들 때 `cd` 대신 절대경로와 `git -C`를 쓴다(이번에 시험용 `git init`·커밋이 작업 브랜치에 잘못 들어가 고쳤다).
 
 - **Codex CLI가 바뀌면 사전 확인이 먼저 깨진다(2026-11-25)**: ChatGPT.app 업데이트가 내장 codex-cli를 바꾼다. 앱의 사전 확인(`codex_preflight/exchange.rs`, `named_config.rs`, `codex_login/connection.rs`)은 응답을 엄격하게 비교한다(`deny_unknown_fields`, null 기본값 목록). 그래서 새 필드 하나만 생겨도 "연결을 확인하지 못했어요"(`providerLoginFailed`)가 난다.
