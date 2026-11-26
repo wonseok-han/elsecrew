@@ -150,18 +150,21 @@ fn remembered_projection_rows_equal_a_full_parse_and_parse_only_changed_rows() {
     assert_eq!(storage.unclean_engine_processes().unwrap_err().kind, "projectionInvalid");
     storage.connection.execute("UPDATE runs SET projection_json=?1 WHERE run_id='run_06'", [json!({"run_id":"run_06"}).to_string()]).unwrap();
     assert_eq!(storage.projection_record("project", "project_a").unwrap(), full().projects.get("project_a").cloned());
-    // Damage restored to the remembered bytes is accepted again: those bytes
-    // parsed before. Text that is not valid UTF-8 or not text fails.
+    // Stored text that is not valid UTF-8 fails like the full parse does
+    // (the table is STRICT, so a non-text value cannot be stored at all).
     storage.connection.execute("UPDATE runs SET projection_json=CAST(X'FF' AS TEXT) WHERE run_id='run_08'", []).unwrap();
     assert!(storage.projection_record("project", "project_a").is_err());
-    storage.connection.execute("UPDATE runs SET projection_json=X'7B7D' WHERE run_id='run_08'", []).unwrap();
-    assert!(storage.projection_record("project", "project_a").is_err());
-    // A change committed by another connection is seen.
+    assert!(load_projection(&storage.connection).is_err());
+    // Rows changed inside a transaction are seen there, and a rollback brings
+    // the earlier rows back (no change counter is trusted). Other connections
+    // cannot write while the engine holds the database.
     storage.connection.execute("UPDATE runs SET projection_json='{}' WHERE run_id='run_08'", []).unwrap();
-    let other = Connection::open(&path).unwrap();
-    other.execute("UPDATE projects SET projection_json=?1 WHERE project_id='project_a'", [json!({"id":"project_a","from":"other"}).to_string()]).unwrap();
-    drop(other);
-    assert_eq!(storage.projection_record("project", "project_a").unwrap().unwrap()["from"], "other");
+    let before = storage.projection_record("project", "project_a").unwrap();
+    storage.connection.execute_batch("BEGIN IMMEDIATE").unwrap();
+    storage.connection.execute("UPDATE projects SET projection_json=?1 WHERE project_id='project_a'", [json!({"id":"project_a","inside":true}).to_string()]).unwrap();
+    assert_eq!(storage.projection_record("project", "project_a").unwrap().unwrap()["inside"], true);
+    storage.connection.execute_batch("ROLLBACK").unwrap();
+    assert_eq!(storage.projection_record("project", "project_a").unwrap(), before);
     assert_eq!(storage.projection_record("project", "project_a").unwrap(), full().projects.get("project_a").cloned());
 }
 
