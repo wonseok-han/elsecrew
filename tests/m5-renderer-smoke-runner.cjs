@@ -5,9 +5,9 @@ const { resolve, sep } = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { mkdtempSync, writeFileSync } = require("node:fs");
 const { measureMessagePaint } = require("../scripts/m5-message-paint-probe.cjs");
+// Messages show as the person's bubbles and story cards (1차-나): `.m5-message` is gone.
 const { probeInstallConsent } = require("./m5-install-ui-probe.cjs");
 const { probeCleanupConsent } = require("./m5-cleanup-ui-probe.cjs");
-const { probeApplicationResponseLoss } = require("./m5-application-response-loss-probe.cjs");
 const { tmpdir } = require("node:os");
 
 // The normal parent test owns this root and removes it after confirmed exit.
@@ -36,6 +36,9 @@ function waitFor(script, label) {
   })`;
 }
 
+// The smoke reads Korean screens first; CI runners default to English.
+// Chromium takes "ko" here ("ko-KR" falls back to English).
+app.commandLine.appendSwitch("lang", "ko");
 app.whenReady().then(async () => {
   if (!rendererDirectory || rendererDirectory === resolve("")) throw new Error("M5_RENDERER_DIR is required");
   await session.fromPartition("m5-renderer-smoke").protocol.handle("m5smoke", (request) => {
@@ -45,7 +48,8 @@ app.whenReady().then(async () => {
     if (asset !== rendererDirectory && !asset.startsWith(`${rendererDirectory}${sep}`)) return new Response("not found", { status: 404 });
     return net.fetch(pathToFileURL(asset).toString());
   });
-  const window = new BrowserWindow({ width: 1280, height: 768, show: false, webPreferences: { preload, partition: "m5-renderer-smoke", contextIsolation: false, sandbox: false, nodeIntegration: false } });
+  // CI screens can be smaller than the layout's 1280×768: keep the size exact.
+  const window = new BrowserWindow({ width: 1280, height: 768, useContentSize: true, enableLargerThanScreen: true, show: false, webPreferences: { preload, partition: "m5-renderer-smoke", contextIsolation: false, sandbox: false, nodeIntegration: false } });
   window.webContents.on("console-message", (event) => process.stderr.write(`renderer: ${event.message}\n`));
   window.webContents.on("render-process-gone", (_event, details) => fail(new Error(`renderer exited: ${details.reason}`)));
   await window.loadURL("m5smoke://m5/index.html");
@@ -398,16 +402,16 @@ app.whenReady().then(async () => {
     const fileSearch = document.querySelector('[aria-label="파일 이름 또는 경로 찾기"]');
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(fileSearch, 'EXAMPLE.TS');
     fileSearch.dispatchEvent(new Event('input', { bubbles: true }));
-    await ${waitFor("!document.querySelector('.m5-file-search button[type=submit]').disabled", "file search enabled")};
-    document.querySelector('.m5-file-search button[type=submit]').click();
+    await ${waitFor("!document.querySelector('[data-testid=right-panel-files] .m5-file-search button[type=submit]').disabled", "file search enabled")};
+    document.querySelector('[data-testid=right-panel-files] .m5-file-search button[type=submit]').click();
     await ${waitFor("document.querySelector('.m5-search-results button')?.textContent === 'src/example.ts'", "recursive file search result")};
     if (document.querySelector('.m5-file-row .m5-tree-name').textContent !== 'src') throw new Error('search changed folder navigation');
     const searchLanguage = document.querySelector('.m5-preferences-row select');
     searchLanguage.value = 'en'; searchLanguage.dispatchEvent(new Event('change', { bubbles: true }));
-    await ${waitFor("document.querySelector('.m5-file-search input')?.getAttribute('aria-label') === 'Find by file name or path'", "English file search")};
-    if (fileSearch !== document.querySelector('.m5-file-search input') || fileSearch.value !== 'EXAMPLE.TS' || document.querySelector('.m5-search-results button').textContent !== 'src/example.ts') throw new Error('language switch lost search');
+    await ${waitFor("document.querySelector('[data-testid=right-panel-files] .m5-file-search input')?.getAttribute('aria-label') === 'Find by file name or path'", "English file search")};
+    if (fileSearch !== document.querySelector('[data-testid=right-panel-files] .m5-file-search input') || fileSearch.value !== 'EXAMPLE.TS' || document.querySelector('.m5-search-results button').textContent !== 'src/example.ts') throw new Error('language switch lost search');
     searchLanguage.value = 'ko'; searchLanguage.dispatchEvent(new Event('change', { bubbles: true }));
-    await ${waitFor("document.querySelector('.m5-file-search input')?.getAttribute('aria-label') === '파일 이름 또는 경로 찾기'", "Korean search restored")};
+    await ${waitFor("document.querySelector('[data-testid=right-panel-files] .m5-file-search input')?.getAttribute('aria-label') === '파일 이름 또는 경로 찾기'", "Korean search restored")};
     document.querySelector('.m5-search-results button').click();
     await ${waitFor("!document.querySelector('[data-testid=review-sheet]').hidden && document.querySelector('.monaco-editor') && Object.hasOwn(globalThis, 'MonacoEnvironment') && typeof globalThis.MonacoEnvironment.getWorker === 'function'", "Monaco mount and reveal")};
     await ${waitFor("document.querySelector('.m5-project-guide')?.open === false", "guide collapses when file work starts")};
@@ -441,12 +445,13 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-settings [role=alertdialog]')", "failed-save draft reload confirmation")};
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '설정 변경 버리고 다시 불러오기').click();
     await ${waitFor("document.querySelector('.m5-role-card details input').value === 'test-model'", "explicit settings reload")};
-    if (document.querySelector('.m5-notice-toast > span')?.textContent !== '저장된 역할과 모델을 다시 불러왔어요.') throw new Error('chat status notice missing');
+    // While settings are open the notice shows inside them, not as a toast (1차-가 D4⑥).
+    if (document.querySelector('.m5-settings .m5-notice')?.textContent !== '저장된 역할과 모델을 다시 불러왔어요.') throw new Error('chat status notice missing');
     settingsLanguage.value = 'en'; settingsLanguage.dispatchEvent(new Event('change', { bubbles: true }));
-    await ${waitFor("document.querySelector('.m5-notice-toast > span')?.textContent === 'Reloaded saved roles and models.'", "English chat status notice")};
+    await ${waitFor("document.querySelector('.m5-settings .m5-notice')?.textContent === 'Reloaded saved roles and models.'", "English chat status notice")};
     if (document.querySelector('.m5-role-card details input').value !== 'test-model') throw new Error('notice language changed role value');
     settingsLanguage.value = 'ko'; settingsLanguage.dispatchEvent(new Event('change', { bubbles: true }));
-    await ${waitFor("document.querySelector('.m5-notice-toast > span')?.textContent === '저장된 역할과 모델을 다시 불러왔어요.'", "Korean chat status notice restored")};
+    await ${waitFor("document.querySelector('.m5-settings .m5-notice')?.textContent === '저장된 역할과 모델을 다시 불러왔어요.'", "Korean chat status notice restored")};
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '프로젝트로 돌아가기').click();
     if (document.querySelector('.monaco-editor') !== editorNode) throw new Error('settings reload remounted editor');
     if (document.querySelector('.m5-layout-settings, .m5-dock-options, .m5-dock-visibility') || document.querySelector('[role=tab][draggable=true]')) throw new Error('removed layout controls remain');
@@ -501,6 +506,9 @@ app.whenReady().then(async () => {
   window.webContents.debugger.attach("1.3");
   await window.webContents.debugger.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: true });
   await window.webContents.executeJavaScript(`(async () => {
+    // The editor lives in the review sheet (1차-나): reopen it from its tab.
+    if (document.querySelector('[data-testid=review-sheet]').hidden) document.querySelector('.m5-editor-tab [role=tab]').click();
+    await ${waitFor("!document.querySelector('[data-testid=review-sheet]').hidden", "editor sheet open")};
     document.querySelector('.monaco-editor').scrollIntoView({block:'center'});
     document.querySelector('.monaco-editor textarea').focus();
     await ${waitFor("document.activeElement === document.querySelector('.monaco-editor textarea')", "focused editor input")};
@@ -511,14 +519,14 @@ app.whenReady().then(async () => {
     globalThis.narrowEditor = document.querySelector('.monaco-editor');
     globalThis.wideLayout = localStorage.getItem('elsecrew.m5.layout.rightWidth.v1');
   })()`);
-  window.setSize(760, 640);
+  window.setContentSize(760, 640);
   await window.webContents.executeJavaScript(`(async () => {
     await ${waitFor("document.querySelector('[data-testid=task-layout]').dataset.band === 'compact'", "narrow layout band")};
     if (document.querySelector('[data-testid=review-sheet]').hidden) throw new Error('narrow window closed the review sheet');
     if (globalThis.narrowEditor !== document.querySelector('.monaco-editor') || !document.querySelector('[aria-label="저장되지 않은 변경"]')) throw new Error('responsive layout lost draft or editor');
     if (localStorage.getItem('elsecrew.m5.layout.rightWidth.v1') !== globalThis.wideLayout) throw new Error('narrow layout overwrote the results width');
   })()`);
-  window.setSize(1280, 768);
+  window.setContentSize(1280, 768);
   await window.webContents.executeJavaScript(`(async () => {
     await ${waitFor("document.querySelector('[data-testid=task-layout]').dataset.band === 'regular'", "wide layout restored")};
     if (globalThis.narrowEditor !== document.querySelector('.monaco-editor') || localStorage.getItem('elsecrew.m5.layout.rightWidth.v1') !== globalThis.wideLayout || !document.querySelector('[aria-label="저장되지 않은 변경"]')) throw new Error('wide restoration lost layout or draft');
@@ -629,16 +637,20 @@ app.whenReady().then(async () => {
     const jsonWorker = globalThis.MonacoEnvironment.getWorker('smoke', 'json');
     jsonWorker.terminate();
     const preservedEditor = document.querySelector('.monaco-editor');
-    document.querySelector('.m5-change-row').click();
-    await ${waitFor("document.querySelectorAll('.m5-diff-lines tbody tr').length === 200", "bounded diff page")};
+    // The changes list sits behind the open sheet (inert): close it first, as a person would.
+    if (!document.querySelector('[data-testid=review-sheet]').hidden) document.querySelector('[data-testid=sheet-close]').click();
+    document.querySelector('[data-testid=right-panel-changes] .m5-change-row').click();
+    await ${waitFor("document.querySelectorAll('.m5-diff-lines tbody tr').length === (document.querySelector('.m5-diff-split') ? 199 : 200)", "bounded diff page")};
     if (!document.querySelector('[data-testid=review-sheet] .m5-diff-details') || document.querySelector('[data-testid=review-sheet]').hidden) throw new Error('diff did not open in the review sheet');
     if (!document.querySelector('.m5-editor-surface').hidden || document.querySelector('.monaco-editor') !== preservedEditor) throw new Error('review disposed the existing editor');
     document.querySelector('.m5-diff-options').open = true;
     [...document.querySelectorAll('.m5-diff-actions button')].find(button => button.textContent === '이전 편집기로 돌아가기').click();
     await ${waitFor("!document.querySelector('.m5-editor-surface').hidden && !document.querySelector('.m5-diff-details')", "return from review")};
     if (document.querySelector('.monaco-editor') !== preservedEditor) throw new Error('return from review recreated the editor');
-    document.querySelector('.m5-change-row').click();
-    await ${waitFor("document.querySelectorAll('.m5-diff-lines tbody tr').length === 200", "reopened diff")};
+    // The changes list sits behind the open sheet (inert): close it first, as a person would.
+    if (!document.querySelector('[data-testid=review-sheet]').hidden) document.querySelector('[data-testid=sheet-close]').click();
+    document.querySelector('[data-testid=right-panel-changes] .m5-change-row').click();
+    await ${waitFor("document.querySelectorAll('.m5-diff-lines tbody tr').length === (document.querySelector('.m5-diff-split') ? 199 : 200)", "reopened diff")};
     if (!document.querySelector('.m5-diff-deleted') || !document.querySelector('.m5-diff-added')) throw new Error('missing distinct change rows');
     if (document.querySelector('.m5-diff-header').getBoundingClientRect().height > 42) throw new Error('comparison header is too tall');
     document.querySelector('.m5-diff-options').open = true;
@@ -682,11 +694,14 @@ app.whenReady().then(async () => {
     diffLanguage.value = 'ko'; diffLanguage.dispatchEvent(new Event('change', { bubbles: true }));
     await ${waitFor("document.querySelector('.m5-diff-wrap').textContent.includes('긴 줄')", "Korean diff restored")};
     if (!document.querySelector('.m5-diff-lines').textContent.includes('+line 401')) throw new Error('last diff lines missing');
-    document.querySelector('.m5-change-row').click();
+    // The changes list sits behind the open sheet (inert): close it first, as a person would.
+    if (!document.querySelector('[data-testid=review-sheet]').hidden) document.querySelector('[data-testid=sheet-close]').click();
+    document.querySelector('[data-testid=right-panel-changes] .m5-change-row').click();
     await ${waitFor("!document.querySelector('.m5-diff-lines').textContent.includes('+line 401')", "reopened diff starts at the top block")};
     document.querySelector('.m5-chat-chip').click();
     await ${waitFor("document.querySelector('.m5-followup button:not(:disabled)') || document.querySelector('#m5-followup-text')", "follow-up composer")};
-    globalThis.applicationResponseLossReport = await (${probeApplicationResponseLoss.toString()})();
+    // The old apply-review panel (.m5-chat-review) left the screen on 2026-11-17 (one-step apply);
+    // its response-loss probe no longer has a panel to drive.
     const input = document.querySelector('#m5-followup-text');
     if (!document.querySelector('[data-testid=review-sheet]').hidden) document.querySelector('[data-testid=sheet-close]').click();
     await ${waitFor("document.querySelector('[data-testid=review-sheet]').hidden", "conversation visible for geometry")};
@@ -741,7 +756,7 @@ app.whenReady().then(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, '설명을 추가해 주세요.');
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await ${waitFor("!document.querySelector('.m5-followup button[type=submit]').disabled", "enabled follow-up submit")};
-    const previousMessages = [...document.querySelectorAll('.m5-message p')].map(node => node.textContent);
+    const previousMessages = [...document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')].map(node => node.textContent);
     const goalInput = document.querySelector('.m5-new-chat-form input');
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(goalInput, '새 목표 초안');
     goalInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -781,11 +796,11 @@ app.whenReady().then(async () => {
       if (document.activeElement !== selectedChat) throw new Error('chat chip cannot receive keyboard focus');
     } finally { goalLabel.textContent = savedLabel; }
     if (document.querySelector('.m5-files').getAttribute('aria-label') !== 'Files' || document.querySelector('.m5-tree-pages')) throw new Error('file navigation not translated');
-    if (JSON.stringify(previousMessages) !== JSON.stringify([...document.querySelectorAll('.m5-message p')].map(node => node.textContent))) throw new Error('language change translated user messages');
+    if (JSON.stringify(previousMessages) !== JSON.stringify([...document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')].map(node => node.textContent))) throw new Error('language change translated user messages');
     document.querySelector('.m5-followup button[type=submit]').click();
-    await ${waitFor("[...document.querySelectorAll('.m5-message p')].some(node => node.textContent === '설명을 추가해 주세요.') && document.querySelector('#m5-followup-text').value === ''", "persisted follow-up visible and input cleared")};
+    await ${waitFor("[...document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')].some(node => node.textContent === '설명을 추가해 주세요.') && document.querySelector('#m5-followup-text').value === ''", "persisted follow-up visible and input cleared")};
     await ${waitFor("window.m5SmokeShortStarts.length === 1", "followup sends coordinator without role selection")};
-    if ([...document.querySelectorAll('.m5-message p')].filter(node => node.textContent === '설명을 추가해 주세요.').length !== 1) throw new Error('duplicate follow-up message');
+    if ([...document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')].filter(node => node.textContent === '설명을 추가해 주세요.').length !== 1) throw new Error('duplicate follow-up message');
     languageSelect.value = 'ko';
     languageSelect.dispatchEvent(new Event('change', {bubbles:true}));
     await ${waitFor("document.querySelector('.m5-followup button[type=submit]')?.textContent === '보내기'", "Korean team conversation restored")};
@@ -852,24 +867,24 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-chat-chip')", "saved chat available again")};
     if (document.querySelector('.m5-project-guide').open) throw new Error('dismissed guide reopened automatically');
     document.querySelector('.m5-project-guide > summary').click();
-    await ${waitFor("document.querySelector('.m5-guide-next strong')?.textContent === '이전 첫 작업 이어가기'", "guide offers persisted task on reentry")};
-    [...document.querySelectorAll('.m5-guide-next button')].find(button => button.textContent === '이전 첫 작업 열기').click();
-    await ${waitFor("[...document.querySelectorAll('.m5-message p')].some(node => node.textContent === '설명을 추가해 주세요.')", "chat history preserved after reopening")};
+    // Reopening the project resumes its last task (2026-11-17), so the guide
+    // follows that task at once instead of offering to reopen it.
+    await ${waitFor("[...document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')].some(node => node.textContent === '설명을 추가해 주세요.')", "chat history preserved after reopening")};
     await ${waitFor("document.querySelector('.m5-guide-next strong')?.textContent === '진행 확인'", "resumed guide follows chat state")};
     window.m5SmokeAppendMessages(450);
-    await ${waitFor("document.querySelectorAll('.m5-message').length === 200 && [...document.querySelectorAll('.m5-message p')].at(-1)?.textContent === 'history message 450'", "bounded latest conversation page")};
+    await ${waitFor("document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message)').length === 200 && [...document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')].at(-1)?.textContent === 'history message 450'", "bounded latest conversation page")};
     const historyButton = label => [...document.querySelectorAll('.m5-timeline nav button')].find(button => button.textContent === label);
     historyButton('이전 메시지').click();
-    await ${waitFor("[...document.querySelectorAll('.m5-message p')].at(-1)?.textContent === 'history message 250'", "older conversation page")};
-    const oldPage = [...document.querySelectorAll('.m5-message p')].map(node => node.textContent);
+    await ${waitFor("[...document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')].at(-1)?.textContent === 'history message 250'", "older conversation page")};
+    const oldPage = [...document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')].map(node => node.textContent);
     window.m5SmokeAppendMessages(1);
     await ${waitFor("document.querySelector('.m5-new-messages')", "new message notice while reading history")};
-    if (JSON.stringify(oldPage) !== JSON.stringify([...document.querySelectorAll('.m5-message p')].map(node => node.textContent))) throw new Error('new message moved the older page');
+    if (JSON.stringify(oldPage) !== JSON.stringify([...document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')].map(node => node.textContent))) throw new Error('new message moved the older page');
     historyButton('이전 메시지').click();
-    await ${waitFor("document.querySelector('.m5-message p')?.textContent === '처음 요청'", "first conversation page still reachable")};
+    await ${waitFor("document.querySelector('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')?.textContent === '처음 요청'", "first conversation page still reachable")};
     historyButton('최신 메시지').click();
-    await ${waitFor("document.querySelectorAll('.m5-message').length === 200 && [...document.querySelectorAll('.m5-message p')].at(-1)?.textContent === 'history message 451' && !document.querySelector('.m5-new-messages')", "return to latest conversation page")};
-    ${process.env.M5_MEASURE_MESSAGE_PAINT === "1" ? `globalThis.messagePaintReport = await (${measureMessagePaint.toString()})({ emit: () => window.m5SmokeAppendMessages(1)[0], visible: () => [...document.querySelectorAll('.m5-message p')].map(node => node.textContent) });` : ""}
+    await ${waitFor("document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message)').length === 200 && [...document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')].at(-1)?.textContent === 'history message 451' && !document.querySelector('.m5-new-messages')", "return to latest conversation page")};
+    ${process.env.M5_MEASURE_MESSAGE_PAINT === "1" ? `globalThis.messagePaintReport = await (${measureMessagePaint.toString()})({ emit: () => window.m5SmokeAppendMessages(1)[0], visible: () => [...document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')].map(node => node.textContent) });` : ""}
     const originalConfirm = window.confirm;
     let contextPrompt = '';
     window.confirm = text => { contextPrompt = text; return false; };
@@ -894,24 +909,28 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('#m5-followup-text')?.value === ''", "approved context run settled")};
     if (!contextPrompt.includes('처음 요청과 최근 99개') || window.m5SmokeContextStarts[0].inputMessageIds.length !== 100) throw new Error('context scope or language mismatch');
     historyButton('이전 메시지').click();
-    await ${waitFor("[...document.querySelectorAll('.m5-message p')].at(-1)?.textContent === 'history message 253'", "context run older history page")};
+    await ${waitFor("[...document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')].at(-1)?.textContent === 'history message 253'", "context run older history page")};
     historyButton('이전 메시지').click();
-    await ${waitFor("document.querySelector('.m5-message p')?.textContent === '처음 요청'", "full history retained after bounded run")};
+    await ${waitFor("document.querySelector('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')?.textContent === '처음 요청'", "full history retained after bounded run")};
     historyButton('최신 메시지').click();
     window.confirm = originalConfirm;
     window.m5SmokeTeamMessages();
-    await ${waitFor("[...document.querySelectorAll('.m5-message p')].some(node => node.textContent === '확인한 내용을 정리해 드릴게요.')", "orchestrator synthesized answer")};
+    await ${waitFor("[...document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')].some(node => node.textContent === '확인한 내용을 정리해 드릴게요.')", "orchestrator synthesized answer")};
     if (document.querySelector('.m5-timeline-list').textContent.includes('"action":"delegate"')) throw new Error('raw orchestration decision leaked into normal conversation');
-    if (![...document.querySelectorAll('.m5-message p')].some(node => node.textContent === '개발 담당과 구조를 확인할게요.')) throw new Error('delegation summary missing');
+    if (![...document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')].some(node => node.textContent === '개발 담당과 구조를 확인할게요.')) throw new Error('delegation summary missing');
     window.m5SmokeVisualChatState('running');
     await ${waitFor("[...document.querySelectorAll('button.m5-stop-team')].some(button => button.textContent === '작업 중단')", "stop task between team steps")};
-    if (!document.querySelector('.m5-chat-activity[role=status]')?.textContent.includes('진행 중')) throw new Error('team activity indicator missing between steps');
+    // Between steps the stage bar's current cell says what happens now (1차-나 L4a).
+    await ${waitFor("document.querySelector('[data-testid=stage-bar] [aria-current=step]')", "team activity between steps")};
+    if (!/계획을 세우는 중|다음 담당을 정하는 중/.test(document.querySelector('[data-testid=stage-bar] [aria-current=step]').textContent)) throw new Error('team activity indicator missing between steps');
     if (!document.querySelector('.m5-followup button[type=submit]').disabled) throw new Error('queued workflow permits a competing send');
     [...document.querySelectorAll('button.m5-stop-team')].find(button => button.textContent === '작업 중단').click();
     await ${waitFor("window.m5SmokeTeamStops.length === 1 && ![...document.querySelectorAll('button.m5-stop-team')].some(button => button.textContent === '작업 중단')", "queued team cancellation applied")};
     window.m5SmokeVisualChatState('draft');
     window.m5SmokeFailedClaude();
-    await ${waitFor("document.querySelector('.m5-agent-runs details')", "failed Claude run details")};
+    // Run details live in the results panel's History tab (1차-나 L5).
+    document.querySelector('[data-testid=right-tab-history]').click();
+    await ${waitFor("document.querySelector('[data-testid=right-panel-history] .m5-agent-runs details')", "failed Claude run details")};
     document.querySelector('.m5-agent-runs details summary').click();
     const diagnosticButton = () => [...document.querySelectorAll('.m5-agent-runs button')].find(button => button.textContent === '이번 앱 세션의 연결 진단 보기');
     await ${waitFor("diagnosticButton()", "session diagnostic action")};
@@ -940,7 +959,7 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('#m5-followup-text')", "parallel chat selected")};
     globalThis.parallelPaintReport = await (${measureMessagePaint.toString()})({
       emit: () => window.m5SmokeEmitParallelRound()[0].text,
-      visible: () => [...document.querySelectorAll('.m5-message p')].map(node => node.textContent),
+      visible: () => [...document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')].map(node => node.textContent),
     });
     parallelPaintReport.sourceCounts = window.m5SmokeParallelCounts();
     parallelPaintReport.restoredChats = [];
@@ -949,7 +968,7 @@ app.whenReady().then(async () => {
       await new Promise((resolve, reject) => {
         const deadline = Date.now() + 7000;
         const timer = setInterval(() => {
-          const messages = [...document.querySelectorAll('.m5-message p')].map(node => node.textContent);
+          const messages = [...document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')].map(node => node.textContent);
           if (messages.length === 200 && messages.every((text, offset) => text === 'paint_chat_' + index + ' message ' + (2801 + offset))) {
             clearInterval(timer); resolve();
           } else if (Date.now() > deadline) { clearInterval(timer); reject(new Error('parallel chat restore failed: ' + index)); }
@@ -978,10 +997,10 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('#m5-remove-title')?.closest('dialog').open", "removal confirmation")};
     document.querySelector('#m5-remove-title ~ .m5-dialog-actions .m5-danger').click();
     await ${waitFor("document.querySelector('#m5-remove-title ~ [role=alert]')", "removal failure stays in project")};
-    if (document.querySelector('#m5-followup-text') !== preservedConversation || document.querySelector('h1').textContent !== 'smoke') throw new Error('rejected removal navigated away');
+    if (document.querySelector('#m5-followup-text') !== preservedConversation || document.querySelector('.m5-switcher-name')?.textContent !== 'smoke') throw new Error('rejected removal navigated away');
     removalAccepted = true;
     document.querySelector('#m5-remove-title ~ .m5-dialog-actions .m5-danger').click();
-    await ${waitFor("!document.querySelector('#m5-remove-title').closest('dialog').open && !document.querySelector('.m5-chat-remove') && document.querySelector('h1')?.textContent === 'smoke'", "deleted chat disappears and its project stays open")};
+    await ${waitFor("!document.querySelector('#m5-remove-title').closest('dialog').open && !document.querySelector('.m5-chat-remove') && document.querySelector('.m5-switcher-name')?.textContent === 'smoke'", "deleted chat disappears and its project stays open")};
     if (!removedChatId) throw new Error('chat deletion not persisted');
   })()`);
   process.stdout.write(`${JSON.stringify(result)}\n`);
