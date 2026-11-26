@@ -25,6 +25,7 @@ PR #18 머지(68503092) 뒤 WIP(afaaa370)를 그 위로 옮겨 이어 갔다. �
   - `npm test` 1012/1012, `pnpm build`, `pnpm m5:capture`(다크·라이트 36화면, 대비 실패 0, `36-run-limits` 캡처 추가).
   - 네이티브 스모크 `m5:smoke:multiproject` PASS(25·재시작 10 확인).
   - 캡처: `~/Documents/elsecrew-ade-multiproject-2026-11-26/pr-b/{smoke/{light,dark},native,real,real-codex}`.
+  - PR #20 열 때 `feature/ade`에 PR #19가 머지돼 충돌(`docs/history.md`만)이 났다. `feature/ade`를 병합(03e98c91)하고 다시 확인했다. `cargo test --workspace` core 267·protocol 75·sidecar 954·통합 16 실패 0, `npm test` 1015/1015, `m5:check:history` 통과. CI(03e98c91) macOS·Windows·website·GitGuardian 통과.
 - **다음 할 일**: 실행 시작을 엔진 처리 스레드 밖으로 옮기기(지금은 시작마다 13~18초 동안 다른 요청도 기다림). Codex 혼합 실패 1건 재현 시 원인 확인. Windows는 실행 경로가 비활성이라 미검증.
 
 ### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #19 재검토(B1 미해소·중요 3) 마지막 라운드 (`orca/ade-d3-bigwrite`)
