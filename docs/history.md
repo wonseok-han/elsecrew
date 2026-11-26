@@ -48,6 +48,7 @@
   - `npm test` 988 → 새 시험 포함 통과, `pnpm build`.
   - `pnpm m5:test:editor` 69/69(다크·라이트, 렌더 대비 라이트 1479곳 실패 0).
   - 캡처는 `~/Documents/elsecrew-ade-multiproject-2026-11-26/pr-a/`에 있다(렌더러 `dark/`, 네이티브 `native/`).
+- **PR**: https://github.com/wonseok-han/elsecrew/pull/18 (`--base feature/ade`). 본문 캡처는 39cccc59에 올리고 2a42e728에서 지웠다. CI(2a42e728) macOS·Windows(기준선 하네스 포함)·website·GitGuardian 모두 통과.
 - **남은 것(PR-B)**
   - P5 공급자 병렬 실행: 실행별 잠금 파일, 로그인·설치만 배타, 실행 중 sidecar Claude 갱신 생략.
   - P3′ 상한과 '차례 기다리는 중', P4 전체 수신함(다시 불러오기 전에 시작된 다른 프로젝트 실행도 잡기).
