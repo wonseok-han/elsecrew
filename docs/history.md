@@ -16,7 +16,8 @@
   - 실제 앱 합성(`node scripts/m5-preview-build-run.mjs --build`, 격리 앱 데이터): PASS 10/10.
   - 실제 앱 실제 팀(`--real`, 개발 앱 데이터, 실행 전 ps로 다른 Elsecrew 앱 없음 확인, 자기 PID만): 총괄·개발 Claude Code가 Vite+React todo 앱 8개 파일 작성(Bash 1건 거절, Glob·Read·Write 허용) → 실제 `npm install`(네트워크) → `vite build` → 빌드 결과 미리보기에서 키 입력으로 할 일 추가 → `/active` 새로고침(history fallback) → 느린 두 번째 빌드 멈춤: 그룹 4개 프로세스(npm·sh·node·손자 node) 모두 종료 확인 → 로그 토큰 가림 확인. PASS 10/10. 시험 프로젝트는 삭제 요청함(작업 공간 폴더 `~/elsecrew/workspaces/todo-vite/task-a33340ee`는 앱의 삭제 마무리 대상으로 남음).
   - 캡처·결과: `~/Documents/elsecrew-ade-preview-build-2026-11-27/{synthetic,real}/`(동의 대화상자는 이 컴퓨터에서 화면 캡처가 막혀 main에 전달된 옵션을 그린 `0-consent-boxes.png`와 `consent-boxes.json`).
-- **다음 할 일**: Codex 검토 대응, CI. 2단계 구현은 제안 문서의 열린 결정(동의 기억·상한 합산·알 수 없는 도구·3단계 기본값) 확정 뒤. Windows 빌드 실행은 꺼져 있음(미검증).
+- **PR·CI**: https://github.com/wonseok-han/elsecrew/pull/22 (`--base feature/ade`). 첫 CI(40a69ee7)에서 Windows만 실패 — 보안 하네스 새 시험이 spawn `detached: true`를 기대했으나 Windows는 의도대로 false(프로세스 그룹은 POSIX 전용). 기대값을 플랫폼에 맞춘 뒤(70ce1046) macOS·Windows·website·GitGuardian 모두 통과.
+- **다음 할 일**: Codex 검토 대응. 2단계 구현은 제안 문서의 열린 결정(동의 기억·상한 합산·알 수 없는 도구·3단계 기본값) 확정 뒤. Windows 빌드 실행은 꺼져 있음(미검증).
 
 ### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #20 재검토 B2 두 경로 반영 (`orca/ade-multiproject-b`)
 재검토 `~/Documents/elsecrew-ade-multiproject-2026-11-26/REVIEW-pr20-2.md`(대상 0d7fe46b). B1·B3은 해소로 확인됐다.
