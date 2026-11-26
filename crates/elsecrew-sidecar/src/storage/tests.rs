@@ -103,6 +103,100 @@ fn selected_projection_retains_only_requested_rows_without_skipping_validation()
 }
 
 #[test]
+fn remembered_projection_rows_equal_a_full_parse_and_parse_only_changed_rows() {
+    let (_root, path) = database();
+    let storage = Storage::open(&path).unwrap();
+    for index in 0..40 {
+        storage.connection.execute(
+            "INSERT INTO runs(run_id,state,projection_json,last_event_sequence) VALUES (?1,'running',?2,3)",
+            params![format!("run_{index:02}"), json!({"run_id":format!("run_{index:02}"),"payload":"r".repeat(4096)}).to_string()],
+        ).unwrap();
+    }
+    for id in ["project_a", "project_b"] {
+        storage.connection.execute(
+            "INSERT INTO projects(project_id,canonical_path,projection_json,last_event_sequence) VALUES (?1,?1,?2,7)",
+            params![id, json!({"id":id}).to_string()],
+        ).unwrap();
+    }
+    let parsed = || storage.projection_memo.parsed.get();
+    let full = || load_projection(&storage.connection).unwrap();
+    // The first lookup parses every row once; later ones parse nothing.
+    assert_eq!(storage.projection_record("project", "project_b").unwrap(), full().projects.get("project_b").cloned());
+    assert_eq!(parsed(), 42);
+    for _ in 0..5 {
+        assert_eq!(storage.projection_record("run", "run_07").unwrap(), full().runs.get("run_07").cloned());
+        assert_eq!(storage.projection_records("run").unwrap(), full().runs.values().cloned().collect::<Vec<_>>());
+    }
+    storage.unclean_engine_processes().unwrap();
+    assert_eq!(parsed(), 42);
+    // A changed row is parsed again, and only that row; so is a new sequence
+    // with the same bytes.
+    storage.connection.execute("UPDATE runs SET projection_json=?1 WHERE run_id='run_03'", [json!({"run_id":"run_03","payload":"changed"}).to_string()]).unwrap();
+    assert_eq!(storage.projection_record("run", "run_03").unwrap(), full().runs.get("run_03").cloned());
+    assert_eq!(storage.projection_record("run", "run_03").unwrap().unwrap()["payload"], "changed");
+    assert_eq!(parsed(), 43);
+    storage.connection.execute("UPDATE runs SET last_event_sequence=9 WHERE run_id='run_04'", []).unwrap();
+    assert_eq!(storage.projection_record("run", "run_04").unwrap().unwrap()["last_event_sequence"], 9);
+    assert_eq!(parsed(), 44);
+    // A removed row is gone, also from what is remembered.
+    storage.connection.execute("DELETE FROM runs WHERE run_id='run_05'", []).unwrap();
+    assert_eq!(storage.projection_record("run", "run_05").unwrap(), None);
+    assert_eq!(storage.projection_records("run").unwrap().len(), 39);
+    // A damaged row in another table still fails every lookup, remembered
+    // rows or not, and repairing it lets lookups through again.
+    storage.connection.execute("UPDATE runs SET projection_json='[]' WHERE run_id='run_06'", []).unwrap();
+    assert_eq!(storage.projection_record("project", "project_a").unwrap_err().kind, "projectionInvalid");
+    assert_eq!(storage.projection_record("project", "project_a").unwrap_err().kind, "projectionInvalid");
+    assert_eq!(storage.unclean_engine_processes().unwrap_err().kind, "projectionInvalid");
+    storage.connection.execute("UPDATE runs SET projection_json=?1 WHERE run_id='run_06'", [json!({"run_id":"run_06"}).to_string()]).unwrap();
+    assert_eq!(storage.projection_record("project", "project_a").unwrap(), full().projects.get("project_a").cloned());
+    // Damage restored to the remembered bytes is accepted again: those bytes
+    // parsed before. Text that is not valid UTF-8 or not text fails.
+    storage.connection.execute("UPDATE runs SET projection_json=CAST(X'FF' AS TEXT) WHERE run_id='run_08'", []).unwrap();
+    assert!(storage.projection_record("project", "project_a").is_err());
+    storage.connection.execute("UPDATE runs SET projection_json=X'7B7D' WHERE run_id='run_08'", []).unwrap();
+    assert!(storage.projection_record("project", "project_a").is_err());
+    // A change committed by another connection is seen.
+    storage.connection.execute("UPDATE runs SET projection_json='{}' WHERE run_id='run_08'", []).unwrap();
+    let other = Connection::open(&path).unwrap();
+    other.execute("UPDATE projects SET projection_json=?1 WHERE project_id='project_a'", [json!({"id":"project_a","from":"other"}).to_string()]).unwrap();
+    drop(other);
+    assert_eq!(storage.projection_record("project", "project_a").unwrap().unwrap()["from"], "other");
+    assert_eq!(storage.projection_record("project", "project_a").unwrap(), full().projects.get("project_a").cloned());
+}
+
+/// Cost of record lookups on a copy of a real ledger (latency work 2026-11-26):
+/// `ELSECREW_PROJECTION_BENCH_DB=<copy> cargo test -p elsecrew-sidecar
+/// projection_lookup_cost -- --ignored --nocapture`. Reads the copy only.
+#[test]
+#[ignore]
+fn projection_lookup_cost_on_a_ledger_copy() {
+    let Some(path) = std::env::var_os("ELSECREW_PROJECTION_BENCH_DB") else { return };
+    let connection = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    let ids: Vec<String> = connection.prepare("SELECT project_id FROM projects").unwrap()
+        .query_map([], |row| row.get(0)).unwrap().map(Result::unwrap).collect();
+    let rounds = 20;
+    let started = std::time::Instant::now();
+    for index in 0..rounds {
+        let _ = load_projection_selected(&connection, Some(("project", Some(&ids[index % ids.len()])))).unwrap();
+    }
+    let full_ms = started.elapsed().as_secs_f64() * 1000.0 / rounds as f64;
+    let memo = ProjectionMemo::default();
+    let _ = load_projection_memo(&connection, &memo, None).unwrap();
+    let started = std::time::Instant::now();
+    for index in 0..rounds {
+        let _ = load_projection_memo(&connection, &memo, Some(("project", Some(&ids[index % ids.len()])))).unwrap();
+    }
+    let memo_ms = started.elapsed().as_secs_f64() * 1000.0 / rounds as f64;
+    let started = std::time::Instant::now();
+    for _ in 0..rounds {
+        let _ = load_projection_memo(&connection, &memo, Some(("run", None))).unwrap();
+    }
+    let runs_ms = started.elapsed().as_secs_f64() * 1000.0 / rounds as f64;
+    println!("PROJECTION_LOOKUP_COST {{\"fullParseMs\":{full_ms:.2},\"rememberedMs\":{memo_ms:.2},\"allRunsRememberedMs\":{runs_ms:.2}}}");
+}
+
+#[test]
 fn runtime_storage_owner_excludes_external_transaction_until_drop() {
     let (_root, path) = database();
     let storage = Storage::open(&path).unwrap();
@@ -4750,6 +4844,7 @@ fn populated_v2_storage(path: &Path, state: &str) -> Storage {
         writes_admitted: true,
         maintenance_epoch: 0,
         opened_from_seal: false,
+        projection_memo: Default::default(),
     };
     storage
         .append_event(&event(
