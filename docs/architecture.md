@@ -520,3 +520,18 @@ macOS에서 사용량 조회가 만료된 access token을 발견하면 기존 Cl
 - `src/m5/styles.css` 맨 위 `:root`가 단일 출처다. 1단 원시 팔레트 `--p-*`(테마마다 바뀌는 값), 2단 의미 토큰(면 `--bg-app/pane/raised/sunken/hover/selected`, 선 `--line-subtle/default/strong`, 글자 `--text-primary/secondary/tertiary`, 강조 `--action-bg/-bg-hover/-text`, 상태 `--status-{running,attention,review,done,danger}` + `-text`·`-bg`, `--status-neutral`, `--diff-add/remove`, 역할 색 `--role-1~8`), 간격 `--space-1~6`(4/8/12/16/24/32), 모서리 `--radius-s/m/l`, 글자 크기 `--text-xs~xl`, 레이아웃 치수 `--topbar-h/--statusbar-h/--left-w/--right-w/--center-max`(창 폭 구간마다 바뀜).
 - 예전 `--m5-*` 이름은 의미 토큰의 별칭으로 남아 기존 화면 값이 그대로다. 상태 색 이름은 1차-가 `taskPhaseTone`과 같다.
 - 규칙: 1차-나가 새로 쓰거나 다시 쓰는 구역은 의미 토큰만 쓴다(hex·원시 `--p-*` 직접 사용 금지, 리뷰 규칙). 값은 다크만 있고, 라이트 테마·테마 선택(2차)은 `:root[data-theme="light"]` 주석 자리에 1단 값만 다시 정의한다.
+
+### 작업 레이아웃 (ADE 1차-나 L1~L6, 2026-11-26)
+
+설계: `docs/proposals/m5-ade-layout-plan.md`(제안). 아래는 구현된 현재 구조다.
+
+- **3영역 + 시트**: `task-layout.tsx`(`TaskLayout`)가 그린다. 상단 막대(Elsecrew · 프로젝트 › 작업, 알림·도움말·설정) 아래에 왼쪽 작업 목록(`nav`), 가운데 작업 이야기, 오른쪽 결과(`aside`)가 있고, 넓은 검토 시트(`review-sheet.tsx`)가 가운데·오른쪽을 덮는다. dock(`WorkbenchDock`/`dock-layout.ts`)은 지웠다. 모든 패널은 지우지 않고 숨기기만 해서 Monaco와 저장하지 않은 초안이 시트 닫기·탭 바꾸기에서 남는다.
+- **창 폭 구간**(`task-layout-model.ts` `layoutBand`): 1500px 이상 왼쪽 264·오른쪽 520, 1100~1499 왼쪽 240·오른쪽 400(1280에서 가운데 640px), 1100 미만은 왼쪽 56px 레일 + 오른쪽 서랍(최대 440px, 820 미만은 92%). 오른쪽 폭은 끌거나 ←/→로 320px~화면 절반, `localStorage` `elsecrew.m5.layout.rightWidth.v1` 하나만 저장한다.
+- **편집기 요청 해석**: `editor-state.ts`는 그대로 `files|editor|changes`(+대화·목록) 요청을 낸다. `panelRequestTarget`이 `editor`→시트(diff 중이면 바뀐 내용 모드), `changes`/`files`→오른쪽 탭(좁은 창은 서랍 열기), 대화→시트·서랍 닫고 입력칸 초점, 목록→목록 초점으로 바꾼다.
+- **왼쪽**: `ProjectSwitcher`(옛 프로젝트 레일을 팝오버로 접음, 전환 동작은 그대로) · 새 작업 · `task-list.tsx` 상태 묶음(`task-list-model.ts`: 1차-가 `taskGroup` 순서대로 확인 필요/일하는 중/검토 기다림/끝남, 빈 묶음 숨김, 최근 활동 순, 끝남은 열린 작업이 없으면 접힘, 읽기 실패 줄은 검토 기다림). 줄 지우기는 ⋯ 메뉴.
+- **가운데**(`task-story.tsx`): 머리말(상태 배지·시작 시각·경과·목표 제목) → 복구·오류 알림 → 붙어 있는 단계 막대(`stage-bar.tsx`, `task-story-model.ts` `stageCells`: 실제 실행 순서, 지금 칸, 팀이 일하는 동안 마지막 칸 "다음 · 총괄이 정해요" 또는 실행 사이 "결과를 읽고 다음 담당을 정하는 중", 5칸 넘으면 앞을 +N, 지금 일은 `aria-live` 한 곳) → 팀원 카드(`member-card.tsx`, `storyItems`: 실행 하나 + 같은 `runId` 보고 = 카드 하나, 사용자 메시지는 말풍선, 실행 없는 메시지는 단독) → 입력칸. 대기 중인 확인 요청은 portal로 입력칸 바로 위 고정 슬롯에 그린다. 실행별 바뀐 파일 칩은 renderer에 실행별 파일 목록이 없어 넣지 않았다(2차 F4와 함께).
+- **오른쪽**: 탭 미리보기(자리만, P3 전까지 안내)·변경·파일·기록. 결과 상자(`result-box.tsx`)는 탭과 상관없이 바닥에 있고 **합치기(git)·반영(사본, `ApplyLatest`)·버리기의 유일한 위치**다. 변경 탭에는 상태 한 줄과 "결과 상자에서 넣기" 링크만 둔다. 기록 탭(`history-tab.tsx`)에 실행 세부(공급자·모델·시각·종료·실행 ID·저장된 출력·이전 실행·진단)와 개발용 fixture 실행(접힘)이 있다.
+- **역할 표시(R5)**: `role-colors.ts` — 템플릿 ID는 고정 색, 사용자 역할은 ID 해시로 `--role-1~8` 중 하나. 이름은 `roleLabel`(작업 스냅샷 정의)로 그리고, 프로젝트 팀에 없는 역할의 카드는 "이 역할은 지금 프로젝트 팀에 없어요"를 보인다.
+- **키보드**: ⌘/Ctrl+1 목록, +2 입력칸, +3 결과, +\ 결과 열기/닫기, +N 새 작업, Esc 시트·서랍 닫기(Monaco가 먼저 처리한 Esc는 제외). 시트가 열리면 가운데·오른쪽이 `inert`.
+- **미리보기 겹침**: `previewObscured`(시트·닫힌 서랍·대화상자)가 한 곳에서 계산되고 레이아웃의 `data-preview-covered`로 노출된다. 미리보기 화면(P3)이 이 값을 읽는다.
+- **시험 선택자**: 스모크·캡처는 `data-testid`(`task-layout`, `layout-left/center/right`, `right-tab-*`, `right-panel-*`, `review-sheet`, `sheet-close`, `result-box`, `stage-bar`, `member-card`, `pinned-approval`, `drawer-toggle-*`)를 쓴다. 1차-가 규칙을 지키는 소스 검사는 `tests/m5-workbench-source.mts`로 작업대의 나뉜 파일을 함께 읽는다.

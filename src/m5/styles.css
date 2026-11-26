@@ -1858,3 +1858,7 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
   .m5-topbar-brand { display: none; }
   .m5-drawer-toggles > button { padding: 3px 6px; }
 }
+/* The old timeline header rule (flex, space-between) must not reach the story header or card heads. */
+.m5-workbench .m5-timeline > header.m5-task-header { display: block; padding: 0; border: 0; }
+.m5-workbench .m5-timeline header.m5-member-head { justify-content: flex-start; gap: var(--space-2); }
+.m5-task-eyebrow > span { white-space: nowrap; }

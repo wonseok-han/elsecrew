@@ -34,7 +34,7 @@ import { HistoryTab } from "./history-tab.tsx";
 import { TaskList, type TaskListItem } from "./task-list.tsx";
 import { ReviewSheet } from "./review-sheet.tsx";
 import { ProjectSwitcher } from "./project-switcher.tsx";
-import { bandSizes, bandUsesDrawer, defaultRightTab, previewObscured, RIGHT_TABS, clampRightWidth, layoutBand, panelRequestTarget, parseRightWidth, RIGHT_WIDTH_KEY, type LayoutBand, type RightTab, type SheetMode } from "./task-layout-model.ts";
+import { BAND_NARROW_MIN, BAND_REGULAR_MIN, BAND_WIDE_MIN, bandSizes, bandUsesDrawer, defaultRightTab, previewObscured, RIGHT_TABS, clampRightWidth, layoutBand, panelRequestTarget, parseRightWidth, RIGHT_WIDTH_KEY, type LayoutBand, type RightTab, type SheetMode } from "./task-layout-model.ts";
 import { ProviderLogin, type ConnectionReveal } from "./provider-login.tsx";
 import { ChatWorkspaceDiscard } from "./chat-workspace-discard.tsx";
 import { ChatWorkspaceMerge } from "./chat-workspace-merge.tsx";
@@ -635,9 +635,15 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   // ===== Task layout (ADE 1차-나): list · story · results, and a wide review sheet =====
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   useEffect(() => {
+    // The CSS switches columns on these media queries; listen to the same
+    // ones so the rail and drawer never lag the columns (a resize event can
+    // come late), and to resize for the panel width limits.
     const update = () => setViewportWidth(window.innerWidth);
+    const queries = [BAND_WIDE_MIN, BAND_REGULAR_MIN, BAND_NARROW_MIN].map(width => window.matchMedia(`(min-width: ${width}px)`));
+    queries.forEach(query => query.addEventListener("change", update));
     window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
+    update();
+    return () => { queries.forEach(query => query.removeEventListener("change", update)); window.removeEventListener("resize", update); };
   }, []);
   const layoutBandNow: LayoutBand = layoutBand(viewportWidth);
   const [rightTab, setRightTab] = useState<RightTab>("changes");
@@ -690,6 +696,15 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     defaultTabFor.current = id;
     setRightTab(defaultRightTab(activePhase, false));
   }, [chat.activeChat?.chatId, chat.switching, activePhase]);
+  // When the team finishes, the results show what it made (PLAN 1.5: review → changes).
+  const wasWorking = useRef<{ chatId: string; working: boolean } | null>(null);
+  useEffect(() => {
+    const id = chat.activeChat?.chatId ?? null;
+    if (!id || chat.switching || !activePhase) return;
+    const before = wasWorking.current;
+    wasWorking.current = { chatId: id, working: activeWorking };
+    if (before?.chatId === id && before.working && !activeWorking) setRightTab(defaultRightTab(activePhase, false));
+  }, [chat.activeChat?.chatId, chat.switching, activePhase, activeWorking]);
   const dirtyTabs = snapshot.tabs.filter(tab => tab.saveState !== "clean").length;
   // "View all changes" opens the sheet; another task or project closes it.
   useEffect(() => { if (allChanges) setSheetOpen(true); }, [allChanges]);
