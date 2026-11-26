@@ -48,7 +48,8 @@ app.whenReady().then(async () => {
     if (asset !== rendererDirectory && !asset.startsWith(`${rendererDirectory}${sep}`)) return new Response("not found", { status: 404 });
     return net.fetch(pathToFileURL(asset).toString());
   });
-  const window = new BrowserWindow({ width: 1280, height: 768, show: false, webPreferences: { preload, partition: "m5-renderer-smoke", contextIsolation: false, sandbox: false, nodeIntegration: false } });
+  // CI screens can be smaller than the layout's 1280×768: keep the size exact.
+  const window = new BrowserWindow({ width: 1280, height: 768, useContentSize: true, enableLargerThanScreen: true, show: false, webPreferences: { preload, partition: "m5-renderer-smoke", contextIsolation: false, sandbox: false, nodeIntegration: false } });
   window.webContents.on("console-message", (event) => process.stderr.write(`renderer: ${event.message}\n`));
   window.webContents.on("render-process-gone", (_event, details) => fail(new Error(`renderer exited: ${details.reason}`)));
   await window.loadURL("m5smoke://m5/index.html");
@@ -518,14 +519,14 @@ app.whenReady().then(async () => {
     globalThis.narrowEditor = document.querySelector('.monaco-editor');
     globalThis.wideLayout = localStorage.getItem('elsecrew.m5.layout.rightWidth.v1');
   })()`);
-  window.setSize(760, 640);
+  window.setContentSize(760, 640);
   await window.webContents.executeJavaScript(`(async () => {
     await ${waitFor("document.querySelector('[data-testid=task-layout]').dataset.band === 'compact'", "narrow layout band")};
     if (document.querySelector('[data-testid=review-sheet]').hidden) throw new Error('narrow window closed the review sheet');
     if (globalThis.narrowEditor !== document.querySelector('.monaco-editor') || !document.querySelector('[aria-label="저장되지 않은 변경"]')) throw new Error('responsive layout lost draft or editor');
     if (localStorage.getItem('elsecrew.m5.layout.rightWidth.v1') !== globalThis.wideLayout) throw new Error('narrow layout overwrote the results width');
   })()`);
-  window.setSize(1280, 768);
+  window.setContentSize(1280, 768);
   await window.webContents.executeJavaScript(`(async () => {
     await ${waitFor("document.querySelector('[data-testid=task-layout]').dataset.band === 'regular'", "wide layout restored")};
     if (globalThis.narrowEditor !== document.querySelector('.monaco-editor') || localStorage.getItem('elsecrew.m5.layout.rightWidth.v1') !== globalThis.wideLayout || !document.querySelector('[aria-label="저장되지 않은 변경"]')) throw new Error('wide restoration lost layout or draft');
