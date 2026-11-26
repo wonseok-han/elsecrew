@@ -156,8 +156,9 @@ pub struct FileChange {
     pub path: String,
     /// add, delete or update.
     pub kind: String,
-    pub added: u64,
-    pub removed: u64,
+    /// Added and removed lines; None when the notification did not carry the
+    /// diff (an oversized one may drop it rather than give a wrong count).
+    pub lines: Option<(u64, u64)>,
 }
 
 const DETAIL_TEXT_MAX: usize = 4 * 1024;
@@ -171,7 +172,7 @@ fn detail_text(value: Option<&serde_json::Value>) -> Option<String> {
 
 /// Added and removed lines of one patch. An added file's diff is its
 /// content, a deleted file's is what it held, an update is a unified diff.
-fn diff_counts(kind: &str, diff: &str) -> (u64, u64) {
+pub(crate) fn diff_counts(kind: &str, diff: &str) -> (u64, u64) {
     let unified = diff.starts_with("@@") || diff.starts_with("---") || diff.starts_with("diff ");
     let lines = diff.lines().count() as u64;
     match kind {
@@ -203,8 +204,8 @@ fn tool_detail(raw: &str) -> ToolDetail {
     let changes = item.get("changes").and_then(|v| v.as_array()).map(|changes| changes.iter().take(DETAIL_ITEMS_MAX)
         .filter_map(|change| {
             let kind = detail_text(change.get("kind").and_then(|kind| kind.get("type")))?;
-            let (added, removed) = change.get("diff").and_then(|v| v.as_str()).map_or((0, 0), |diff| diff_counts(&kind, diff));
-            Some(FileChange { path: detail_text(change.get("path"))?, kind, added, removed })
+            let lines = change.get("diff").and_then(|v| v.as_str()).map(|diff| diff_counts(&kind, diff));
+            Some(FileChange { path: detail_text(change.get("path"))?, kind, lines })
         }).collect()).unwrap_or_default();
     ToolDetail {
         cwd: detail_text(item.get("cwd")),
@@ -864,8 +865,11 @@ mod tests {
             {"path":"/w/old.md","kind":{"type":"delete"},"diff":"x"},
             {"path":42,"kind":{"type":"add"},"diff":""}
         ]}).to_string());
-        assert_eq!(change.changes.iter().map(|c| (c.path.as_str(), c.kind.as_str(), c.added, c.removed)).collect::<Vec<_>>(),
-            vec![("/w/a.ts", "update", 2, 1), ("/w/new.md", "add", 2, 0), ("/w/old.md", "delete", 0, 1)]);
+        assert_eq!(change.changes.iter().map(|c| (c.path.as_str(), c.kind.as_str(), c.lines)).collect::<Vec<_>>(),
+            vec![("/w/a.ts", "update", Some((2, 1))), ("/w/new.md", "add", Some((2, 0))), ("/w/old.md", "delete", Some((0, 1)))]);
+        // A change without its diff has no count, not a zero one (PR #17 review M1).
+        let unknown = tool_detail(&json!({"id":"i","type":"fileChange","changes":[{"path":"/w/a.ts","kind":{"type":"update"}}]}).to_string());
+        assert_eq!(unknown.changes[0].lines, None);
         // Content lines that start with `++`/`--` inside a hunk still count (M2).
         assert_eq!(diff_counts("update", "--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n---removed\n+++added\n ctx"), (1, 1));
         assert_eq!(diff_counts("update", "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\ndiff --git a/y b/y\n--- a/y\n+++ b/y\n@@ -0,0 +1 @@\n+c"), (2, 1));

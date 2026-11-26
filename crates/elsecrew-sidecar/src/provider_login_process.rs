@@ -1107,6 +1107,18 @@ impl<'a> LoginProcess<'a> {
         result
     }
 
+    /// Only after the agent session is bound on this connection (Claude session
+    /// channel or Codex turn); a login or preflight exchange keeps the strict lines.
+    pub(crate) fn admit_session_lines(
+        &mut self,
+        policy: elsecrew_core::provider::oversized_line::OversizedLinePolicy,
+    ) -> Result<(), SidecarError> {
+        if self.failed || self.finished || !self.preflight_claimed {
+            return Err(failure());
+        }
+        self.io.as_mut().ok_or_else(failure)?.admit_session_lines(policy)
+    }
+
     pub(crate) fn poll_preflight_observed(
         &mut self,
         cancel: &AtomicBool,
