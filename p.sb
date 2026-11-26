@@ -1,6 +1,0 @@
-(version 1)
-(allow default)
-(deny file-write*)
-(allow file-write* (subpath "/private/tmp/claude-501/-Users-wonseok-han-orca-workspaces-elsecrew-ade-preview-build/06b2640b-242c-4c23-b013-e905dd6b1017/scratchpad/sbx/ws") (subpath "/private/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn") (literal "/dev/null") (regex #"^/dev/tty") (subpath "/dev/fd"))
-(deny file-read* (subpath "/Users/wonseok-han/.ssh"))
-(deny network*)
