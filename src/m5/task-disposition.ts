@@ -101,16 +101,21 @@ export class TaskDispositionStore {
     for (const task of tasks) {
       if (!FINISHED.has(task.state) || this.#asked.get(task.chatId) === task.updatedAt) continue;
       this.#asked.set(task.chatId, task.updatedAt);
+      // The round is taken when the task is queued: a queued ask whose round
+      // has passed is skipped before anything is sent (review N4).
+      const round = this.#round;
+      const current = () => round === this.#round && this.#asked.get(task.chatId) === task.updatedAt;
       this.#queue = this.#queue.then(async () => {
-        const round = this.#round;
-        const current = () => round === this.#round && this.#asked.get(task.chatId) === task.updatedAt;
+        if (!current()) return;
+        let timer: ReturnType<typeof setTimeout> | undefined;
         try {
-          const disposition = await Promise.race([this.#inspect(task.chatId), new Promise<never>((_, reject) => setTimeout(() => reject(new Error("no answer")), this.#timeoutMs))]);
+          const disposition = await Promise.race([this.#inspect(task.chatId), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("no answer")), this.#timeoutMs); })]);
           // An answer from before a revalidation or for an older version is out of date.
           if (!current()) return;
           if (disposition) this.record(task, disposition);
           else this.#markFailed(task);
         } catch { if (current()) this.#markFailed(task); }
+        finally { clearTimeout(timer); }
       });
     }
   }

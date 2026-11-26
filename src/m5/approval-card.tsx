@@ -6,7 +6,11 @@ import { approvalFields, approvalHeadline, canAcceptApproval, withdrawnRequests 
 import { useI18n } from "../i18n.tsx";
 
 /** A request the agent took back before anyone answered it. */
-export interface WithdrawnApproval { approvalId: string; kind: ApprovalSummary["kind"]; summary: string | null }
+export interface WithdrawnApproval {
+  approvalId: string; kind: ApprovalSummary["kind"]; summary: string | null;
+  /** The person answered, but the run ended before the answer was taken. */
+  answerFailed?: boolean;
+}
 
 const FIELD_KEYS = {
   command: "m5.approval.command", cwd: "m5.approval.cwd", reason: "m5.approval.reason", toolInput: "m5.approval.toolInput",
@@ -107,6 +111,8 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
     if (action === "acceptOnce" && !canAcceptApproval({ approvalId, inspectedId: inspections.get(approvalId)?.approvalId ?? null, openedIds: opened, sending, error })) return;
     busy.current = true;
     deciding.current.add(approvalId);
+    const asked = pendingRef.current.find(item => item.approvalId === approvalId);
+    const shown = inspections.get(approvalId);
     const revision = ++epoch.current;
     setSending(true);
     const request = { action, identity, approvalId };
@@ -117,6 +123,9 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
       if (live.current && revision === epoch.current) { takeList(result.pending); setQueued(true); setError(false); }
     } catch {
       if (live.current && revision === epoch.current) setError(true);
+      // The run ended while this answer was on its way, and it was not
+      // taken: the conversation says so, apart from a request taken back.
+      else if (!live.current && asked) withdrawnCallback.current?.([{ approvalId, kind: asked.kind, summary: shown ? approvalHeadline(shown).target : null, answerFailed: true }]);
     } finally {
       deciding.current.delete(approvalId);
       if (live.current && revision === epoch.current) { busy.current = false; setSending(false); }
@@ -196,5 +205,5 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
 /** "The agent took the request back", with what it was when known. */
 export function ApprovalWithdrawnNote({ item }: { item: WithdrawnApproval }) {
   const { t } = useI18n();
-  return <p role="status" className="m5-approval-withdrawn">{t("m5.approval.withdrawn")}{item.summary ? <> · <code dir="auto">{item.summary}</code></> : <> · {t(`m5.approval.kind.${item.kind}`)}</>}</p>;
+  return <p role="status" className="m5-approval-withdrawn">{t(item.answerFailed ? "m5.approval.answerFailed" : "m5.approval.withdrawn")}{item.summary ? <> · <code dir="auto">{item.summary}</code></> : <> · {t(`m5.approval.kind.${item.kind}`)}</>}</p>;
 }

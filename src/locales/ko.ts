@@ -1089,6 +1089,7 @@ export const ko = {
   "m5.task.recheck": "작업 상태 다시 확인",
   "m5.markdown.truncated": "내용이 많아 앞부분만 서식을 입혔어요. 나머지는 원문 그대로예요.",
   "m5.message.noSummary": "요약할 문장이 없는 긴 보고예요. ‘자세히’에서 전체를 볼 수 있어요.",
+  "m5.approval.answerFailed": "실행이 끝나 이 요청에 대한 답을 전하지 못했어요",
 } as const;
 
 export type MessageKey = keyof typeof ko;

@@ -210,7 +210,7 @@ test("the open task's standing is read apart from the result bar, and again when
   const source = readFileSync(new URL("../src/m5/workbench.tsx", import.meta.url), "utf8");
   const reader = source.slice(source.indexOf("// Reading the open task's standing runs on its own"), source.indexOf("const dispositionKnown = standingRead"));
   assert.ok(reader.includes("inspectChatMerge") && reader.includes("inspectChatApply"), "reads both standings itself");
-  assert.match(reader, /\[chat\.activeChat\?\.chatId, activeWorking, chat\.switching, admissionReady, diffRevision, standingNonce\]/, "re-reads on task, changes or 'look again'");
+  assert.match(reader, /\[chat\.activeChat\?\.chatId, chat\.activeChat\?\.updatedAt, activeWorking, chat\.switching, admissionReady, diffRevision, standingNonce\]/, "re-reads on task, its version, changes or 'look again'");
   assert.ok(!reader.includes("resultView"), "not tied to the bar's visibility");
   assert.ok(reader.includes("STANDING_READ_TIMEOUT_MS"), "no answer in time counts as failed");
 });

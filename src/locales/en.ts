@@ -1091,4 +1091,5 @@ export const en: Record<MessageKey, string> = {
   "m5.task.recheck": "Check task status again",
   "m5.markdown.truncated": "This is long, so only the first part is formatted. The rest is plain text.",
   "m5.message.noSummary": "A long report with no sentences to summarise. Open “More” to see it all.",
+  "m5.approval.answerFailed": "The run ended before your answer to this request was taken",
 };

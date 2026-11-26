@@ -178,10 +178,13 @@ function parseLines(lines: string[], depth: number): MarkdownBlock[] {
     }
     if (line.includes("|") && i + 1 < lines.length && TABLE_RULE.test(lines[i + 1]!) && lines[i + 1]!.includes("-")) {
       const header = splitRow(line);
+      // Not enough allowance for the header: the whole table, and what
+      // follows, stays as original text (review #2: header cells count too).
+      if (!spend(header.length)) { blocks.push(restAsText(lines, i)); break; }
       const align = splitRow(lines[i + 1]!).map(cell => cell.startsWith(":") && cell.endsWith(":") ? "center" as const : cell.endsWith(":") ? "right" as const : cell.startsWith(":") ? "left" as const : null);
       i += 2;
       const rows: MarkdownInline[][][] = [];
-      const headerCells = spend(header.length) ? header.map(cell => parseInline(cell, depth)) : header.map(cell => [{ kind: "text" as const, text: cell }]);
+      const headerCells = header.map(cell => parseInline(cell, depth));
       let stopped = false;
       while (i < lines.length && !blank(lines[i]!) && lines[i]!.includes("|")) {
         const cells = splitRow(lines[i]!);
@@ -218,22 +221,23 @@ function closeBracket(text: string, open: number, limit: number): number {
 
 /** `(target "title")` right after a link's text, looking at most `limit`
  * characters; returns target and end. */
-function linkDestination(text: string, open: number, limit: number): { target: string; end: number } | null {
-  if (text[open] !== "(") return null;
+function linkDestination(text: string, open: number, limit: number): { found: { target: string; end: number } | null; scanned: number } {
+  if (text[open] !== "(") return { found: null, scanned: 0 };
   let level = 0;
   const stop = Math.min(text.length, open + limit);
-  for (let i = open; i < stop; i++) {
+  let i = open;
+  for (; i < stop; i++) {
     const c = text[i];
     if (c === "\\") { i++; continue; }
-    if (c === "\n") return null;
+    if (c === "\n") return { found: null, scanned: i - open };
     if (c === "(") level++;
     else if (c === ")" && --level === 0) {
       const inside = text.slice(open + 1, i).trim();
       const target = /^<[^>]*>/.exec(inside)?.[0] ?? inside.split(/\s+/)[0] ?? "";
-      return { target, end: i + 1 };
+      return { found: { target, end: i + 1 }, scanned: i + 1 - open };
     }
   }
-  return null;
+  return { found: null, scanned: i - open };
 }
 
 // Sticky (`y`): matched in place at an index, never on a copied tail.
@@ -287,14 +291,18 @@ export function parseInline(source: string, depth = 0, links = true): MarkdownIn
       const auto = AUTOLINK.exec(source);
       if (auto) { flush(); out.push({ kind: "link", href: safeLinkTarget(auto[1]!), children: [{ kind: "text", text: auto[1]! }] }); i += auto[0].length; continue; }
     }
+    // The scanning budget ran out: the rest is not looked at for links, and
+    // the document says its formatting stopped (review N5).
+    if ((c === "[" || (c === "!" && source[i + 1] === "[")) && links && scan.scan <= 0 && budget) budget.truncated = true;
     if ((c === "[" || (c === "!" && source[i + 1] === "[")) && depth < MAX_DEPTH && links && scan.scan > 0) {
       const open = c === "!" ? i + 1 : i;
       const close = closeBracket(source, open, Math.min(scan.scan, source.length - open));
       scan.scan -= close > 0 ? close - open : Math.min(scan.scan, source.length - open);
-      // The destination's scan comes out of the same budget.
-      const destinationLimit = Math.max(0, Math.min(scan.scan, source.length - close - 1));
-      const destination = close > 0 && destinationLimit > 0 ? linkDestination(source, close + 1, destinationLimit) : null;
-      if (close > 0) scan.scan -= destination ? destination.end - close - 1 : destinationLimit;
+      // Only a destination that starts, "(", is looked for, and only what was
+      // actually read comes out of the shared budget: "[passed]" costs nothing more.
+      const looked = close > 0 && source[close + 1] === "(" ? linkDestination(source, close + 1, Math.max(0, Math.min(scan.scan, source.length - close - 1))) : { found: null, scanned: 0 };
+      scan.scan -= looked.scanned;
+      const destination = looked.found;
       if (destination) {
         flush();
         const label = source.slice(open + 1, close);
