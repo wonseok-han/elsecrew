@@ -24,6 +24,7 @@
   - `npm test` 1000/1000, build.
   - 렌더러 스모크 69/69. 가짜 bridge에 `workStatus` 답을 추가했다. 없으면 '일하는 중'으로 판단해 업데이트 준비 검사가 실패한다.
   - `cargo test -p elsecrew-sidecar` 단위 928 통과(무시 45), 통합 16 통과.
+  - feature/ade(PR #17 병합 f2d50132)를 병합했다(history 맨 위 엔트리 충돌만 있었고 양쪽 모두 남김, `m5:check:history` 누락 0). 병합 뒤 관련 sidecar 31개와 `npm test` 1006/1006을 다시 돌려 통과했다. CI(12f8d429) macOS·Windows·website·GitGuardian 모두 통과.
 
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 여러 프로젝트 동시 작업 PR-A: 단계 막대 전체 보기·실행 중 전환·작업 단위 쓰기 차단 (`orca/ade-multiproject-a`, 기준 feature/ade 331a206d)
 계획·조사 `~/Documents/elsecrew-ade-multiproject-2026-11-26/PLAN.md`(본문 + 부록 "Orca 방식과 비교"). 현행 설명은 architecture "여러 프로젝트 동시 작업".
