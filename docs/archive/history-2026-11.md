@@ -1,3 +1,121 @@
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #4 독립 검토(차단 0·중요 4·경미 2) 전부 반영
+검토 문서: `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr4.md`(검토 HEAD d677a1e3). 같은 브랜치 `orca/ade-keychain-fix`에서 한 번에 고쳤다. 바뀐 곳은 `provider_claude_refresh.rs`, 호출부 `provider_claude_login.rs`, `Cargo.toml`, `docs/architecture.md`다.
+
+- **I1 Keychain 대기 무제한**
+  - 모든 `security` 호출을 `run_bounded`로 감쌌다. 30초 제한이 있고, 제한이나 취소에 걸리면 자식을 죽이고 거둔 뒤에야 돌아온다. 예약은 그 뒤에야 풀린다.
+  - 취소는 토큰 교환 전까지만 받는다. 교환 뒤에는 서버가 옛 refresh token을 폐기했을 수 있어, 새 값 저장을 끝까지 시도한다(제한 30초 안에서).
+  - 쓰기가 중단되거나 실패해도 다시 읽어 결과를 셋으로 가른다. 새 값이면 성공, 원래 값 그대로면 실패(기존 토큰 유지), 그 밖은 "결과 확인 불가"(`outcome_unknown`)다.
+  - 호출부는 갱신 중 취소되면 "canceled"를 알린다.
+  - 테스트:
+    - `a_keychain_call_waiting_past_its_deadline_is_killed_and_reaped`
+    - `a_keychain_call_is_stopped_when_the_login_is_canceled`
+    - `a_write_stopped_at_its_deadline_keeps_the_stored_login`
+    - `a_write_stopped_after_it_landed_is_confirmed_by_reading_back`
+    - `canceling_before_the_exchange_contacts_no_server_and_writes_nothing`
+    - `canceling_during_the_exchange_still_stores_the_rotated_login`
+- **I2 비교와 쓰기 사이 경합**
+  - 쓰기 직전에 항목이 같은 항목(생성 시각 `cdat`)이고 같은 값인지 다시 확인한다. 아니면 쓰지 않는다.
+  - 쓴 뒤에도 같은 항목인지 확인한다. 몇 밀리초 사이에 지워져 `-U`로 다시 만들어진 경우는 새 생성 시각으로 감지해 "결과 확인 불가"로 보고한다.
+  - `security`는 조건부 갱신을 할 수 없다. 그 몇 밀리초 동안 다른 프로그램이 쓴 더 새 로그인을 덮는 것은 막지 못하며, 이 한계를 architecture의 보장 문구에 명시했다.
+  - 테스트:
+    - `a_login_changed_during_the_exchange_is_not_overwritten`
+    - `an_item_deleted_just_before_the_write_is_reported_unconfirmed`
+    - `a_profile_moved_during_the_exchange_writes_nothing`
+- **I3 비ASCII 재검증**
+  - 저장 JSON을 ASCII로만 직렬화한다(`AsciiJson` 포매터, 비ASCII는 `\uXXXX`).
+  - 읽기는 `-w`가 비ASCII 값을 hex로 내보내는 경우(임시 키체인에서 실측)를 풀어 읽는다. JSON은 `{`로 시작하므로 hex와 구별된다.
+  - 테스트:
+    - `renewal_keeps_escaped_non_ascii_metadata_ascii`
+    - `password_output_in_hex_is_decoded`
+    - `the_real_tool_renews_confirms_and_reads_non_ascii_back`(임시 키체인에서 실제 `security`로 갱신·확인하고, UTF-8 저장값을 왕복)
+- **I4 코어 덤프**
+  - 비밀을 다루는 자식은 exec 전에 `RLIMIT_CORE` soft·hard를 0으로 둔다(`secret_child`). 사이드카 자신도 갱신 시작 때 soft 한도를 0으로 낮춘다(이후 자식에게도 상속된다).
+  - 비밀 버퍼(읽은 값, 명령 줄, 응답, 교체 값)는 `zeroize::Zeroizing`으로 바꿨다. 오류·패닉 경로에서도 지워지고 컴파일러가 지우기를 없애지 않는다.
+  - 명령 줄은 stdin에 쓰자마자, 자식이 끝나기 전에 지운다.
+  - 외부 `security` 프로세스 안의 사본(Apple 소스는 해제 전에 지우지 않는다)은 통제할 수 없다. 대신 그 프로세스의 코어 덤프를 막는다.
+  - 테스트:
+    - `secret_children_cannot_dump_core`
+    - `renewing_turns_off_this_process_core_dumps`
+    - `the_secret_line_is_wiped_once_written_even_before_the_child_exits`
+- **경미 1(4032자 초과 시 native 대체)**
+  - native 대체를 없앴다. 제한 없는 in-process 호출이라 I1과도 맞지 않았다.
+  - 대신 1400바이트 이상인 로그인은 서버에 요청하기 전에 갱신을 거절한다(기존 토큰 유지). 실제 로그인은 약 600바이트다.
+  - `security-framework` 직접 의존을 지우고 `zeroize =1.9.0`을 추가했다(이미 lock에 있던 버전).
+  - 테스트: `a_login_too_long_to_store_safely_is_never_exchanged`, `security_line_carries_only_hex_and_stays_within_one_line`
+- **경미 2(레이블 초기화)**
+  - 속성 출력에서 기존 레이블을 읽어 `-l`로 돌려준다. 따옴표로 감쌀 수 없는 레이블이면 도구 기본값(서비스 이름)으로 둔다. Claude Code 자신의 쓰기와 같다.
+  - 테스트: `security_line_keeps_a_quotable_label_and_drops_an_unsafe_one`, `security_update_keeps_the_secret_out_of_argv_the_acl_and_the_label`(사용자 레이블·ACL 불변·argv 비노출)
+- **함정**
+  - `pgrep -f "cargo |rustc"`는 다른 워커의 개발 앱 셸(`sh -c cargo build … && electron-forge start`)과 자기 대기 명령에도 걸린다. 실제 빌드 확인은 `pgrep -x cargo; pgrep -x rustc`로 한다.
+- **feature/ade 병합**: PR #3 병합(d221832f)으로 PR #4가 `docs/history.md`·아카이브에서 충돌해 CI가 돌지 않았다. feature/ade를 이 브랜치에 병합했다. 아카이브는 그쪽(11-23~11-25를 이미 옮긴 판)을 그대로 쓰고, 이 엔트리들과 `핵심 결정·발견`의 키체인 항목만 다시 얹었다.
+- **테스트 결과**
+  - `cargo test -p elsecrew-sidecar --lib provider_claude_refresh`: 24 통과(새 20개 포함).
+  - `cargo test -p elsecrew-sidecar` 전체: lib 904 통과, 1 실패, 무시 43. 실패한 `chat::tests::a_sign_in_hold_is_released_after_its_task_or_project_was_deleted_and_the_computer_restarted`는 `providerLoginRecoveryRequired` 대신 `providerBusy`가 나왔다. 같은 시각 다른 워커의 cargo 빌드가 돌던 부하 중이었다. 이 `recover` 경로는 갱신 코드를 거치지 않으며, 단독으로 3회 다시 돌려 모두 통과했다. 타이밍성 실패로 보고 기록만 남긴다.
+  - `npm test` 752 통과, `pnpm build` 통과, `git diff --check` 통과.
+  - feature/ade 병합 뒤: `cargo test -p elsecrew-sidecar --lib provider_claude` 46 통과, `npm test` 806 통과, `pnpm build` 통과.
+- **미검증**
+  - 이번 변경 뒤 로그인 키체인 probe는 다시 하지 않았다. 호출자는 같은 `/usr/bin/security`이고, `-l` 추가가 ACL을 바꾸지 않음은 임시 키체인에서 확인했다.
+  - 실제 만료 토큰 갱신도 아직 보지 못했다.
+  - Electron `claude-usage.ts`의 `-w` 읽기도 비ASCII 저장값(Claude Code가 UTF-8로 쓴 경우)이면 hex를 받는다. 기존 문제이며 이번 범위 밖이다.
+
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 개발 중 반복되는 Keychain 허용 창 원인 확정과 사이드카 쓰기 경로 수정
+Orca 조정자 작업. 기준은 feature/ade 907eeba4, 브랜치 `orca/ade-keychain-fix` → PR base feature/ade.
+
+- **원인 확정**(`security dump-keychain -a`로 ACL·partition만 확인, 비밀 값은 읽지 않음)
+  - `Claude Code-credentials-f97f5bae`: 허용 앱은 `/usr/bin/security` 하나, partition은 `cdhash:dd3f…, apple-tool:`. Claude Code와 사이드카의 읽기는 모두 `/usr/bin/security`라 `apple-tool:`로 통과한다.
+  - `cdhash:` 항목을 만든 것은 사이드카의 토큰 갱신 쓰기(`security_framework::set_generic_password`)뿐이다. 자체 서명 사이드카는 Team ID가 없어 cdhash로 묶이고, 다시 빌드할 때마다 해시가 바뀌어 다시 물었다. 지정 요구사항이 같아도 partition 검사가 따로 있다.
+  - `Elsecrew Safe Storage`: 허용 앱이 ADE-개발 경로 하나이고 partition은 `cdhash:74cc2c91…`. 하지만 ADE-개발·ade-phase1a·이 워크트리(`node install.js`로 새로 품)의 Electron.app cdhash가 모두 74cc2c91…로 같다. 이 워크트리의 Electron으로 safeStorage 왕복(7ms)과 실제 개발 앱 시작·정상 종료(봉인 키 복호화·새 봉인 기록)가 창 없이 됐고, 항목의 ACL·mdat는 바뀌지 않았다. 워크스페이스마다 다시 묻는다는 추정은 사실이 아니어서 Electron 쪽은 바꾸지 않았다.
+- **수정**(`provider_claude_refresh.rs`)
+  - 갱신 쓰기를 `/usr/bin/security -i` + stdin 한 줄(`add-generic-password -U -a "unknown" -s "<서비스>" -X <hex>`)로 바꿨다. argv는 `-i`뿐이고 stdout·stderr는 버린다. 줄 버퍼는 비밀 바이트를 넣기 전에 크기를 정해 재할당 사본이 남지 않고, 쓰기 뒤 0으로 지운다.
+  - 서비스·계정에 따옴표·역슬래시·제어 문자가 있으면 줄을 만들지 않는다. 줄이 4032자를 넘으면(로그인 약 1.9KB 초과) 예전 native 호출로 되돌린다.
+  - `security`는 종료 코드만 알려 주므로 쓰기 뒤 다시 읽어 같은지 확인한다.
+  - 배포판에도 그대로 쓴다. 읽기는 이미 배포판에서 `/usr/bin/security`를 쓰고, 항목의 ACL은 Claude Code가 만들 때부터 `/usr/bin/security`만 허용해 넓어지는 권한이 없다. 서명된 배포판도 업데이트마다 갱신 쓰기 허용 창이 생길 여지가 없어진다.
+  - `scripts/m5-dev-sign-sidecar.mjs`와 테스트를 지우고 `m5:dev`를 PR #2 이전으로 되돌렸다. 사이드카의 Keychain 접근이 모두 `/usr/bin/security`라 사이드카 서명은 Keychain에 영향이 없다. 첫 `codesign` 개인 키 허용 창과 인증서 의존도 사라진다. 로그인 키체인의 "Elsecrew Dev" 인증서는 그대로 두었다.
+- **확인**
+  - 단위 테스트: 줄 형식·hex만 포함·한 줄·상한·따옴표 거부. 임시 키체인(macOS)에서 `security -i`가 비밀을 가진 동안 `ps -axww`의 어떤 argv에도 평문·hex가 없음, 갱신 뒤 값 일치, ACL(`/usr/bin/security`만) 불변.
+  - 로그인 키체인(조정자 승인): 더미 항목 `Elsecrew keychain-fix probe`(계정 `probe-20261126…`)를 `/usr/bin/security`로 만들고, cdhash가 다른 두 빌드(329e767d…, 302776f4…)의 새 쓰기 경로로 갱신했다. 둘 다 창 없이 0.04초 안에 끝났고 partition은 `apple-tool:`, 허용 앱은 `/usr/bin/security` 그대로였다. 끝난 뒤 그 서비스+계정 하나만 걸리는 것을 확인하고 지웠다.
+  - 실제 `Claude Code-credentials-f97f5bae`는 읽기(ACL) 외에 건드리지 않았다(mdat 20261126005712Z 그대로). 기존 partition의 `cdhash:dd3f…`는 남아 있지만 해롭지 않다.
+  - 실수 기록: 개발 앱 확인 때 `pnpm m5:dev -- -- …`의 `--`가 하나 많아 `--user-data-dir`·디버깅 포트가 적용되지 않았고, 개발 기본 프로필(`~/Library/Application Support/Elsecrew`)로 떴다. 다른 개발 앱 인스턴스는 없었고, 시작 화면 뒤 SIGTERM으로 정상 종료해 봉인이 다시 기록됐다(정상 사용분). 다음부터는 `pnpm m5:dev -- --user-data-dir=…` 형태로 쓴다.
+- **테스트**: `cargo test -p elsecrew-sidecar` 통과(lib 887, 무시 44 / 통합 16, 무시 1). 새 테스트 2개와 수동 probe 1개(`#[ignore]`) 포함. `npm test` 752 통과(지운 서명 스크립트 테스트 7개만큼 줄었다), `pnpm build` 통과, `git diff --check` 통과. Rust workspace 전체는 다시 돌리지 않았다(변경은 macOS 전용 `provider_claude_refresh` 하나).
+- **PR #4 CI**: macOS·Windows 하네스, website, GitGuardian 모두 통과. 단 CI 하네스는 sidecar crate 테스트를 돌리지 않아 새 Keychain 테스트의 증거는 위 로컬 실행뿐이다.
+- **미검증**: 실제 만료 토큰 갱신(새 쓰기 경로로 실제 Claude 항목 갱신)은 만료 시점에만 일어나 이번에 돌리지 않았다. 같은 함수를 로그인 키체인 더미 항목으로 확인했다.
+- **다음 할 일**
+  - 이 PR의 CI·독립 검토 대응
+  - 다음 실제 토큰 만료 때 개발 앱에서 창이 뜨지 않는지 관찰
+
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #3 Codex 집중 검토(새 중요 1, 부분 3, 새 경미 1) 반영
+검토서: `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-codex-4.md`(대상 a5fda0c9, 차단 0). 조정자 결정: 이 다섯 가지를 리뷰 재현 순서 그대로의 회귀 테스트로 막으면 재검토 없이 머지.
+
+- **사본 반영 버튼(새 중요)**: 작업 종류(git/사본)를 상태 조회 결과와 분리해 `StandingRead.kind`로 둔다. 같은 작업의 연속 조회(반영 버튼 → 변경 목록 비웠다 다시 읽기)나 반영 내역 조회 실패에도 종류가 유지돼, 변경 패널의 `ApplyLatest`가 다시 마운트되지 않고 확인 요청을 잃지 않는다. 연속 조회 중에는 직전 값을 유지(실패 값 제외).
+- **#4**: 열린 작업의 최신 조회 실패를 목록 저장소에 알린다(`reportFailed`). 다른 작업으로 바꿔도 예전 "합침"이 돌아오지 않고 "상태 확인 실패"로 남는다.
+- **#2**: 표 셀 안 인라인까지 12,000개 공용 상한에 넣는다(넘치면 그 표부터 원문). 끝에 완성 트리 전체를 세어(`countMarkdownNodes`) 상한을 넘으면 문서를 원문으로 보인다.
+- **N5**: 마지막 링크를 읽다 예산이 바닥나면 다음 대괄호가 없어도 서식 제한 안내를 붙인다.
+- **새 경미**: 권한 철회·답 전달 실패 안내에 원래 작업 ID를 붙이고, 대화는 자기 작업의 안내만 보인다(`noticesForChat`).
+- **실제 앱 확인**(사본 모드, todo-test-1125a의 사본 작업): 앱 편집기로 README 한 줄을 저장 → 새로고침 → "반영 뒤 또 바뀜"(`screenshots/31`) → 결과 막대 "다시 반영" 첫 클릭에 확인 창이 열리고 반영 패널은 같은 요소 그대로(`32`) → "반영하기" → "반영함"(`33`). 앱 로그 오류 0건, 정상 종료.
+- **테스트**: `tests/m5-ade-review4.test.mts` 6개. `npm test` 813 통과, `pnpm build` 통과. Rust 변경 없음.
+
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #3 Codex 3차 검토(차단 0, 잔여 중요 4·경미 3) 반영
+검토서: `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-codex-3.md`(대상 362dd23d, N1 해결). 마지막 수정 라운드로 한 번에 고쳤다.
+
+- **N2·N3·#4 한 구조로**: 열린 작업의 합침·반영 상태는 작업대 한 곳(`standing-read.ts`)이 읽는다. 읽기마다 세대 번호와 작업 ID·버전(`updatedAt`)을 붙이고, 읽기 효과를 떠나는 모든 경우(다른 작업, 팀 재시작, 새 읽기, 저장소 준비 해제)에 세대를 올려 늦은 응답을 버린다(N3). 최신 결과가 이긴다: 실패하면 앞선 "변경 없음"·"합침"이나 저장된 값을 현재로 보이지 않고 결과 막대에 "확인하지 못했어요 · 다시 확인"을 띄운다(N2, #4). 결과 막대·변경 패널의 자체 조회는 버튼용이고 상태에 쓰지 않는다. 합치기·반영 뒤에는 다시 읽는다. 목록 저장소 기록은 현재 버전의 성공한 읽기만.
+- **#2**: 표 머리글도 요소 상한에 들어간다. 머리글을 그릴 여유가 없으면 그 표부터 원문으로 넘긴다(78,003자 2줄 13,000칸 사례).
+- **N4**: 목록 재확인은 큐에 넣을 때 회차를 잡고, 회차가 지난 항목은 보내기 전에 건너뛴다. 응답 시간 타이머는 끝나면 정리한다.
+- **N5**: 링크 목적지는 "("로 시작할 때만 찾고 실제로 읽은 글자만 공용 예산에서 뺀다("[통과]"는 예산을 쓰지 않음). 예산이 실제로 바닥나면 "앞부분만 서식" 안내를 붙인다.
+- **#8**: 실행이 끝날 때 전송 중이던 답이 나중에 실패하면 대화에 "실행이 끝나 답을 전하지 못했어요"를 철회 안내와 구분해 보인다.
+- **테스트**: `tests/m5-ade-review3.test.mts` 7개(지적마다 리뷰 재현 시나리오). `npm test` 807 통과, `pnpm build` 통과. Rust 변경 없음.
+
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #3 Codex 재검토(새 차단 1·중요 1, 부분 3) 반영
+재검토서: `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-codex-2.md`(대상 8233d104, 기존 11건 중 해결 8·부분 3). 한 번에 고쳤다(a3a4d4d8 외).
+
+- **N1 차단(합치기 확인 대상)**: 확인 창을 열 때 읽은 작업 head·기준 tip을 그 확인에 고정하고(`merge-confirmation.ts`), 합치기는 정확히 그 값을 `expectedHead/expectedBase`로 보낸다. 이후 읽기에서 둘 중 하나라도 바뀌면 확인을 닫고 "확인한 뒤에 바뀌었어요"를 보여 다시 확인하게 한다(보내기 직전에도 다시 비교). 사본 반영 확인도 열린 동안 반영 내역(applied·pending·total)이 바뀌면 닫는다. 사본 반영 요청 자체는 계약상 기대값을 보내지 않는다("작업 공간의 지금 내용", 11-17 주인님 결정) — 화면 쪽 무효화만 넣었고 계약 변경은 하지 않았다.
+- **N2**: 열린 작업의 합침·반영 상태 읽기를 결과 막대에서 떼어 작업대에 두었다(작업·변경 목록·"다시 확인"이 바뀔 때마다, 팀이 일하지 않을 때). 그래서 "답변 완료" 뒤 파일이 바뀌면 다시 읽어 검토 대기와 합치기 버튼이 나타난다. 읽기 실패·20초 무응답은 별도 상태로, 답변 작업이어도 결과 막대에 "확인하지 못했어요 · 다시 확인"을 띄운다. 실패한 뒤에는 저장된 옛 값을 보이지 않는다.
+- **#2 부분**: 문서당 생성 요소(블록·인라인·표 셀) 상한 1.2만 개(넘으면 나머지는 원문 + 안내), CR·CRLF도 파서와 같은 규칙으로 줄을 셈, 링크 목적지 탐색도 문서 공용 탐색 예산(6만 자)에 포함, 앞부분에 문장이 없는 긴 보고는 펼치지 않고 "요약할 문장이 없어요 · 자세히"로 접는다.
+- **#4 부분**: 닫힌 작업의 재조회가 실패하거나 20초 안에 답이 없으면 목록에 "상태 확인 실패"(옛 합침·반영함 대신). 목록의 "작업 상태 다시 확인"과 변경 목록 새로고침으로 프로젝트를 닫지 않고 다시 확인한다.
+- **#8 부분**: 철회 안내는 카드가 아니라 대화(타임라인)가 8초 관리한다. `decided`에는 엔진이 허용·거절 성공을 돌려준 ID만 넣고, 보내는 중인 ID는 따로 둔다(실패하면 빠진다).
+- 문구: 합치기 확인 무효 안내의 "main가"를 "main의 내용이 바뀌었어요"로 다듬었다.
+- **실제 앱 확인**(todo-test-1125a): N1 — 합치기 확인을 연 뒤 시험 저장소 main에 커밋을 만들고 변경을 새로고침하자 확인 창이 닫히고 다시 확인 안내가 나왔다(`screenshots/27`, `28`). N2 — 총괄이 직접 답한 작업이 "답변 완료"(막대 없음, `29`), 그 작업 공간 README를 바꾸고 새로고침하자 "검토 대기" + 결과 막대 + 합치기 버튼(`30`); 시험 변경은 되돌렸다. 앱 로그 오류 0건, 정상 종료.
+- **테스트**: 새 회귀 테스트(N1 합치기·반영 확인 무효화, N2 실패 막대·독립 읽기, #4 실패·무응답·다시 확인, #2 표 셀·인라인 상한·CR 줄·목적지 예산·문장 없는 접기, #8 기록 순서). `npm test` 800 통과, `pnpm build` 통과, Rust 전체(이번 Rust 변경 없음) core 242·protocol 70·sidecar 885(43 무시)·stdio 16·기타 3, 실패 0.
+
 ### 2026-11-25 · by Claude Opus 5.5 (claude-opus-5-5) — PR #3 Codex 독립 검토(차단 1·중요 5·경미 5) 반영
 검토서: `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-codex.md`(gpt-6.2-sol, 대상 adcda993). 같은 브랜치에서 한 번에 고쳤다(67006645 외).
 

@@ -119,6 +119,7 @@ impl ProjectManager {
             application_job: None,
             #[cfg(any(unix, windows))]
             application_confirmations: Default::default(),
+            preview_roots: Default::default(),
             data_root: self.data_root.clone(),
             data_dir: clone_dir(&self.data_dir)?,
             worktrees_root: self.worktrees_root.clone(),

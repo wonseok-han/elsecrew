@@ -181,6 +181,20 @@ window.m5SmokeEnableParallelChats = () => {
 };
 // The tree has no root button at the top level any more; an overflowing watch
 // is the real path that offers a full reload ("다시 확인").
+const SMOKE_READ_VERSION = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const SMOKE_DIFF_ENTRIES = [{ path: "src/example.ts", kind: "modified", binary: false }];
+function smokeFileText(path) {
+  return path.endsWith(".rs") ? "fn main() {}\n" : path.endsWith(".py") ? "def main():\n    pass\n" : path.endsWith(".json") ? '{"ready":true}\n' : "export const smoke = true;\n";
+}
+function smokeDiffText() {
+  return "@@ -1 +1,401 @@\n-old\n" + Array.from({ length: 401 }, (_, index) => `+line ${index + 1}\n`).join("");
+}
+function workspaceRef(input) {
+  return { chatId: input.chatId, projectId: input.projectId, worktreeId: input.worktreeId, workspaceIdentity: input.workspaceIdentity };
+}
+function emitWorkspaceChunk(input, streamId, text) {
+  for (const listener of workspaceListeners) listener({ protocolVersion: 1, kind: "event", sidecarInstanceId: "smoke_sidecar", streamId, seq: 1, event: "workspace.blob.chunk", payload: { ...workspaceRef(input), text } });
+}
 function smokeTreePage(parentPath, cursor) {
     if (window.m5SmokeLongTree && parentPath === "") {
       window.m5SmokeTreeReads = (window.m5SmokeTreeReads ?? 0) + 1;
@@ -315,7 +329,7 @@ window.m5 = {
   },
   closeProject: async () => ({ projectId: "smoke_project", lifecycle: "abandoned", physicallyDeleted: false }),
   readFile: async ({ path }) => {
-    const text = path.endsWith(".rs") ? "fn main() {}\n" : path.endsWith(".py") ? "def main():\n    pass\n" : path.endsWith(".json") ? '{"ready":true}\n' : "export const smoke = true;\n";
+    const text = smokeFileText(path);
     for (const listener of listeners) {
       listener({
         protocolVersion: 1,
@@ -345,10 +359,10 @@ window.m5 = {
   },
   getDiffSummary: async () => {
     if (!snapshotCreated) throw new Error("renderer requested changes before creating its standalone snapshot");
-    return { projectId: "smoke_project", baseCommit: "a".repeat(40), entries: [{ path: "src/example.ts", kind: "modified", binary: false }] };
+    return { projectId: "smoke_project", baseCommit: "a".repeat(40), entries: SMOKE_DIFF_ENTRIES };
   },
   getDiffFile: async () => {
-    const text = "@@ -1 +1,401 @@\n-old\n" + Array.from({ length: 401 }, (_, index) => `+line ${index + 1}\n`).join("");
+    const text = smokeDiffText();
     for (const listener of listeners) listener({ protocolVersion: 1, kind: "event", sidecarInstanceId: "smoke_sidecar", streamId: "smoke_diff", seq: 1, event: "blob.chunk", payload: { text } });
     return { projectId: "smoke_project", path: "src/example.ts", kind: "modified", oldPath: null, baseVersion: "sha256:" + "a".repeat(64), worktreeVersion: "sha256:" + "b".repeat(64), byteLength: text.length, stream: { streamId: "smoke_diff", chunkBytes: 262144 } };
   },
@@ -359,14 +373,27 @@ window.m5 = {
     const page = smokeTreePage(input.parentPath ?? "", input.cursor ?? null);
     return { ...input, entries: page.entries, nextCursor: page.nextCursor };
   },
-  closeWorkspace: unexpected("closeWorkspace"),
-  readWorkspaceFile: unexpected("readWorkspaceFile"),
-  beginWorkspaceFileSave: unexpected("beginWorkspaceFileSave"),
-  appendWorkspaceFileSaveChunk: unexpected("appendWorkspaceFileSaveChunk"),
-  commitWorkspaceFileSave: unexpected("commitWorkspaceFileSave"),
+  // Opening a project resumes its last task, so files, saves and comparisons
+  // go through the task's workspace. They serve the same smoke content as the
+  // project calls, with the workspace address and `workspace.blob.chunk`
+  // events; a save commits through `commitFileSave`, so wrappers the runner
+  // puts on it (save counting) still see every save.
+  closeWorkspace: async (input) => ({ ...workspaceRef(input), lifecycle: "abandoned", physicallyDeleted: false }),
+  readWorkspaceFile: async (input) => {
+    const text = smokeFileText(input.path);
+    emitWorkspaceChunk(input, "smoke_workspace_file", text);
+    return { ...workspaceRef(input), path: input.path, classification: "utf8", byteLength: Buffer.byteLength(text), version: SMOKE_READ_VERSION, stream: { streamId: "smoke_workspace_file", chunkBytes: 262144 } };
+  },
+  beginWorkspaceFileSave: async (input) => ({ ...workspaceRef(input), saveId: "smoke_workspace_save", chunkBytes: 262144 }),
+  appendWorkspaceFileSaveChunk: async (input) => ({ ...workspaceRef(input), saveId: input.saveId, acceptedSeq: input.seq }),
+  commitWorkspaceFileSave: async (input) => ({ ...(await window.m5.commitFileSave(input)), ...workspaceRef(input), saveId: input.saveId }),
   watchWorkspaceFiles: async (input) => ({ ...input, watching: true }),
-  getWorkspaceDiffSummary: async (input) => ({ ...input, baseCommit: "a".repeat(40), entries: [] }),
-  getWorkspaceDiffFile: unexpected("getWorkspaceDiffFile"),
+  getWorkspaceDiffSummary: async (input) => ({ ...workspaceRef(input), baseCommit: "a".repeat(40), entries: SMOKE_DIFF_ENTRIES }),
+  getWorkspaceDiffFile: async (input) => {
+    const text = smokeDiffText();
+    emitWorkspaceChunk(input, "smoke_workspace_diff", text);
+    return { ...workspaceRef(input), path: input.path, kind: "modified", oldPath: null, baseVersion: "sha256:" + "a".repeat(64), worktreeVersion: "sha256:" + "b".repeat(64), byteLength: text.length, stream: { streamId: "smoke_workspace_diff", chunkBytes: 262144 } };
+  },
   onWorkspaceEvent: (listener) => unsubscribe(workspaceListeners, listener),
   prepareChatWorkspace: unexpected("prepareChatWorkspace"),
   abandonPreparedWorkspace: unexpected("abandonPreparedWorkspace"),
