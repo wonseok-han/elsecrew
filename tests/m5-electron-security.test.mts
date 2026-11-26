@@ -1039,7 +1039,7 @@ test("build-then-preview: a build runs only after main's own box, in the folder 
     assert.equal((await handler(harness.currentEvent(), start) as { outcome: string }).outcome, "started");
     assert.equal(fakePreviewBuild.spawns.length, 1);
     const spawned = fakePreviewBuild.spawns[0]!;
-    assert.deepEqual([spawned.program, spawned.args, spawned.cwd, spawned.detached], ["/opt/homebrew/bin/npm", ["run", "build"], "/Users/me/elsecrew/workspaces/app/task-1", true]);
+    assert.deepEqual([spawned.program, spawned.args, spawned.cwd, spawned.detached], ["/opt/homebrew/bin/npm", ["run", "build"], "/Users/me/elsecrew/workspaces/app/task-1", process.platform !== "win32"]);
     assert.deepEqual(Object.keys(spawned.env).filter(name => /KEY|TOKEN|ELSECREW/.test(name)), []);
     assert.equal(spawned.env.HOME, "/Users/me");
     // One job per task: a second start while it runs is busy, without a box.
