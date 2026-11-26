@@ -234,7 +234,8 @@ class FakeWindow {
     listeners: new Map<string, (...args: unknown[]) => void>(),
     mainFrame: { url: "" },
     on: (event: string, listener: (...args: unknown[]) => void) => this.webContents.listeners.set(event, listener),
-    send: () => undefined,
+    sent: [] as [string, unknown][],
+    send: (channel: string, payload: unknown) => { this.webContents.sent.push([channel, payload]); },
     setWindowOpenHandler: (handler: () => { action: string }) => { this.openHandler = handler; },
     getZoomFactor: () => 1,
     zoomLevel: 0,
@@ -313,7 +314,7 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
     },
     BrowserWindow: Object.assign(FakeWindow, { getAllWindows: () => FakeWindow.windows }),
     screen: { getDisplayMatching: () => ({ scaleFactor: 1 }) },
-    dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }), showMessageBox: async (_window: unknown, options: { detail?: string }) => { sidecarCalls.push(`confirm:${options.detail ?? ""}`); return { response: externalLinkAnswer.value }; } },
+    dialog: { showOpenDialog: async () => folderPick.path ? { canceled: false, filePaths: [folderPick.path] } : { canceled: true, filePaths: [] }, showMessageBox: async (_window: unknown, options: { detail?: string }) => { sidecarCalls.push(`confirm:${options.detail ?? ""}`); return { response: externalLinkAnswer.value }; } },
     shell: { openExternal: async () => { sidecarCalls.push("openExternal"); } },
     safeStorage: { isEncryptionAvailable: () => false, encryptString: () => { throw new Error("unexpected encryption"); }, decryptString: () => { throw new Error("unexpected decryption"); } },
     ipcMain: {
@@ -382,6 +383,7 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
       return { tree: true };
     }
     failRendererDisconnected() {}
+    async openProject(path: string) { sidecarCalls.push(`openProject:${path}`); return { outcome: "opened" }; }
   }
   class FakeEventCredit {
     outstanding = 0;
@@ -407,6 +409,9 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
     module,
     exports: module.exports,
     process: { platform: "darwin", resourcesPath: "/resources", execPath: "node" },
+    // Timers are held, not run: a test fires them (the folder confirmation's time limit).
+    setTimeout: (callback: () => void) => { heldTimers.push(callback); return heldTimers.length; },
+    clearTimeout: () => undefined,
     require: (specifier: string) => moduleFor(specifier, { electron, files, FakeSidecar, FakeEventCredit, FakeQuitCoordinator, env }),
   });
   const source = readFileSync(resolve(root, "electron/main.ts"), "utf8");
@@ -505,8 +510,9 @@ function moduleFor(
     return {
       mkdirSync: () => undefined,
       realpathSync: Object.assign((path: string) => path, { native: (path: string) => path }),
-      readdirSync: () => { throw new Error("unexpected directory listing in main security harness"); },
+      readdirSync: (path: string) => { if (path === folderPick.path) return []; throw new Error("unexpected directory listing in main security harness"); },
       statSync: (path: string) => {
+        if (path === folderPick.path) return { dev: 1n, ino: 2n };
         if (!fakes.files.has(path)) throw new Error("missing test asset");
         return { isFile: () => true };
       },
@@ -529,6 +535,10 @@ import * as approvalContract from "../src/m5/contracts/approval-v1.ts";
 import * as externalLinkContract from "../src/m5/contracts/external-link-v1.ts";
 /** What the fake quit coordinator answers to a quit preparation. */
 const quitAnswer = { value: { blockers: [] as string[], safeToQuit: true } };
+/** The folder the fake open dialog picks (an empty one, on macOS), or none. */
+const folderPick: { path: string | null } = { path: null };
+/** Timers main.ts set, held so a test can run them. */
+const heldTimers: (() => void)[] = [];
 /** What the native "open this address?" confirmation answers (0 = open). */
 const externalLinkAnswer = { value: 1 };
 import * as catalogContract from "../src/m5/contracts/project-catalog-v1.ts";
@@ -783,4 +793,52 @@ test("the View menu's zoom and a window resize hide the preview before anything 
   assert.equal(zoomMenuModel.zoomLevelAfter(9, 1), 9);
   assert.equal(zoomMenuModel.zoomLevelAfter(-8, -1), -8);
   assert.equal(zoomMenuModel.zoomLevelAfter(2.5, 0), 0);
+});
+
+test("folder confirmation is asked in the app with a one-time number; only the main frame answers, never with a folder (ADE U2, Q7)", async () => {
+  const harness = await loadMain();
+  folderPick.path = "/Users/me/new-shop";
+  heldTimers.length = 0;
+  try {
+    const open = harness.handlers.get(M5_BRIDGE_V2_CHANNELS.projectOpen)!;
+    const answer = harness.handlers.get("m5:folder-confirm:answer")!;
+    assert.ok(answer, "an answer channel exists");
+    const sent = (harness.window.webContents as unknown as { sent: [string, { nonce: string; kind: string; name: string; path: string }][] }).sent;
+    // No native box: the page is asked, and nothing opens until it says yes.
+    const first = open(harness.currentEvent());
+    await new Promise(done => setImmediate(done));
+    assert.equal(sent.length, 1);
+    const [channel, ask] = sent[0]!;
+    assert.equal(channel, "m5:folder-confirm:ask");
+    assert.deepEqual({ kind: ask.kind, name: ask.name, path: ask.path }, { kind: "emptyFolder", name: "new-shop", path: "/Users/me/new-shop" });
+    assert.ok(!harness.sidecarCalls.some(call => call.startsWith("confirm:") || call.startsWith("openProject")));
+    // A foreign frame, a wrong number, a non-boolean, a folder and extra arguments are all refused.
+    await assert.rejects(answer({ sender: {}, senderFrame: {} }, ask.nonce, true));
+    await assert.rejects(answer(harness.currentEvent(), "guessed", true));
+    await assert.rejects(answer(harness.currentEvent(), ask.nonce, "yes"));
+    await assert.rejects(answer(harness.currentEvent(), ask.nonce, true, "/etc"));
+    await assert.rejects(answer(harness.currentEvent(), { nonce: ask.nonce, path: "/etc" }, true));
+    assert.ok(!harness.sidecarCalls.some(call => call.startsWith("openProject")));
+    await answer(harness.currentEvent(), ask.nonce, true);
+    assert.equal((await first as { outcome: string }).outcome, "opened");
+    assert.ok(harness.sidecarCalls.includes("openProject:/Users/me/new-shop"), "the folder main picked is opened, not one the page named");
+    // The number is used once.
+    await assert.rejects(answer(harness.currentEvent(), ask.nonce, true));
+    // No answers "no"; a newer ask ends the older one as "no"; time running out is "no".
+    const declined = open(harness.currentEvent());
+    await new Promise(done => setImmediate(done));
+    await answer(harness.currentEvent(), sent[1]![1].nonce, false);
+    assert.equal((await declined as { outcome: string }).outcome, "cancelled");
+    const older = open(harness.currentEvent());
+    await new Promise(done => setImmediate(done));
+    const newer = open(harness.currentEvent());
+    await new Promise(done => setImmediate(done));
+    assert.equal((await older as { outcome: string }).outcome, "cancelled");
+    await assert.rejects(answer(harness.currentEvent(), sent[2]![1].nonce, true), "the older number no longer answers");
+    heldTimers.at(-1)!();
+    assert.equal((await newer as { outcome: string }).outcome, "cancelled");
+    assert.equal(harness.sidecarCalls.filter(call => call.startsWith("openProject")).length, 1);
+  } finally {
+    folderPick.path = null;
+  }
 });

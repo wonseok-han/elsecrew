@@ -89,13 +89,14 @@ app.whenReady().then(async () => {
     }
     const controlLabel = "프로젝트 선택";
     await ${waitFor("document.querySelector('.m5-open-preferences')", "settings entry")};
-    if (!document.querySelector('.m5-rail-footer .m5-open-preferences svg') || document.querySelector('.m5-toolbar .m5-open-preferences')) throw new Error('settings must be a sidebar gear');
+    // ADE U2: the home screen has no rail; settings is the gear in the top bar, as on the task screen.
+    if (!document.querySelector('.m5-topbar .m5-open-preferences svg') || document.querySelector('.m5-project-rail')) throw new Error('settings must be the top bar gear and the home rail gone');
     await ${waitFor("document.querySelector('.m5-app-statusbar').textContent.includes('Claude') && document.querySelector('.m5-app-statusbar').textContent.includes('연결 안 됨')", "both disconnected summaries")};
-    if(document.querySelector('.m5-project-rail .m5-provider-usage')) throw new Error('usage still occupies sidebar');
+
     const usageHeight = document.querySelector('.m5-provider-usage').getBoundingClientRect().height;
     const statusTop = document.querySelector('.m5-app-statusbar').getBoundingClientRect().top;
     const settingsRect = document.querySelector('.m5-open-preferences').getBoundingClientRect();
-    if (document.querySelector('.m5-project-rail').getBoundingClientRect().bottom > statusTop || settingsRect.bottom > statusTop || !document.elementFromPoint(settingsRect.x + settingsRect.width / 2, settingsRect.y + settingsRect.height / 2)?.closest('.m5-open-preferences')) throw new Error('statusbar covers sidebar settings');
+    if (settingsRect.bottom > statusTop || !document.elementFromPoint(settingsRect.x + settingsRect.width / 2, settingsRect.y + settingsRect.height / 2)?.closest('.m5-open-preferences')) throw new Error('settings gear not reachable');
     document.querySelector('.m5-usage-trigger').click();
     await ${waitFor("document.querySelector('.m5-provider-usage-content').matches(':popover-open')", "usage top layer")};
     if (document.querySelector('.m5-provider-usage').getBoundingClientRect().height !== usageHeight) throw new Error('usage popup shifted sidebar');
@@ -118,9 +119,9 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-preferences-row select')", "language control")};
     const storageRequest = window.m5Projects.request;
     window.m5Projects.request = async input => input.action === 'backupStorageUsage' ? {schemaVersion:1, action:input.action, usage:{usedBytes:0,limitBytes:5*1024**3,remainingBytes:5*1024**3}} : storageRequest(input);
-    document.querySelectorAll('.m5-preferences-layout nav button')[3].click();
-    await ${waitFor("!document.querySelector('.m5-storage-settings > button').disabled", "storage ready")};
-    document.querySelector('.m5-storage-settings > button').click();
+    document.querySelectorAll('.m5-preferences-layout nav button')[4].click();
+    await ${waitFor("!document.querySelector('.m5-storage-settings .m5-setting-control > button').disabled", "storage ready")};
+    document.querySelector('.m5-storage-settings .m5-setting-control > button').click();
     await ${waitFor("document.querySelector('.m5-storage-consent')", "storage controls")};
     ${capture("01-settings-storage")}
     const budget = document.querySelector('.m5-storage-limit').getBoundingClientRect();
@@ -128,7 +129,7 @@ app.whenReady().then(async () => {
     const saveBudget = document.querySelector('.m5-storage-actions');
     if (consent.top < budget.bottom || saveBudget.getBoundingClientRect().top < consent.bottom || !saveBudget.querySelector('button').disabled) throw new Error('budget controls overlap or consent bypassed');
     window.m5Projects.request = storageRequest;
-    document.querySelectorAll('.m5-preferences-layout nav button')[4].click();
+    document.querySelectorAll('.m5-preferences-layout nav button')[5].click();
     await ${waitFor("document.querySelector('.m5-management-projects li > button')", "settings project list")};
     document.querySelectorAll('.m5-preferences-layout nav button')[0].click();
     const chooseLanguage = value => {
@@ -136,7 +137,7 @@ app.whenReady().then(async () => {
       select.value = value;
       select.dispatchEvent(new Event('change', {bubbles:true}));
     };
-    document.querySelectorAll('.m5-preferences-layout nav button')[1].click();
+    document.querySelectorAll('.m5-preferences-layout nav button')[3].click();
     await ${waitFor("document.querySelector('.m5-preferences-content .m5-notice details')", "defaults failure")};
     if (document.querySelector('.m5-preferences-content .m5-notice').querySelectorAll('button').length !== 1) throw new Error('defaults error duplicates navigation');
     if (document.querySelector('.m5-app-settings > header button').disabled) throw new Error('failed defaults traps settings');
@@ -154,7 +155,7 @@ app.whenReady().then(async () => {
     document.querySelectorAll('.m5-preferences-layout nav button')[0].click();
     await ${waitFor("!document.querySelector('.m5-settings-inline')", "close model settings")};
     window.m5SmokeDefaultsRevision = 1;
-    document.querySelectorAll('.m5-preferences-layout nav button')[1].click();
+    document.querySelectorAll('.m5-preferences-layout nav button')[3].click();
     await ${waitFor("document.querySelectorAll('#m5-role-editor select')[1]?.value === 'new-default'", "initial defaults use provider recommendation")};
     document.querySelectorAll('.m5-preferences-layout nav button')[0].click();
     // A default the screen suggests is not an unsaved edit (1차-가 D12,
@@ -257,50 +258,37 @@ app.whenReady().then(async () => {
     await ${waitFor("!document.getElementById('codex-connection-details').hidden", "inspected connection stays visible")};
     await ${waitFor("document.querySelector('#codex-installation-slot button')", "installation step visible")};
     await (${probeInstallConsent.toString()})();
-    await ${waitFor("[...document.querySelectorAll('button')].some((button) => !button.disabled && (button.getAttribute('aria-label') === controlLabel || button.textContent?.trim() === controlLabel))", "enabled accessible project-selection control")};
-    const projectButton = [...document.querySelectorAll("button")].find((button) => !button.disabled && (button.getAttribute("aria-label") === controlLabel || button.textContent?.trim() === controlLabel));
-    if (!projectButton) throw new Error("renderer smoke lost its enabled accessible project-selection control after it was observed");
-    // Saved projects are now a persistent rail, not a toolbar popover.
-    await ${waitFor("document.querySelector('.m5-project-catalog-list li button') && !document.querySelector('.m5-project-catalog-list li button').disabled", "saved project catalog loaded")};
-    ${capture("03-home-catalog")}
-    if (document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/earlier') throw new Error('catalog first page missing');
+    // ADE U2: one list on the home screen — the most recently opened project leads
+    // with "continue"; folder paths are only the rows' tooltip and data-path.
+    await ${waitFor("document.querySelector('.m5-home .m5-project-add') && !document.querySelector('.m5-home .m5-project-add').disabled", "enabled project add on home")};
+    await ${waitFor("document.querySelector('.m5-home .m5-project-catalog-list li button') && !document.querySelector('.m5-home .m5-project-catalog-list li button').disabled", "saved project catalog loaded")};
+    if (document.querySelector('.m5-home .m5-project-catalog-list li').dataset.path !== '/work/earlier') throw new Error('catalog first page missing');
     document.querySelector('.m5-app-settings > header button').click();
     await ${waitFor("document.querySelector('.m5-app-settings').hidden", "settings page closed")};
-    const rail = document.querySelector('.m5-project-rail');
-    const railToggle = rail.querySelector('.m5-rail-bookmark');
-    if (rail.getBoundingClientRect().width < 180 || railToggle.getAttribute('aria-expanded') !== 'true') throw new Error('project rail not expanded by default');
-    if (railToggle.closest('.m5-project-rail-header')) throw new Error('collapse mixed with project actions');
-    if (railToggle.getBoundingClientRect().right > rail.getBoundingClientRect().right || railToggle.getBoundingClientRect().top > 32) throw new Error('sidebar toggle must stay inside top brand row');
-    railToggle.click();
-    await ${waitFor("document.querySelector('.m5-project-rail').getBoundingClientRect().width < 100", "user collapses project rail")};
-    if (rail.getBoundingClientRect().width !== 0 || railToggle.getAttribute('aria-expanded') !== 'false') throw new Error('sidebar must fully collapse');
-    for (const child of rail.children) if (child !== railToggle && getComputedStyle(child).display !== 'none') throw new Error('collapsed sidebar content remains visible');
-    const reopen = document.querySelector('.m5-workbench > .m5-sidebar-reopen');
-    const reopenBounds = reopen.getBoundingClientRect();
-    if (reopenBounds.left !== 0 || reopenBounds.width > 24 || reopen.closest("header")) throw new Error("reopen tab must stay on the screen edge outside the header");
-    if (reopenBounds.left < 0 || document.elementFromPoint(reopenBounds.left + reopenBounds.width / 2, reopenBounds.top + reopenBounds.height / 2)?.closest('button') !== reopen) throw new Error('reopen button not reachable');
-    reopen.click();
-    await ${waitFor("document.querySelector('.m5-project-rail').getBoundingClientRect().width >= 180", "expanded project rail")};
-    if (getComputedStyle(document.querySelector('.m5-project-catalog-list li span')).display === 'none') throw new Error('expanded project path hidden');
-    rail.querySelector('.m5-project-overflow > summary').click();
-    const overflow = rail.querySelector('.m5-project-overflow');
+    ${capture("03-home-catalog")}
+    if ([...document.querySelectorAll('.m5-project-catalog')].filter(list => list.getClientRects().length).length !== 1) throw new Error('home shows more than one project list');
+    if (document.querySelector('.m5-home').innerText.includes('/work/')) throw new Error('home shows folder paths');
+    const hero = document.querySelector('.m5-home-hero');
+    if (!hero?.querySelector('.m5-home-continue') || document.querySelectorAll('.m5-home .m5-home-continue').length !== 1) throw new Error('home must lead with one continue');
+    const overflow = hero.querySelector('.m5-project-overflow');
+    overflow.querySelector('summary').click();
     await ${waitFor("document.querySelector('.m5-project-context-popup:popover-open')", "top-layer project menu")};
     ${capture("04-project-menu")}
     const menuSurface = overflow.querySelector('div');
     const menuBounds = menuSurface.getBoundingClientRect();
     const menuAnchor = overflow.querySelector('summary').getBoundingClientRect();
-    if (menuBounds.left < menuAnchor.right || Math.abs(menuBounds.top - menuAnchor.top) > 1) throw new Error('project context must open beside its trigger');
-    if (menuBounds.left < 0 || menuBounds.right > innerWidth || menuBounds.bottom > innerHeight || document.elementFromPoint(menuBounds.right - 12, menuBounds.top + 12)?.closest('.m5-project-context-popup') !== menuSurface) throw new Error('project menu clipped by sidebar');
+    if ((menuBounds.left < menuAnchor.right && menuBounds.right > menuAnchor.left) || Math.abs(menuBounds.top - menuAnchor.top) > 1) throw new Error('project context must open beside its trigger');
+    if (menuBounds.left < 0 || menuBounds.right > innerWidth || menuBounds.bottom > innerHeight || document.elementFromPoint(menuBounds.right - 12, menuBounds.top + 12)?.closest('.m5-project-context-popup') !== menuSurface) throw new Error('project menu clipped');
     if (menuSurface.getBoundingClientRect().width < 200 || !getComputedStyle(menuSurface).backgroundColor.startsWith('rgb(') || getComputedStyle(menuSurface).backgroundColor === getComputedStyle(document.querySelector('.m5-workbench')).backgroundColor || !menuSurface.querySelector('button svg')) throw new Error('context menu needs an opaque distinct surface and icons');
-    if (getComputedStyle(rail).userSelect !== 'none') throw new Error('app chrome text is selectable');
+    if (getComputedStyle(document.querySelector('.m5-home')).userSelect !== 'none') throw new Error('app chrome text is selectable');
     overflow.querySelector('div').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
     if (!overflow.open) throw new Error('inside menu pointer closed popup');
-    const outsideTarget = rail.querySelector('h2');
+    const outsideTarget = document.querySelector('.m5-home h1');
     outsideTarget.addEventListener('pointerdown', event => event.stopPropagation(), { once: true });
     outsideTarget.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
     if (overflow.open) throw new Error('outside pointer did not close project popup');
     overflow.querySelector('summary').click();
-    rail.querySelector('.m5-project-manage').click();
+    hero.querySelector('.m5-project-manage').click();
     await ${waitFor("!document.querySelector('.m5-app-settings').hidden && document.querySelector('.m5-maintenance-group')", "project management page")};
     if (document.querySelector('.m5-troubleshooting').open) throw new Error('troubleshooting should start folded');
     document.querySelector('.m5-troubleshooting > summary').click();
@@ -312,7 +300,7 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('[aria-label=\"실패한 준비 종료 확인\"]')", "automatic preparation inspection")};
     document.querySelectorAll('.m5-preferences-layout > nav button')[0].click();
     await ${waitFor("document.querySelector('.m5-preferences-row').getClientRects().length > 0", "leave project management")};
-    document.querySelectorAll('.m5-preferences-layout > nav button')[4].click();
+    document.querySelectorAll('.m5-preferences-layout > nav button')[5].click();
     await ${waitFor("document.querySelector('[aria-label=\"실패한 준비 종료 확인\"]')?.getClientRects().length > 0", "project recovery inspection survives navigation")};
     recoveryButton('이 준비 기록 종료').click();
     await ${waitFor("document.querySelector('[aria-label=\"프로젝트 시작 실패 복구\"]').textContent.includes('결과를 확인하지 못했어요')", "lost preparation response")};
@@ -321,7 +309,7 @@ app.whenReady().then(async () => {
     chooseLanguage('en');
     await ${waitFor("document.querySelector('[aria-label=\\\"Project startup failure recovery\\\"]')?.textContent.includes('Could not verify the outcome.')", "English unknown preparation outcome")};
     if (pendingPreparation !== document.querySelector('[aria-label="Confirm closing failed preparation"]') || pendingPreparation.querySelector('code').textContent !== pendingId) throw new Error('language switch reset preparation confirmation');
-    if (document.querySelector('.m5-project-catalog').getAttribute('aria-label') !== 'Projects' || document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/earlier') throw new Error('language switch lost saved project');
+    if (document.querySelector('.m5-project-catalog').getAttribute('aria-label') !== 'Projects' || document.querySelector('.m5-project-catalog-list li').dataset.path !== '/work/earlier') throw new Error('language switch lost saved project');
     chooseLanguage('ko');
     await ${waitFor("document.querySelector('[aria-label=\\\"프로젝트 시작 실패 복구\\\"]')?.textContent.includes('결과를 확인하지 못했어요')", "Korean preparation outcome restored")};
     recoveryButton('이 준비 기록 종료').click();
@@ -329,10 +317,9 @@ app.whenReady().then(async () => {
     if (document.querySelector('[aria-label="실패한 준비 종료 확인"]')) throw new Error('completed preparation confirmation retained');
     globalThis.cleanupConsentReport = await (${probeCleanupConsent.toString()})();
     document.querySelector('.m5-app-settings > header button').click();
-    railToggle.click();
     [...document.querySelectorAll('.m5-project-catalog-list button')].find(b => b.textContent === '다음 목록').click();
-    await ${waitFor("document.querySelector('.m5-project-catalog-list li span')?.textContent === '/work/smoke'", "next catalog page")};
-    if (document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/smoke') throw new Error('catalog path missing');
+    await ${waitFor("document.querySelector('.m5-project-catalog-list li')?.dataset.path === '/work/smoke'", "next catalog page")};
+    if (document.querySelector('.m5-project-catalog-list li').dataset.path !== '/work/smoke') throw new Error('catalog path missing');
     window.m5SmokeCatalogListsCurrent = true;
     document.querySelector('.m5-project-catalog-list li button').click();
     // The file tree lives in the results panel's Files tab (1차-나 layout).
@@ -342,8 +329,8 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-file-row')", "project tree")};
     if (document.querySelector('.m5-project-menu') || document.querySelector('.m5-workbench > .m5-project-permissions')) throw new Error('project controls clutter the header');
     // The rail reloads after opening a project; manage the open project once listed.
-    await ${waitFor("[...document.querySelectorAll('.m5-project-catalog-list li')].some(item => item.textContent.includes('/work/smoke') && item.querySelector('.m5-project-manage'))", "open project listed in rail")};
-    [...document.querySelectorAll('.m5-project-catalog-list li')].find(item => item.textContent.includes('/work/smoke')).querySelector('.m5-project-manage').click();
+    await ${waitFor("[...document.querySelectorAll('.m5-project-catalog-list li')].some(item => item.dataset.path === '/work/smoke' && item.querySelector('.m5-project-manage'))", "open project listed in the switcher")};
+    [...document.querySelectorAll('.m5-project-catalog-list li')].find(item => item.dataset.path === '/work/smoke').querySelector('.m5-project-manage').click();
     await ${waitFor("document.querySelector('.m5-app-settings .m5-permission-options input:not(:disabled)')", "project permissions in settings")};
     if (Object.keys(window.m5SmokePermissions).length) throw new Error('permissions silently enabled');
     if (document.querySelectorAll('.m5-app-settings .m5-project-permissions').length !== 1) throw new Error('project permissions rendered more than once');
@@ -354,8 +341,8 @@ app.whenReady().then(async () => {
     document.querySelectorAll('.m5-app-settings .m5-permission-options input').forEach(input => input.click());
     document.querySelector('.m5-app-settings .m5-project-permissions button').click();
     await ${waitFor("Object.values(window.m5SmokePermissions).some(p => p.files === false && p.commands === false) && document.querySelector('.m5-app-settings .m5-project-permissions button').disabled", "explicit project permission revoke")};
-    document.querySelectorAll('.m5-preferences-layout > nav button')[3].click();
-    document.querySelector('.m5-cleanup-settings > button').click();
+    document.querySelectorAll('.m5-preferences-layout > nav button')[4].click();
+    document.querySelector('.m5-cleanup-settings .m5-setting-control > button').click();
     await ${waitFor("document.querySelectorAll('.m5-workspace-cleanup input').length === 2", "cleanup items")};
     if (!document.querySelectorAll('.m5-workspace-cleanup input')[1].disabled) throw new Error('recovery cleanup selectable');
     document.querySelector('.m5-workspace-cleanup input').click();
@@ -450,7 +437,7 @@ app.whenReady().then(async () => {
     if (document.querySelector('.monaco-editor') !== editorNode) throw new Error('file navigation remounted Monaco');
     if (!document.querySelector('.m5-project-guide').open) throw new Error('file navigation closed explicitly reopened guide');
     document.querySelector('.m5-project-guide summary').click();
-    [...document.querySelectorAll('button')].find(button => ['이 프로젝트의 팀 역할 바꾸기', '팀 역할'].includes(button.textContent) && !button.disabled).click();
+    [...document.querySelectorAll('button')].find(button => ['이 프로젝트의 팀 역할 바꾸기', '팀 역할'].some(name => button.textContent === name || button.getAttribute('aria-label') === name) && !button.disabled).click();
     await ${waitFor("document.querySelectorAll('.m5-team-row').length === 5", "role settings")};
     ${capture("09-role-settings")}
     const modelField = document.querySelector('#m5-role-editor details input');
@@ -794,7 +781,7 @@ app.whenReady().then(async () => {
     document.querySelector('.m5-new-chat-button').click();
     await ${waitFor("document.querySelector('.m5-new-chat-dialog').open", "new chat draft dialog")};
     ${capture("15-new-task-dialog")}
-    [...document.querySelectorAll('.m5-new-chat-dialog button')].find(button => button.textContent === '이 프로젝트의 팀 역할 바꾸기').click();
+    [...document.querySelectorAll('.m5-new-chat-dialog button')].find(button => button.getAttribute('aria-label') === '이 프로젝트의 팀 역할 바꾸기').click();
     await ${waitFor("document.querySelector('.m5-settings-dialog')?.open && !document.querySelector('.m5-new-chat-dialog').open", "draft to project settings without overlapping modals")};
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '작성 중인 새 작업으로 돌아가기').click();
     await ${waitFor("document.querySelector('.m5-new-chat-dialog').open && !document.querySelector('.m5-settings-dialog')", "return to preserved draft")};
@@ -843,7 +830,11 @@ app.whenReady().then(async () => {
     await ${waitFor("[...document.querySelectorAll('button')].some(button => button.textContent.trim() === '프로젝트 화면 닫기')", "current project menu listed")};
     const leave = findLeave();
     if (!leave || leave.disabled) throw new Error('cannot leave idle project');
-    [...document.querySelectorAll('button')].find(button => ['이 프로젝트의 팀 역할 바꾸기', '팀 역할'].includes(button.textContent) && !button.disabled).click();
+    // The open project's menu in the switcher offers its team roles (ADE U2).
+    const menuButtons = () => [...document.querySelectorAll('.m5-switcher-projects li.m5-project-open .m5-project-context-popup button')];
+    const rolesButton = menuButtons().find(button => button.textContent.trim() === '팀 역할' && !button.disabled);
+    if (!rolesButton) throw new Error('roles not offered in the open project menu: ' + JSON.stringify(menuButtons().map(button => [button.textContent.trim(), button.disabled])));
+    rolesButton.click();
     await ${waitFor("document.querySelector('.m5-settings')", "role settings open")};
     if (!leave.disabled) throw new Error('leaving must protect open role settings');
     const modelInput = document.querySelector('#m5-role-editor details input');
@@ -892,11 +883,13 @@ app.whenReady().then(async () => {
     await ${waitFor("!document.querySelector('.m5-project-guide').open && JSON.parse(localStorage.getItem('elsecrew.m5.guide.v1:smoke_project')).dismissed", "guide dismissal persisted")};
     leave.click();
     await ${waitFor("!document.querySelector('#m5-followup-text') && document.querySelector('h1').textContent === '이어서 작업하기'", "project and chat view cleared")};
-    [...document.querySelectorAll('.m5-project-catalog-list button')].find(b => b.textContent === '처음부터 다시 확인').click();
-    await ${waitFor("document.querySelector('.m5-project-catalog-list li span')?.textContent === '/work/earlier'", "catalog reopened")};
+    [...document.querySelectorAll('.m5-project-catalog-list button')].find(b => b.textContent === '처음부터 다시 확인')?.click(); // the home list rereads its first page when it comes back
+    await ${waitFor("[...document.querySelectorAll('.m5-home .m5-project-catalog-list li')].some(item => item.dataset.path === '/work/earlier')", "catalog reopened")};
+    // Q1: the project opened last leads the home list.
+    if (document.querySelector('.m5-home-hero')?.dataset.path !== '/work/smoke') throw new Error('home must lead with the project opened last');
     // The synthetic first page now also lists the saved project (see preload).
-    await ${waitFor("[...document.querySelectorAll('.m5-project-catalog-list li span')].some(span => span.textContent === '/work/smoke')", "saved project available again")};
-    [...document.querySelectorAll('.m5-project-catalog-list li')].find(item => item.querySelector('span')?.textContent === '/work/smoke').querySelector('button').click();
+    await ${waitFor("[...document.querySelectorAll('.m5-project-catalog-list li')].some(item => item.dataset.path === '/work/smoke')", "saved project available again")};
+    [...document.querySelectorAll('.m5-project-catalog-list li')].find(item => item.dataset.path === '/work/smoke').querySelector('button').click();
     await ${waitFor("document.querySelector('.m5-chat-chip')", "saved chat available again")};
     if (document.querySelector('.m5-project-guide').open) throw new Error('dismissed guide reopened automatically');
     document.querySelector('.m5-project-guide > summary').click();
@@ -985,10 +978,10 @@ app.whenReady().then(async () => {
     [...document.querySelectorAll('button')].find(button => button.textContent.trim() === '프로젝트 화면 닫기').click();
     await ${waitFor("!document.querySelector('#m5-followup-text')", "parallel project closed")};
     window.m5SmokeEnableParallelChats();
-    [...document.querySelectorAll('.m5-project-catalog-list button')].find(b => b.textContent === '처음부터 다시 확인').click();
-    await ${waitFor("document.querySelector('.m5-project-catalog-list li span')?.textContent === '/work/earlier'", "parallel catalog reset")};
-    await ${waitFor("[...document.querySelectorAll('.m5-project-catalog-list li span')].some(span => span.textContent === '/work/smoke')", "parallel project available")};
-    [...document.querySelectorAll('.m5-project-catalog-list li')].find(item => item.querySelector('span')?.textContent === '/work/smoke').querySelector('button').click();
+    [...document.querySelectorAll('.m5-project-catalog-list button')].find(b => b.textContent === '처음부터 다시 확인')?.click(); // the home list rereads its first page when it comes back
+    await ${waitFor("[...document.querySelectorAll('.m5-home .m5-project-catalog-list li')].some(item => item.dataset.path === '/work/earlier')", "parallel catalog reset")};
+    await ${waitFor("[...document.querySelectorAll('.m5-project-catalog-list li')].some(item => item.dataset.path === '/work/smoke')", "parallel project available")};
+    [...document.querySelectorAll('.m5-project-catalog-list li')].find(item => item.dataset.path === '/work/smoke').querySelector('button').click();
     await ${waitFor("document.querySelectorAll('.m5-chat-chip').length === 4", "four chats listed")};
     document.querySelector('.m5-chat-chip').click();
     await ${waitFor("document.querySelector('#m5-followup-text')", "parallel chat selected")};
@@ -1058,6 +1051,8 @@ app.whenReady().then(async () => {
     process.stdout.write(JSON.stringify({ evidencePath, diagnostic: true, maxPaintMs: measurement.maxPaintMs, unobserved: measurement.unobserved.length }) + '\n');
     if (measurement.observationError || measurement.unobserved.length || measurement.maxPaintMs > 100) throw new Error('diagnostic message paint limit failed');
   }
+  // This part starts on the home screen: the open project would come back by itself after the reload (last session).
+  await window.webContents.executeJavaScript("localStorage.removeItem('elsecrew.m5.lastProject.v1')");
   await window.loadURL("m5smoke://m5/index.html");
   await window.webContents.executeJavaScript(`(async () => {
     await ${waitFor("[...document.querySelectorAll('[aria-label=\"Codex 연결\"] button')].some(button => button.textContent === '연결' && !button.disabled)", "connection preference fixture after reload")};
@@ -1065,27 +1060,82 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('[aria-label=\"Codex 연결\"]')?.textContent.includes('로그인이 연결됐어요')", "saved login after reconnect")};
     if (document.querySelector('.m5-provider-selection form')) throw new Error('saved agent choice was lost');
     if (!document.querySelector('[aria-label="Claude Code 연결"]')) throw new Error('added agent lost after reload');
-    await ${waitFor("document.querySelector('.m5-project-rail .m5-project-overflow')", "project removal on home")};
+    await ${waitFor("document.querySelector('.m5-home:not([hidden]) .m5-project-overflow')", "project removal on home")};
     const catalogRequest = window.m5Projects.request;
     let removed = false;
     window.m5Projects.request = async input => {
       if (input.action === 'deleteProject') { if (input.projectId !== 'earlier_project' || input.confirmed !== true) throw new Error('wrong deletion target'); removed = true; window.m5SmokeCatalogEmpty = true; return {schemaVersion:1, action:input.action, projectId:input.projectId}; }
       return catalogRequest(input);
     };
-    document.querySelector('.m5-project-rail .m5-project-overflow summary').click();
-    [...document.querySelectorAll('.m5-project-rail .m5-project-overflow button')].find(button => button.textContent === '삭제').click();
+    document.querySelector('.m5-home .m5-project-overflow summary').click();
+    [...document.querySelectorAll('.m5-home .m5-project-overflow button')].find(button => button.textContent === '삭제').click();
     await ${waitFor("document.querySelector('#m5-remove-title')?.closest('dialog').open", "remove project confirmation")};
     ${capture("21-project-removal-confirmation")}
     const dialog = document.querySelector('#m5-remove-title').closest('dialog');
     if (parseFloat(getComputedStyle(dialog.querySelector('.m5-dialog-actions')).gap) < 8) throw new Error('removal buttons need spacing');
     [...dialog.querySelectorAll('button')].find(button => button.textContent === '취소').click();
     if (removed) throw new Error('cancelled project removal mutated catalog');
-    document.querySelector('.m5-project-rail .m5-project-overflow summary').click();
-    [...document.querySelectorAll('.m5-project-rail .m5-project-overflow button')].find(button => button.textContent === '삭제').click();
+    document.querySelector('.m5-home .m5-project-overflow summary').click();
+    [...document.querySelectorAll('.m5-home .m5-project-overflow button')].find(button => button.textContent === '삭제').click();
     await ${waitFor("document.querySelector('#m5-remove-title')?.closest('dialog').open", "reopen removal confirmation")};
     [...dialog.querySelectorAll('button')].find(button => button.textContent === '삭제').click();
-    await ${waitFor("!document.querySelector('.m5-project-rail .m5-project-overflow')", "project removed from catalog")};
+    await ${waitFor("!document.querySelector('.m5-home .m5-project-overflow')", "project removed from catalog")};
     if (!removed) throw new Error('project removal not persisted');
+
+    // ADE U2·U3·U4 screens, each measured for rendered contrast in this run's theme.
+    // (1) A folder that needs a yes is asked in the app's own dialog (Q7); the first focus is Cancel.
+    window.m5SmokeAskFolder("emptyFolder");
+    await ${waitFor("document.querySelector('[data-testid=folder-confirm]')?.open", "folder confirmation in the app")};
+    ${capture("22-folder-confirm")}
+    if (document.activeElement?.textContent !== '취소') throw new Error('folder confirmation must focus Cancel first');
+    if (!document.querySelector('[data-testid=folder-confirm]').textContent.includes('/work/new-shop')) throw new Error('folder confirmation must name the folder');
+    document.activeElement.click();
+    await ${waitFor("!document.querySelector('[data-testid=folder-confirm]').open && window.m5SmokeFolderAnswers.length === 1", "folder confirmation answered")};
+    if (window.m5SmokeFolderAnswers[0].yes !== false || window.m5SmokeFolderAnswers[0].nonce !== 'smoke-nonce-emptyFolder') throw new Error('cancel must answer no with the same number');
+    // (2) No saved project: the first-run checklist, one action-colored button (the step to do now).
+    window.m5SmokeCatalogEmpty = true; window.m5SmokeOpenCancel = true;
+    document.querySelector('.m5-home .m5-project-add').click();
+    await ${waitFor("document.querySelector('[data-testid=first-run]')", "first-run checklist")};
+    ${capture("23-first-run")}
+    const actionColor = getComputedStyle(document.documentElement).getPropertyValue('--action-bg').trim();
+    const toRgb = hex => 'rgb(' + [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)).join(', ') + ')';
+    const actionButtons = [...document.querySelectorAll('[data-testid=first-run] button')].filter(button => getComputedStyle(button).backgroundColor === toRgb(actionColor));
+    if (actionButtons.length !== 1) throw new Error('first run needs exactly one action-colored button, found ' + actionButtons.length);
+    if (document.querySelectorAll('[data-testid=first-run] .m5-start-agents li').length !== 2) throw new Error('first run must show both agents with their state');
+    // (3) The first task of a project: Send stays off until the separate yes (Q9), and the window fits without scrolling.
+    window.m5SmokeCatalogEmpty = false; window.m5SmokeOpenCancel = false; window.m5SmokeNoChats = true;
+    [...document.querySelectorAll('[data-testid=first-run] button')].find(button => button.textContent === '프로젝트 선택').click();
+    await ${waitFor("document.querySelector('.m5-new-task') && !document.querySelector('.m5-new-task').disabled", "project with no task yet")};
+    document.querySelector('.m5-new-task').click();
+    await ${waitFor("document.querySelector('.m5-new-chat-dialog')?.open && document.querySelector('.m5-first-chat-confirm')", "first-task window")};
+    const firstGoal = document.querySelector('.m5-new-chat-form input');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(firstGoal, 'README를 다듬어 줘');
+    firstGoal.dispatchEvent(new Event('input', { bubbles: true }));
+    ${capture("24-new-task-first")}
+    const send = document.querySelector('.m5-new-chat-dialog [type=submit]');
+    const confirmBox = document.querySelector('.m5-first-chat-confirm');
+    if (send.getBoundingClientRect().bottom > innerHeight || confirmBox.getBoundingClientRect().bottom > send.getBoundingClientRect().top) throw new Error('send or the first-task yes is out of view');
+    if (!send.disabled) throw new Error('send must wait for the first-task yes (Q9)');
+    confirmBox.querySelector('input').click();
+    await ${waitFor("!document.querySelector('.m5-new-chat-dialog [type=submit]').disabled", "send after the first-task yes")};
+    document.querySelector('.m5-new-chat-dialog header button').click();
+    await ${waitFor("!document.querySelector('.m5-new-chat-dialog').open", "first-task window closed")};
+    // (4) The switcher: other projects with when they were opened, adding one at the bottom.
+    document.querySelector('[data-testid=project-switcher]').open = true;
+    await ${waitFor("document.querySelector('.m5-switcher-projects li')", "switcher list")};
+    ${capture("25-switcher")}
+    if (document.querySelector('.m5-switcher-projects').innerText.includes('/work/')) throw new Error('switcher shows folder paths');
+    document.querySelector('[data-testid=project-switcher]').open = false;
+    // (5) Settings: notifications (kinds and tidying) and this project in groups.
+    document.querySelector('.m5-open-preferences').click();
+    [...document.querySelectorAll('.m5-preferences-layout > nav button')].find(button => button.textContent === '알림').click();
+    await ${waitFor("document.querySelectorAll('[data-testid=notification-kinds] input[role=switch]').length === 3", "notification settings")};
+    ${capture("26-settings-notifications")}
+    [...document.querySelectorAll('.m5-preferences-layout > nav button')].find(button => button.textContent === '프로젝트 설정').click();
+    await ${waitFor("document.querySelector('.m5-app-settings .m5-permission-options input')", "this project's settings")};
+    ${capture("27-settings-project")}
+    if ([...document.querySelectorAll('.m5-preferences-content > section:not([hidden]) > *')].some(node => !node.matches('h3, .m5-group-label, .m5-settings-group, .m5-project-permissions, .m5-project-location, .m5-project-list-back, .m5-settings-intro'))) throw new Error('settings page is made of groups and rows only');
+    document.querySelector('.m5-app-settings > header button').click();
 
   })()`);
   if (window.isVisible() || window.isFocused()) throw new Error("renderer smoke captured desktop focus");

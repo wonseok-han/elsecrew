@@ -16,10 +16,33 @@ export interface AppNotification {
   read: boolean;
   /** The request it was about went away (answered or taken back by the agent). */
   resolved?: boolean;
+  /** When it was settled: settled lines are tidied away a day later (if the person keeps that on). */
+  resolvedAt?: string;
 }
 
 const KEY = "elsecrew.m5.notifications.v1";
 const OS_KEY = "elsecrew.m5.notifications.os.v1";
+const PREFS_KEY = "elsecrew.m5.notifications.prefs.v1";
+/** Settled lines stay this long before they are tidied away. */
+export const RESOLVED_KEEP_MS = 24 * 60 * 60 * 1000;
+
+/** What the person wants to hear about (settings › notifications, ADE U4). */
+export interface NotificationPreferences { kinds: Record<NotificationKind, boolean>; pruneResolved: boolean }
+export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = { kinds: { attention: true, done: true, stopped: true }, pruneResolved: true };
+
+export function readNotificationPreferences(storage: StorageLike | null = safeStorage()): NotificationPreferences {
+  try {
+    const raw: unknown = JSON.parse(storage?.getItem(PREFS_KEY) ?? "null");
+    if (!raw || typeof raw !== "object") return DEFAULT_NOTIFICATION_PREFERENCES;
+    const value = raw as { kinds?: Record<string, unknown>; pruneResolved?: unknown };
+    const kind = (name: NotificationKind) => typeof value.kinds?.[name] === "boolean" ? value.kinds[name] as boolean : true;
+    return { kinds: { attention: kind("attention"), done: kind("done"), stopped: kind("stopped") }, pruneResolved: typeof value.pruneResolved === "boolean" ? value.pruneResolved : true };
+  } catch { return DEFAULT_NOTIFICATION_PREFERENCES; }
+}
+
+export function saveNotificationPreferences(preferences: NotificationPreferences, storage: StorageLike | null = safeStorage()): void {
+  try { storage?.setItem(PREFS_KEY, JSON.stringify(preferences)); } catch { /* per-viewer preference only */ }
+}
 const LIMIT = 50;
 
 /** Chat states that mean the team finished its turn and the user can read the result. */
@@ -42,7 +65,8 @@ function valid(item: unknown): item is AppNotification {
   const value = item as Record<string, unknown>;
   return ["id", "projectId", "chatId", "goal", "text", "at"].every(key => typeof value[key] === "string")
     && ["done", "attention", "stopped"].includes(value.kind as string) && typeof value.read === "boolean"
-    && (value.resolved === undefined || typeof value.resolved === "boolean");
+    && (value.resolved === undefined || typeof value.resolved === "boolean")
+    && (value.resolvedAt === undefined || typeof value.resolvedAt === "string");
 }
 
 export class NotificationCenter {
@@ -50,14 +74,30 @@ export class NotificationCenter {
   #listeners = new Set<() => void>();
   #storage: StorageLike | null;
 
-  constructor(storage: StorageLike | null = safeStorage()) {
+  #preferences: () => NotificationPreferences;
+  #now: () => number;
+
+  constructor(storage: StorageLike | null = safeStorage(), preferences: () => NotificationPreferences = () => readNotificationPreferences(storage), now: () => number = Date.now) {
     this.#storage = storage;
+    this.#preferences = preferences;
+    this.#now = now;
     let restored: AppNotification[] = [];
     try {
       const parsed: unknown = JSON.parse(storage?.getItem(KEY) ?? "[]");
       if (Array.isArray(parsed)) restored = parsed.filter(valid).slice(0, LIMIT);
     } catch { restored = []; }
     this.#items = restored;
+    this.prune();
+  }
+
+  /** Tidies away lines settled more than a day ago, when the person keeps that on. */
+  prune(): void {
+    if (!this.#preferences().pruneResolved) return;
+    const limit = this.#now() - RESOLVED_KEEP_MS;
+    const kept = this.#items.filter(item => !item.resolved || Date.parse(item.resolvedAt ?? item.at) > limit);
+    if (kept.length === this.#items.length) return;
+    this.#items = kept;
+    this.#changed();
   }
 
   snapshot(): readonly AppNotification[] { return this.#items; }
@@ -71,6 +111,8 @@ export class NotificationCenter {
   /** Adds a notification once per id; returns whether it was new. */
   add(item: Omit<AppNotification, "read">): boolean {
     if (this.#items.some(existing => existing.id === item.id)) return false;
+    // A kind the person turned off is not kept (nor shown as a banner).
+    if (!this.#preferences().kinds[item.kind]) return false;
     this.#items = [{ ...item, read: false }, ...this.#items].slice(0, LIMIT);
     this.#changed();
     return true;
@@ -87,7 +129,8 @@ export class NotificationCenter {
   /** The thing to check is gone: keep the line, read and marked as settled. */
   resolve(id: string): void {
     if (!this.#items.some(item => item.id === id && !item.resolved)) return;
-    this.#items = this.#items.map(item => item.id === id ? { ...item, read: true, resolved: true } : item);
+    const at = new Date(this.#now()).toISOString();
+    this.#items = this.#items.map(item => item.id === id ? { ...item, read: true, resolved: true, resolvedAt: at } : item);
     this.#changed();
   }
 
@@ -96,7 +139,8 @@ export class NotificationCenter {
   resolveApprovalsFor(chatId: string): void {
     const open = (item: AppNotification) => item.chatId === chatId && item.id.startsWith("approval:") && !item.resolved;
     if (!this.#items.some(open)) return;
-    this.#items = this.#items.map(item => open(item) ? { ...item, read: true, resolved: true } : item);
+    const at = new Date(this.#now()).toISOString();
+    this.#items = this.#items.map(item => open(item) ? { ...item, read: true, resolved: true, resolvedAt: at } : item);
     this.#changed();
   }
 

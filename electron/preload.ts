@@ -231,6 +231,29 @@ const appUpdateApi = Object.freeze({
 });
 contextBridge.exposeInMainWorld("m5AppUpdate", appUpdateApi);
 
+// Folder confirmations in the app's own dialog (ADE U2): main asks with a
+// one-time number; the page answers yes or no with it.
+const M5_FOLDER_CONFIRM_ASK = "m5:folder-confirm:ask";
+const M5_FOLDER_CONFIRM_ANSWER = "m5:folder-confirm:answer";
+type FolderConfirmAsk = { nonce: string; kind: "emptyFolder" | "plainFolder" | "recordMissing"; name: string; path: string };
+const isFolderConfirmAsk = (value: unknown): value is FolderConfirmAsk => {
+  const ask = value as Record<string, unknown> | null;
+  return typeof ask === "object" && ask !== null && typeof ask.nonce === "string" && ["emptyFolder", "plainFolder", "recordMissing"].includes(ask.kind as string)
+    && typeof ask.name === "string" && typeof ask.path === "string";
+};
+const folderConfirmApi = Object.freeze({
+  onAsk: (listener: (ask: FolderConfirmAsk) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, raw: unknown) => { if (isFolderConfirmAsk(raw)) listener({ nonce: raw.nonce, kind: raw.kind, name: raw.name, path: raw.path }); };
+    ipcRenderer.on(M5_FOLDER_CONFIRM_ASK, handler);
+    return () => { ipcRenderer.removeListener(M5_FOLDER_CONFIRM_ASK, handler); };
+  },
+  answer: async (nonce: unknown, yes: unknown) => {
+    if (typeof nonce !== "string" || typeof yes !== "boolean") throw new Error("invalid folder confirmation");
+    await ipcRenderer.invoke(M5_FOLDER_CONFIRM_ANSWER, nonce, yes);
+  },
+});
+contextBridge.exposeInMainWorld("m5FolderConfirm", folderConfirmApi);
+
 // Screen brightness choice (system / light / dark). main keeps the record the
 // settings screen starts from and follows the choice for native parts.
 const M5_APPEARANCE_CHANNEL = "m5:appearance:set";

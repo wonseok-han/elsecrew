@@ -8,6 +8,16 @@ if (typeof require === "function") {
   window.m5SmokeMeasureOnly = measureRenderedContrast;
   window.m5SmokeMeasure = async (screen, options) => require("electron").ipcRenderer.invoke("m5-smoke-contrast", await measureRenderedContrast(screen, options));
 }
+// Folder confirmations (ADE U2, Q7): main's ask, played by the smoke; answers are recorded.
+{
+  let folderListener = null;
+  window.m5SmokeFolderAnswers = [];
+  window.m5FolderConfirm = {
+    onAsk: listener => { folderListener = listener; return () => { if (folderListener === listener) folderListener = null; }; },
+    answer: async (nonce, yes) => { window.m5SmokeFolderAnswers.push({ nonce, yes }); },
+  };
+  window.m5SmokeAskFolder = kind => folderListener?.({ nonce: "smoke-nonce-" + kind, kind, name: "new-shop", path: "/work/new-shop" });
+}
 window.m5SmokeClaudeUsageReads = 0;
 window.m5ClaudeUsage={read:async()=>{window.m5SmokeClaudeUsageReads++;return ({state:"available",usage:{windows:[{id:"primary",usedPercent:12,windowMinutes:300,resetsAt:null},{id:"secondary",usedPercent:27,windowMinutes:10080,resetsAt:null}]},checkedAt:Date.now()});}};
 let smokeConnections = {codex:false,"claude-code":false};
@@ -306,7 +316,8 @@ window.m5 = {
   getStorageStatus: unexpected("getStorageStatus"),
   prepareQuit: async () => ({ safeToQuit: true, blockers: [] }),
   onSidecarEvent: (listener) => unsubscribe(listeners, listener),
-  openProject: async () => ({
+  // ADE U2·U3 smoke: a cancelled folder pick, and a project with no task yet (first-task window).
+  openProject: async () => window.m5SmokeOpenCancel ? null : ({
     schemaVersion: 1,
     projectId: "smoke_project",
     selectedPath: "/work/smoke",
@@ -420,7 +431,7 @@ window.m5 = {
   }),
   updateProjectRoleSettings: unexpected("updateProjectRoleSettings"),
   createChat: unexpected("createChat"),
-  listChats: async ({ projectId }) => ({ projectId, items: parallelPaint ? parallelPaint.chats : [smokeChat], nextCursor: null }),
+  listChats: async ({ projectId }) => ({ projectId, items: window.m5SmokeNoChats ? [] : parallelPaint ? parallelPaint.chats : [smokeChat], nextCursor: null }),
   getChat: async (request) => {
     if (historyReadFailures > 0) { historyReadFailures--; throw new Error("synthetic history read failure"); }
     return parallelPaint ? parallelPaint.detail(request) : ({ chat: smokeChat, afterEventSequence: request.afterEventSequence, messages: smokeMessages.filter(message => message.eventSequence > request.afterEventSequence), runs: [], agentRuns:diagnosticRun ? [diagnosticRun] : [], agentRecovery:null, nextEventSequence: null });
