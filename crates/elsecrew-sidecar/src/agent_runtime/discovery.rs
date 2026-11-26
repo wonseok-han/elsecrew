@@ -467,6 +467,7 @@ impl AgentRuntime {
                     .reasoning_effort
                     .as_deref()
                     .ok_or_else(failure)?,
+                approval: preparation::codex_approval_policy(storage, projects, preparation.chat["projectId"].as_str().ok_or_else(failure)?)?,
             };
         let workspace = Path::new(
             preparation.manifest["worktreePath"]
@@ -547,11 +548,13 @@ impl AgentRuntime {
         let workspace = PathBuf::from(manifest["worktreePath"].as_str().ok_or_else(failure)?);
         let scope = capability_scope(&chat, role_id).map_err(|_| failure())?;
         let binding = crate::provider_profile::CodexProfileBinding::from_storage(storage)?;
+        let approval = preparation::codex_approval_policy(storage, projects, &address.project_id)?;
         let worker = DiscoveryWorker::spawn(
             binding,
             profile.model_selector.clone(),
             profile.reasoning_effort.clone().ok_or_else(failure)?,
             permission,
+            approval,
             workspace,
         )?;
         self.pending_discoveries.insert(

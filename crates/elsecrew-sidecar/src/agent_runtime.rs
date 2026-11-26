@@ -5784,12 +5784,57 @@ fn unsupported_platform_cannot_select_native_provider_mode() {
     assert!(runtime.owned_run_ids().is_empty());
 }
 
+#[cfg(test)]
+mod project_auto_approval_tests {
+    use super::project_auto_approval;
+    use crate::project::automation_permissions::AutomationPermissions;
+    use elsecrew_core::provider::vendor_observation::codex_approval::PendingApproval;
+    use elsecrew_core::provider::BoundedObservation;
+
+    fn request(params: serde_json::Value, untrusted: bool) -> Result<PendingApproval, elsecrew_core::provider::ProviderError> {
+        let mut base = serde_json::json!({"threadId":"t","turnId":"r","itemId":"i","startedAtMs":1,"kind":"command","environmentId":null,"command":"touch a.txt","cwd":"/managed/snapshot"});
+        for (key, value) in params.as_object().unwrap() { base[key] = value.clone(); }
+        let frame = serde_json::json!({"id":7,"method":"item/commandExecution/requestApproval","params":base});
+        PendingApproval::parse_in_thread(&BoundedObservation::new(frame.to_string().into_bytes()).unwrap(), "t", "r", untrusted)
+    }
+    fn command_request(cwd: &str) -> PendingApproval { request(serde_json::json!({"cwd":cwd}), false).unwrap() }
+
+    /// 2026-11-27, PR #19 re-review 2: the app's own approval of a Codex
+    /// command is the same as before or stricter, on and off.
+    /// - Permission on, `on-request` thread: a command inside the workspace is
+    ///   approved as before; a request carrying a proposed trust rule is still
+    ///   refused at parsing (as before), so it never reaches approval.
+    /// - A thread that started `untrusted` (permission off at start) never
+    ///   approves a command on its own, even after the permission is turned on.
+    #[test]
+    fn a_codex_command_asks_the_person_when_commands_are_off() {
+        let workspace = "/managed/snapshot";
+        let on = AutomationPermissions { files: true, commands: true };
+        let off = AutomationPermissions { files: true, commands: false };
+        let plain = command_request(workspace);
+        assert!(!project_auto_approval(off, &plain, workspace));
+        assert!(project_auto_approval(on, &plain, workspace), "unchanged: on, inside the workspace");
+        assert!(!project_auto_approval(on, &command_request("/elsewhere"), workspace));
+        assert!(!project_auto_approval(on, &request(serde_json::json!({"networkApprovalContext":{"host":"example.com","protocol":"https"}}), false).unwrap(), workspace));
+        // A proposed trust rule in an on-request thread: refused before any approval, as before.
+        assert!(request(serde_json::json!({"proposedExecpolicyAmendment":["touch","a.txt"]}), false).is_err());
+        // Started untrusted: asks the person whether the permission is off or turned on mid-run.
+        let untrusted = request(serde_json::json!({"proposedExecpolicyAmendment":["touch","a.txt"]}), true).unwrap();
+        assert!(!project_auto_approval(off, &untrusted, workspace));
+        assert!(!project_auto_approval(on, &untrusted, workspace), "turned on mid-run: still asks");
+        let untrusted_plain = request(serde_json::json!({}), true).unwrap();
+        assert!(!project_auto_approval(on, &untrusted_plain, workspace));
+    }
+}
+
 // Only the existing workspace scope is eligible. Network or wider grants stay interactive.
 fn project_auto_approval(consent: crate::project::automation_permissions::AutomationPermissions, request: &elsecrew_core::provider::vendor_observation::codex_approval::PendingApproval, workspace: &str) -> bool {
     use elsecrew_core::provider::vendor_observation::codex_approval::Action;
     if workspace.is_empty() { return false; }
     match &request.action {
         Action::FileChange { grant_root } => consent.files && grant_root.as_deref() == Some(workspace),
-        Action::Command { cwd, network, .. } => consent.commands && network.is_none() && cwd.as_deref() == Some(workspace),
+        // A run that started with the command permission off (`untrusted`)
+        // keeps asking the person, even if the permission is turned on now.
+        Action::Command { cwd, network, .. } => !request.thread_untrusted && consent.commands && network.is_none() && cwd.as_deref() == Some(workspace),
     }
 }

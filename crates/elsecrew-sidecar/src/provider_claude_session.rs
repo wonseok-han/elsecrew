@@ -231,6 +231,8 @@ pub(crate) struct PermissionAllow {
 impl PermissionAllow {
     pub(crate) fn connection(&self) -> uuid::Uuid { self.connection }
     pub(crate) fn as_str(&self) -> &str { self.reply.as_str() }
+    /// The large-input budget of the echoed input; the transport keeps it until written.
+    pub(crate) fn take_hold(&mut self) -> Option<elsecrew_core::provider::vendor_observation::claude_approval::LargeInputHold> { self.reply.take_hold() }
 }
 
 impl PermissionDenial {
@@ -904,6 +906,93 @@ mod tests {
         })();
         let cleanup = process.finish();
         (result, cleanup.is_ok() && process.closure_evidence().is_some_and(|e| e.confirmed()))
+    }
+
+    /// 2026-11-26 big Write: a fake Claude asks to write a 300 KB file whole
+    /// (one permission request over the 128 KiB line bound). The session does
+    /// not end; the allow reply it reads is the exact original (checked by
+    /// SHA-256 on the provider side), and the session goes on to its answer.
+    /// `admit` false: the strict bounds still apply outside a session.
+    fn large_write_session(admit: bool) -> (Result<Vec<&'static str>, SidecarError>, bool) {
+        use elsecrew_core::provider::vendor_observation::claude_approval::Observation;
+        use elsecrew_core::provider::vendor_observation::claude_events::Projection;
+        use elsecrew_core::provider::vendor_observation::claude_session::Event;
+        use sha2::{Digest, Sha256};
+        let _slots = crate::provider_login_io::LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let storage = Storage::open(&root.join("elsecrew.sqlite3")).unwrap();
+        let profile = ClaudeProfileBinding::from_storage(&storage).unwrap();
+        let home = profile.revalidate().unwrap();
+        let mut process = LoginProcess::reserve_claude_owned(profile).unwrap();
+        let id = format!("init_{}", process.connection_id().simple());
+        let init = serde_json::json!({"type":"control_response","response":{"subtype":"success","request_id":id,"response":{}}});
+        let reported = serde_json::json!({"type":"system","subtype":"init","uuid":"init","session_id":"s","cwd":"/snapshot","model":"model","permissionMode":"default","tools":["Write"],"mcp_servers":[],"skills":[],"plugins":[]});
+        let answer = serde_json::json!({"type":"assistant","uuid":"a1","session_id":"s","parent_tool_use_id":null,
+            "message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"Wrote the file."}]}});
+        let content = "A".repeat(300_000);
+        // The exact reply the provider must read: the original input echoed whole.
+        let expected = serde_json::json!({"type":"control_response","response":{"subtype":"success","request_id":"perm_big",
+            "response":{"behavior":"allow","updatedInput":{"content":content,"file_path":"notes.md"}}}}).to_string();
+        let expected_sha = format!("{:x}", Sha256::digest(expected.as_bytes()));
+        let script = format!(
+            "IFS= read -r first || exit 1\nprintf '%s\\n' '{init}' '{reported}'\n\
+             printf '{{\"type\":\"control_request\",\"request_id\":\"perm_big\",\"request\":{{\"subtype\":\"can_use_tool\",\"tool_name\":\"Write\",\"input\":{{\"file_path\":\"notes.md\",\"content\":\"'; \
+             head -c 300000 /dev/zero | tr '\\0' A; printf '\"}},\"tool_use_id\":\"toolu_big\"}}}}\\n'\n\
+             IFS= read -r reply || exit 2\n\
+             [ \"$(printf '%s' \"$reply\" | /usr/bin/shasum -a 256 | /usr/bin/cut -d' ' -f1)\" = '{expected_sha}' ] || exit 3\n\
+             printf '%s\\n' '{answer}'\nIFS= read -r last\n"
+        );
+        process.launch_gated_command(Path::new("/bin/sh"), &["-c".as_ref(), script.as_ref()], &home).unwrap();
+        let cancel = AtomicBool::new(false);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let result = (|| -> Result<Vec<&'static str>, SidecarError> {
+            let mut session = ControlInitialization::start(&mut process, &cancel)?;
+            while !session.advance(&mut process, &cancel, &mut |_| Ok(()))? {
+                if Instant::now() >= deadline { return Err(failure()); }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            let mut channel = session.into_session_channel(
+                &elsecrew_core::provider::vendor_observation::claude_init::ExpectedInit {
+                    cwd: "/snapshot", model: "model", permission_mode: "default", tools: &["Write"],
+                },
+            )?;
+            if admit {
+                process.admit_session_lines(elsecrew_core::provider::oversized_line::OversizedLinePolicy::ClaudeStreamJson)?;
+            }
+            let mut seen = Vec::new();
+            while !seen.contains(&"answer") {
+                if Instant::now() >= deadline { return Err(failure()); }
+                match channel.advance(&mut process, &cancel, &mut |_| Ok(()))? {
+                    Some(Event::Initialized { .. }) => seen.push("init"),
+                    Some(Event::Permission(Observation::Requested(request))) => {
+                        if request.withheld() || request.inspect_input().len() < 300_000 { return Err(failure()); }
+                        seen.push("large request");
+                        channel.allow_once(&mut process, &request, &cancel, &mut |_, _| Ok(()))?;
+                    }
+                    Some(Event::Output(Projection::Assistant { .. })) => seen.push("answer"),
+                    Some(_) => seen.push("other"),
+                    None => std::thread::sleep(Duration::from_millis(2)),
+                }
+            }
+            Ok(seen)
+        })();
+        let cleanup = process.finish();
+        (result, cleanup.is_ok() && process.closure_evidence().is_some_and(|e| e.confirmed()))
+    }
+
+    #[test]
+    fn a_large_write_request_is_allowed_whole_and_the_session_goes_on() {
+        let (seen, cleaned) = large_write_session(true);
+        assert_eq!(seen.unwrap(), vec!["init", "large request", "answer"]);
+        assert!(cleaned);
+    }
+
+    #[test]
+    fn without_session_lines_a_large_write_request_ends_the_session() {
+        let (seen, cleaned) = large_write_session(false);
+        assert!(seen.is_err());
+        assert!(cleaned);
     }
 
     #[test]

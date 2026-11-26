@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentRunCancelRequestV1 } from "./contracts/agent-adapter-v1.ts";
 import { validateApprovalResult, type ApprovalInspection, type ApprovalSummary } from "./contracts/approval-v1.ts";
-import { approvalFields, approvalHeadline, canAcceptApproval, withdrawnRequests } from "./approval-display.ts";
+import { approvalFields, approvalHeadline, assembleToolInput, EMPTY_REVIEW, reviewAllows, reviewGeneration, reviewLoaded, reviewOpened, reviewProgress, reviewReset, reviewRetain, withdrawnRequests, type ApprovalReview } from "./approval-display.ts";
 
 import { useI18n } from "../i18n.tsx";
 
@@ -42,8 +42,11 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
   const [queued, setQueued] = useState(false);
   /** Full content per request, read from the engine for that exact request. */
   const [inspections, setInspections] = useState<ReadonlyMap<string, ApprovalInspection>>(() => new Map());
-  /** Requests whose full content the person opened on this card. */
-  const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
+  /** What the person reviewed: details open now, large inputs read and
+   * checked while open (PR #19 re-review B1). */
+  const [review, setReview] = useState<ApprovalReview>(EMPTY_REVIEW);
+  const reviewRef = useRef(review);
+  reviewRef.current = review;
   /** Requests whose content could not be read after a few tries. */
   const [unreadable, setUnreadable] = useState<ReadonlySet<string>>(() => new Set());
   /** Requests the engine confirmed as answered (allowed or declined). */
@@ -68,7 +71,7 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
     setPending(next);
     const still = new Set(next.map(item => item.approvalId));
     setInspections(current => [...current.keys()].every(id => still.has(id)) ? current : new Map([...current].filter(([id]) => still.has(id))));
-    setOpened(current => [...current].every(id => still.has(id)) ? current : new Set([...current].filter(id => still.has(id))));
+    setReview(current => reviewRetain(current, still));
     if (!gone.length) return;
     withdrawnCallback.current?.(gone.map(item => ({ chatId: identity.chatId, approvalId: item.approvalId, kind: item.kind, summary: inspectionsRef.current.has(item.approvalId) ? approvalHeadline(inspectionsRef.current.get(item.approvalId)!).target : null })));
   };
@@ -77,7 +80,7 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
     live.current = true;
     epoch.current++;
     busy.current = false;
-    setPending([]); setError(false); setSending(false); setQueued(false); setInspections(new Map()); setOpened(new Set()); setUnreadable(new Set());
+    setPending([]); setError(false); setSending(false); setQueued(false); setInspections(new Map()); setReview(EMPTY_REVIEW); setUnreadable(new Set());
     decided.current = new Set(); deciding.current = new Set(); tries.current = new Map(); pendingRef.current = [];
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
@@ -110,7 +113,7 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
 
   async function decide(approvalId: string, action: "decline" | "acceptOnce") {
     if (busy.current || !window.m5Approval) return;
-    if (action === "acceptOnce" && !canAcceptApproval({ approvalId, inspectedId: inspections.get(approvalId)?.approvalId ?? null, openedIds: opened, sending, error })) return;
+    if (action === "acceptOnce" && !reviewAllows({ approvalId, inspection: inspections.get(approvalId) ?? null, review: reviewRef.current, sending, error })) return;
     busy.current = true;
     deciding.current.add(approvalId);
     const asked = pendingRef.current.find(item => item.approvalId === approvalId);
@@ -145,11 +148,51 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
       if (live.current && revision === epoch.current) {
         takeList(result.pending);
         const inspection = result.inspection ?? null;
-        if (inspection) setInspections(current => new Map(current).set(approvalId, inspection));
+        if (inspection) {
+          // Read again with different content: what was reviewed no longer counts.
+          const before = inspectionsRef.current.get(approvalId);
+          if (before && JSON.stringify(before) !== JSON.stringify(inspection)) setReview(current => reviewReset(current, approvalId));
+          setInspections(current => new Map(current).set(approvalId, inspection));
+        }
         setError(false);
       }
     } catch {
       if (live.current && revision === epoch.current) setError(true);
+    } finally {
+      if (live.current && revision === epoch.current) { busy.current = false; setSending(false); }
+    }
+  }
+
+  /** Read every page of a large tool input, in order, then join and check it
+   * against the engine's size and SHA-256. Only a checked whole is shown as
+   * the full content and lets the person allow (PR #19 review B1). */
+  async function loadFull(approvalId: string) {
+    const first = inspections.get(approvalId);
+    const current = reviewRef.current;
+    if (!first?.toolInputPages || current.full.has(approvalId) || current.progress.has(approvalId) || busy.current || !window.m5Approval) return;
+    const generation = reviewGeneration(current, approvalId);
+    busy.current = true;
+    const revision = ++epoch.current;
+    setSending(true);
+    const pages = [first.toolInput ?? ""];
+    setReview(state => reviewProgress(state, approvalId, generation, 1));
+    try {
+      for (let page = 1; page < first.toolInputPages; page++) {
+        // Closed (or started over) meanwhile: stop; nothing of it counts.
+        if (reviewGeneration(reviewRef.current, approvalId) !== generation || !reviewRef.current.open.has(approvalId)) return;
+        const request = { action: "inspect" as const, identity, approvalId, page };
+        const result = validateApprovalResult(await window.m5Approval.request(request), request);
+        if (!live.current || revision !== epoch.current) return;
+        const view = result.inspection;
+        // Withdrawn meanwhile, or a page that names another input: stop.
+        if (!view || view.toolInputSha256 !== first.toolInputSha256 || view.toolInputBytes !== first.toolInputBytes || view.toolInputPages !== first.toolInputPages) throw new Error("tool input changed");
+        pages.push(view.toolInput ?? "");
+        setReview(state => reviewProgress(state, approvalId, generation, page + 1));
+      }
+      const text = await assembleToolInput(pages, first);
+      if (live.current && revision === epoch.current) setReview(state => reviewLoaded(state, approvalId, generation, text));
+    } catch {
+      if (live.current && revision === epoch.current) setReview(state => reviewProgress(state, approvalId, generation, "failed"));
     } finally {
       if (live.current && revision === epoch.current) { busy.current = false; setSending(false); }
     }
@@ -177,19 +220,32 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
     {pending.map(request => {
       const shown = inspections.get(request.approvalId) ?? null;
       const headline = shown ? approvalHeadline(shown) : null;
-      const accept = canAcceptApproval({ approvalId: request.approvalId, inspectedId: shown?.approvalId ?? null, openedIds: opened, sending, error });
+      const paged = shown?.toolInputPages !== undefined;
+      const full = review.full.get(request.approvalId);
+      const progress = review.progress.get(request.approvalId);
+      const accept = reviewAllows({ approvalId: request.approvalId, inspection: shown, review, sending, error });
       return <div key={request.approvalId} className="m5-approval-request" data-approval-id={request.approvalId}>
         <p className="m5-approval-line"><span className="m5-approval-kind">{t(`m5.approval.kind.${request.kind}`)}</span>
           {headline ? <code className="m5-approval-target" dir="auto">{headline.target}</code>
             : <span className="m5-approval-reading">{t(unreadable.has(request.approvalId) ? "m5.approval.unreadable" : "m5.approval.reading")}</span>}</p>
         {headline?.reason && <p className="m5-approval-why" dir="auto">{t("m5.approval.why", { reason: headline.reason })}</p>}
-        {shown && <details key={`full:${request.approvalId}`} className="m5-approval-details" aria-label={t("m5.approval.details")}
-          onToggle={event => { if (event.currentTarget.open) setOpened(current => current.has(request.approvalId) ? current : new Set(current).add(request.approvalId)); }}>
+        {shown && <details key={`full:${request.approvalId}:${reviewGeneration(review, request.approvalId)}`} className="m5-approval-details" aria-label={t("m5.approval.details")}
+          onToggle={event => {
+            // Open now, or the review starts over (a load in flight is dropped).
+            if (event.currentTarget.open) { reviewRef.current = reviewOpened(reviewRef.current, request.approvalId); setReview(reviewRef.current); if (paged) void loadFull(request.approvalId); }
+            else setReview(current => reviewReset(current, request.approvalId));
+          }}>
           <summary>{t("m5.approval.fullContent")}</summary>
           <p>{t("m5.approval.warning")}</p>
-          <dl>{approvalFields(shown).map(item => <div key={item.field}><dt>{t(FIELD_KEYS[item.field])}</dt><dd><pre className="m5-approval-verbatim">{item.text}</pre></dd></div>)}</dl>
+          {paged && <p className="m5-approval-partial" role="status">{full !== undefined
+            ? t("m5.approval.fullChecked", { size: formatApprovalBytes(shown.toolInputBytes ?? 0), sha256: shown.toolInputSha256 ?? "" })
+            : progress === "failed" ? t("m5.approval.fullFailed")
+            : t("m5.approval.fullLoading", { read: String(typeof progress === "number" ? progress : 0), pages: String(shown.toolInputPages) })}</p>}
+          <dl>{approvalFields(paged ? (full !== undefined ? { ...shown, toolInput: full } : { ...shown, toolInput: undefined }) : shown)
+            .map(item => <div key={item.field}><dt>{t(FIELD_KEYS[item.field])}</dt><dd><pre className="m5-approval-verbatim">{item.text}</pre></dd></div>)}</dl>
         </details>}
-        {shown && <p className="m5-approval-accept-note">{t(opened.has(request.approvalId) ? "m5.approval.acceptWarning" : "m5.approval.openFirst")}</p>}
+        {paged && full === undefined && <p className="m5-approval-partial">{t("m5.approval.large", { size: formatApprovalBytes(shown.toolInputBytes ?? 0) })}</p>}
+        {shown && <p className="m5-approval-accept-note">{t(review.open.has(request.approvalId) ? "m5.approval.acceptWarning" : "m5.approval.openFirst")}</p>}
         <div className="m5-approval-actions">
           {shown && <button type="button" disabled={!accept} onClick={() => void decide(request.approvalId, "acceptOnce")}>{t("m5.approval.acceptOnce")}</button>}
           <button type="button" className="m5-secondary" disabled={sending || error} onClick={() => void decide(request.approvalId, "decline")} aria-label={t("m5.approval.declineLabel", { kind: t(`m5.approval.kind.${request.kind}`) })}>{t("m5.approval.decline")}</button>
@@ -208,4 +264,11 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
 export function ApprovalWithdrawnNote({ item }: { item: WithdrawnApproval }) {
   const { t } = useI18n();
   return <p role="status" className="m5-approval-withdrawn">{t(item.answerFailed ? "m5.approval.answerFailed" : "m5.approval.withdrawn")}{item.summary ? <> · <code dir="auto">{item.summary}</code></> : <> · {t(`m5.approval.kind.${item.kind}`)}</>}</p>;
+}
+
+/** A tool input's size for the partial-view note, in the units a person reads. */
+export function formatApprovalBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }

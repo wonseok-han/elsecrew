@@ -34,6 +34,7 @@ fn configuration_arguments(home: &Path, workspace: &Path) -> Vec<std::ffi::OsStr
         &ExpectedProfile {
             model: "test-model",
             reasoning_effort: "medium",
+            approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
         },
         ExpectedPermission::WorkspaceWrite,
     )
@@ -123,7 +124,7 @@ fn exchange(
                 let config = &result["config"];
                 let layers_match = crate::provider_preflight_session::named_permissions::matches_configuration_layers(
                     result, home,
-                    &elsecrew_core::provider::vendor_observation::codex_preflight::ExpectedProfile { model:"test-model", reasoning_effort:"medium" },
+                    &elsecrew_core::provider::vendor_observation::codex_preflight::ExpectedProfile { model:"test-model", reasoning_effort:"medium", approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest },
                     &expected_policy(home, workspace), "never",
                 );
                 if !layers_match

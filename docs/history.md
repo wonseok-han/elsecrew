@@ -2,6 +2,63 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #19 재검토(B1 미해소·중요 3) 마지막 라운드 (`orca/ade-d3-bigwrite`)
+재검토 `~/Documents/elsecrew-ade-stability-2026-11-26/REVIEW-pr19-2.md`(대상 37f9372d).
+
+| 지적 | 처리 | 시험 |
+| --- | --- | --- |
+| B1 로딩 중 상세를 닫아도 허용이 켜짐 | 요청마다 확인 상태 하나(`ApprovalReview`: 지금 펼쳐짐·검증된 전체·진행·세대)를 두고, 전이를 순수 함수로 만들었다(`reviewOpened`·`reviewReset`·`reviewProgress`·`reviewLoaded`·`reviewRetain`). 상세를 닫거나 요청 내용이 바뀌거나 다시 읽으면 처음부터 다시 확인하고 세대가 올라간다. 그 뒤 도착한 이전 세대의 로딩은 버린다. 실패 뒤 다시 펼치면 재시도한다. 허용 버튼 활성과 클릭 처리 모두 `reviewAllows` 하나를 쓴다(지금 펼쳐짐 + 모든 쪽 + 크기·해시 일치). | `PR #19 re-review B1: allowing needs the details open now…`(리뷰 재현: 펼침 → 로딩 중 닫음 → 늦게 완료 → 허용 불가) |
+| Codex 켬 상태 자동 허용 확대 | 규칙 제안은 `untrusted`로 시작한 스레드에서만 읽는다(`PendingApproval::parse_in_thread`, `TurnStart`→`TurnStream`). `on-request` 스레드에서는 예전처럼 즉시 거절한다. | core `a_trust_rule_proposal_is_an_approval_only_in_an_untrusted_thread`, `a_proposed_trust_rule_is_read_but_never_adopted`; sidecar `a_codex_command_asks_the_person_when_commands_are_off`(켬/끔 × 일반/제안/네트워크/작업 공간 밖) |
+| 실행 중 설정 변경이 진행 중 승인에 적용 | `untrusted` 스레드에서 온 명령 요청은 설정이 실행 중에 켜져도 앱이 자동 허용하지 않는다(`thread_untrusted`). | 같은 sidecar 시험 "turned on mid-run: still asks" |
+| I2 종료 이벤트 읽기 실패 시 예산 | 출력 처리 직후에도 종료가 확인되면 대기열을 비운다(`release_unanswerable`). 소유자가 버려질 때(drop)는 대기열과 함께 예산이 반환된다. | `requests_of_an_ended_run_give_back_their_budget`(종료 → 반환, 대기열 drop → 반환) |
+
+- **검증**: core 267, sidecar 관련 묶음, `npm test` 1011/1011, `pnpm build`. 전체 Rust·CI는 아래에 덧붙인다.
+- **전체 검증(e96fee95)**: `cargo test --workspace` core 267·protocol 75·sidecar lib 949·stdio_process 16 실패 0. CI(run 45862588223) macOS·Windows·website·GitGuardian 모두 통과. 남은 것: 노예 확인과 머지.
+
+### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #19 검토(차단 1·중요 2·경미 1) 반영과 Codex '명령 실행 허용' 일치 (`orca/ade-d3-bigwrite`)
+검토 `~/Documents/elsecrew-ade-stability-2026-11-26/REVIEW-pr19.md`(대상 f65683fd). 조정자 지시: 큰 입력은 전체를 본 뒤에만 허용, 모든 경로에서 예산 회수 증명, 명령 허용을 끄면 Codex도 매번 묻게.
+
+| 지적 | 처리 | 시험 |
+| --- | --- | --- |
+| B1 일부·빈 미리보기로 전체 허용 | 잘라 보여 주던 미리보기를 없앴다. 96KiB 넘는 입력은 정확한 원문(허용 응답이 되돌려 보내는 JSON 글)을 64KiB 쪽(UTF-8 경계)으로 나눠 보낸다. 카드는 '전체 내용 보기'를 펼치면 모든 쪽을 차례로 불러와 이어 붙이고, 크기·SHA-256이 엔진 값과 같을 때만 원문 전체를 보여 주며 허용을 켠다. 불러오지 못했거나 값이 다르면 허용할 수 없다. 엔진도 모든 쪽을 순서대로 내준 뒤에만 `acceptOnce`를 받는다. | owner 경로 `claude_large_tool_input_is_read_whole_before_allowing_and_its_budget_always_returns`(순서 밖 쪽·마지막 쪽 전 허용 거부, 이어 붙인 글 크기·SHA-256 = 엔진 값, 가짜 Claude가 받은 응답 SHA-256 일치), sidecar `a_large_tool_input_is_read_in_pages_that_join_to_the_exact_input`, core `a_large_write_is_kept_exactly_and_echoed_whole`(응답에 쪽 글이 그대로 포함), 화면 `a large Claude tool input arrives in pages…`, `the card's full content is the pages joined, checked…`, `canAcceptApproval` fullyRead |
+| I1 송신 버퍼·기한 | 큰 입력 예산이 요청 → 허용 응답 → 전송 계층으로 옮겨가, 다 쓰이거나 실패하거나 연결이 버려질 때까지 유지된다(대기+송신 합계 16MiB). 공급자가 30초 동안 읽지 않으면 그 연결만 실패한다(`SEND_STALL_MAX`). | `an_allow_reply_keeps_its_budget_until_written_and_a_stalled_write_fails`(다 씀·멈춤·버림 모두 반환) |
+| I2 종료 경로 예산 | 실행이 끝나면(종료 기록 성공 여부와 무관하게) 답할 수 없는 승인 대기열을 바로 비운다. 엔진 재시작은 새 프로세스라 예산이 0에서 시작한다. | owner 경로 4사례: 허용·전송 성공, 거절, 실행 종료 시 미응답, 전송 실패 — 모두 끝나면 예산 0 |
+| 경미 SHA-256 대상 | 카드 문구에 "이 JSON 글 그대로 기준"을 명시. | — |
+
+- **Codex 명령 허용(사용자 결정, 조정자 전달)**: 끄면 Codex 실행의 스레드를 `untrusted`로 시작해 안전한 읽기 외 명령은 매번 묻는다(카드). 켜면 지금처럼 `on-request`다. 설정 화면에 두 공급자 공통 의미를 적었다.
+  - **설치된 Codex 0.171 확인**: 프로세스 설정 `-c approval_policy="untrusted"`는 app-server가 "no longer supported"로 시작을 거부한다. `thread/start`의 `approvalPolicy:"untrusted"`는 받아 그대로 보고한다. 그래서 실행 인자·설정 검사는 `on-request`로 두고 스레드만 정책을 갖게 했다. `unless-trusted`·`on-failure`는 거부된다.
+  - `untrusted`의 명령 요청에는 "이 명령을 앞으로 항상 허용" 규칙 제안(`proposedExecpolicyAmendment`)이 붙는다. 파서가 이를 미지원 요청으로 보고 즉시 거절하던 것을, 작은 문자열 목록이면 읽고 적용하지 않도록 바꿨다(앱 응답은 `accept`/`decline`뿐).
+  - 정책은 실행 시작 때 프로젝트 설정으로 정한다(`codex_approval_policy`). `ExpectedProfile.approval`로 실행 인자·스레드 시작·보고값 검사·실행 직전 관찰값에 함께 흐른다. 다른 정책으로 만든 관찰값으로는 실행하지 않는다.
+  - 시험: core `the_requested_approval_policy_must_be_the_one_reported`, `thread_start_asks_for_the_runs_approval_policy`, `a_proposed_trust_rule_is_read_but_never_adopted`; sidecar `codex_launch_and_observation_follow_the_approval_policy`, `a_codex_command_asks_the_person_when_commands_are_off`.
+  - **실제 Codex 확인(기본 프로필, 제 앱 PID만)**: 명령 허용을 끄고 검증 역할에 `touch codex-probe.txt`를 시켰다. 1차는 0.171의 프로세스 설정 거부로 실행 준비가 실패했다(위 원인). 2차는 규칙 제안 때문에 앱이 자동 거절했다. 수정 뒤 3차에서 카드가 떴고, 40초 남아 있다가 '이번만 허용' 뒤 실행됐다(파일 생성, 종료 코드 0). 권한은 다시 켜고 다시 열어 확인했다. 정상 종료(engine exit 0). 증거 `~/Documents/elsecrew-ade-d3-bigwrite-2026-11-26/codex-*`.
+- **검증**: core 264, sidecar 관련 묶음, `npm test` 996/996, `pnpm build`. 전체 Rust·CI는 아래에 덧붙인다.
+- **전체 검증(c7face2b, feature/ade PR #18 병합 뒤)**: `cargo test --workspace` core 266·protocol 75·sidecar lib 948·stdio_process 16 실패 0, `npm test` 1010/1010, `pnpm build`, 렌더러 스모크 `pnpm m5:test:editor` 69/69. 병합 직후 sidecar의 Codex 채팅 시험 4개가 가짜 스레드의 고정 `on-request` 때문에 실패해, 가짜·시험 프로필을 `codex_approval_policy`에 맞췄다. CI(run 45858722062) macOS·Windows·website·GitGuardian 모두 통과. 그 앞 run 45854467204의 macOS 렌더러 스모크 1건(첫 작업 보내기 대기)은 재실행에서 통과한 일시 실패다. 남은 것: 노예의 B1 재확인, 머지.
+- **함정**: Codex 0.171에서 `approval_policy="untrusted"`는 프로세스 설정으로는 거부, 스레드 단위로는 허용. 정책을 바꿀 때 설치 버전으로 두 경로를 모두 확인한다.
+
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — D3 실제 확인과 큰 Write 권한 요청 (`orca/ade-d3-bigwrite`, 기준 feature/ade f2d50132)
+조정자 지시: 1차에서 남은 두 가지(D3 권한 카드가 2~4초 만에 사라짐, 128KiB 넘는 Write 권한 요청이 세션을 끊음).
+
+- **D3 실제 확인 (기본 프로필, 개발 앱 PID 10110만 띄우고 종료, 실제 Claude·Codex)**
+  - 방법: 시험 프로젝트 `elsecrew-d2-image-test`의 '명령 실행 허용'을 잠시 끄고, 0.25초마다 카드 DOM을 표본으로 남겼다. 끝난 뒤 다시 켜고, 다시 열어 켜짐을 확인했다.
+  - Claude(개발 역할): `ls -la`·`wc -c README.md`·`git status` 카드 3장이 떴다. 모두 0.25초 안에 내용이 보였고("불러오는 중…"은 표본 1개), 응답할 때까지 사라지지 않았다(1분 57초·53초·50초 유지). 허용 2건은 실행됐고, 거절 1건은 "허용 안 됨"으로 남았다. 앱 로그 오류 0, 정상 종료(engine exit 0). 11-25의 "2~4초 만에 사라짐"은 PR #15(엔진 재시작·지연 제거) 뒤 재현되지 않는다.
+  - Claude CLI 2.1.328 확인: SDK 훅 콜백의 기본 대기는 600,000ms다(매처 `timeout`·`whenUnanswered`가 없을 때). 시간이 지나면 "PreToolUse hook did not respond before its timeout … The tool call was not executed"로 그 호출만 하지 않는다. 그래서 몇 초 만의 철회는 CLI 시간 제한 때문이 아니다. 당시 원인은 엔진 재시작·지연으로 본다(추정, 당시 로그로는 확정 못 함).
+  - Codex(검증 역할, `on-request`): 카드가 뜨는 경로가 없었다. 격리 공간 안 명령(`ls`·`touch`)은 명령 허용을 꺼도 묻지 않고 실행됐고, 네트워크 승격(`curl`)은 앱이 역할 경계 밖이라 묻지 않고 거절했다.
+  - **새 발견(미수정, 판단 필요)**: 프로젝트 '명령 실행 허용'을 꺼도 Codex는 격리 안 명령을 그대로 실행한다. 설정은 Codex가 승격을 요청할 때의 자동 허용만 정한다(`project_auto_approval`). Claude는 끄면 모든 Bash를 묻는다. 두 공급자의 의미가 다르다.
+  - 증거: `~/Documents/elsecrew-ade-d3-bigwrite-2026-11-26/`(`d3-claude.jsonl`, `d3-codex.jsonl`, `app-d3.log`). 앱 데이터 변화: 시험 프로젝트에 작업 3개, 명령 권한 끔→켬(설정 버전 증가).
+- **큰 Write 원인**: Claude의 모든 도구 호출은 PreToolUse 훅(`hook_callback`)으로 먼저 오고, 입력 전체를 담는다. 파일을 통째로 쓰는 Write가 128KiB를 넘으면 그 줄이 보호 프레임이라 거부됐다(PR #17). 또 허용 응답이 입력을 `updatedInput`으로 되돌려 보내 보내는 쪽 128KiB 상한도 넘었다. 재현: `without_session_lines_a_large_write_request_ends_the_session`(세션 모드 밖은 지금도 실패).
+- **설계와 수정**
+  - 세션 중 Claude 권한 요청(`can_use_tool`·`hook_callback`)만, 128KiB를 넘어도 **줄이지 않고 통째로** 받는다(`BoundedObservation::new_session_control`, 원문 줄 8MiB 상한·큰 줄 자리 규칙 그대로).
+  - 승인 파서(`claude_approval`)는 입력을 4MiB(`LARGE_TOOL_INPUT_MAX_BYTES`)까지, 128KiB 넘는 입력은 **프로세스 전체 16MiB 예산**(`LARGE_TOOL_INPUTS_HELD_MAX_BYTES`) 안에서만 보유한다. 응답·철회·폐기 때 예산을 돌려준다.
+  - 상한이나 예산을 넘으면 입력을 하나도 보관하지 않고(`withheld`) 그 요청만 거절한다. 안내는 "4MiB 넘음 — 나눠서 쓰라"(`LARGE_INPUT_GUIDANCE`)이며, 세션은 계속된다. 보류된 요청은 허용할 수 없다.
+  - 허용 응답은 원문을 그대로 되돌려 보낸다(최대 4MiB+64KiB, 세션에서만 이 크기 프레임 허용).
+  - 승인 카드: 96KiB를 넘는 입력은 원문 앞부분(긴 문자열 앞 2KiB + "…[N more bytes]")과 함께 전체 크기·SHA-256을 받는다. 카드에는 "허용하면 전체가 그대로 전달돼요"를 표시한다. 화면 계약은 `toolInputBytes`·`toolInputSha256`을 도구 요청에만, 둘 다 있을 때만, 범위 검사와 함께 받는다.
+  - 경계: 데이터 손상 — 승인하는 것과 보내는 것은 같은 원문이고 축약은 화면 보기에만 쓴다. 메모리 — 대기 중 큰 입력 합계 16MiB, 요청당 4MiB, 줄 처리 중 일시 사본은 큰 줄 자리 규칙 그대로. 8MiB 넘는 줄은 예전처럼 세션 실패.
+  - Codex 승인 요청은 명령(64KiB)·경로만 담아 이 문제가 없다.
+- **시험**: core `a_large_write_is_kept_exactly_and_echoed_whole`(훅·권한 요청 300KB 원문 보관·되돌려 보냄·예산 반환), `a_request_too_large_to_keep_is_refused_with_guidance`(4MiB 초과·예산 초과 보류, 안내 거절, 세션 계속, 응답하면 예산 회복), `permission_requests_handshake_and_results_are_never_shortened`(권한 요청은 바이트 그대로 통과), `claude_allow_echoes_the_original_input_after_shortened_frames`(축약된 assistant 뒤 큰 요청도 원문 되돌림); sidecar `a_large_write_request_is_allowed_whole_and_the_session_goes_on`(가짜 Claude가 받은 허용 응답 SHA-256이 원문과 일치, 이어서 답변), `only_a_session_sends_frames_over_the_line_bound`, `a_large_tool_input_is_shown_in_part_with_its_size_and_hash`; 화면 `a large Claude tool input arrives in part, with its full size and SHA-256`.
+- **검증**: core 261, sidecar 관련 묶음 통과, `npm test` 995/995, `pnpm build`. 전체 Rust·CI는 아래에 덧붙인다.
+- **전체 검증(12413137)**: `cargo test --workspace` core 261·protocol 75·sidecar lib 936·stdio_process 16 실패 0. PR https://github.com/wonseok-han/elsecrew/pull/19 (`--base feature/ade`), CI(run 45844680823) macOS·Windows·website·GitGuardian 모두 통과.
+- **남은 일**: Codex 검토 대응. 명령 허용 설정의 Codex 의미 차이를 어떻게 할지 판단. 8MiB 넘는 권한 요청 줄은 여전히 세션 실패. 큰 Write 실제 계정 확인은 출력 토큰 비용 때문에 하지 않았다(가짜 Claude 끝단 시험으로 대체).
+
 ### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #18 3차 확인(B1 두 점) 반영 (`orca/ade-multiproject-a`)
 3차 확인 `~/Documents/elsecrew-ade-multiproject-2026-11-26/REVIEW-pr18-3.md`(대상 6859a030). B2는 해결로 확인됐다.
 
@@ -311,6 +368,10 @@
   - 개발 앱 창이 다른 창에 완전히 가려지면 macOS Electron이 `hide`를 보내 미리보기가 숨고, rAF도 멈춘다. CDP 측정 중 "뷰가 안 보임"은 이것부터 의심한다(창을 앞으로 가져오면 다시 보인다).
   - main 디버거(`--inspect=<port>`)에서는 `require.cache[".../.vite/build/main.cjs"].exports.previewManager`로 미리보기 상태(`currentLayout`·`visibility`·`refusedMeasurements`)를 읽을 수 있다.
   - 큰 도구 결과(이미지)가 Claude 출력 한 줄 128KiB를 넘으면 실행이 멈췄다(D2). 이제 세션 모드에서 8MiB까지 읽고 줄여 관측한다. **승인에 쓰는 값은 원문만**: Claude 권한 요청 줄은 줄이지 않고(허용 응답이 입력을 되돌려 보냄), Codex는 메서드별로 명시한 폐기 필드만 줄인다(`item/started`의 `command`·`cwd`가 승인 보완·완료 대조에 쓰임). 큰 줄은 프로세스 전체 2자리로 동시 처리 메모리를 묶는다(`provider_login_io.rs` `LARGE_LINE_SLOTS`). 자리 보유는 총 30초·무진행 10초, 대기는 90초가 상한이며 넘으면 그 연결만 실패한다(`LargeLineLimits`).
+  - 권한 카드가 2~4초 만에 사라지던 D3는 PR #15 뒤 실제 Claude로 재현되지 않는다(2026-11-26, 카드 3장 모두 응답까지 유지). Claude CLI SDK 훅 기본 대기는 10분이다.
+  - 큰 Write 권한 요청(128KiB 초과)은 통째로 받아 원문으로 승인·되돌려 보낸다. 요청당 4MiB, 대기 합계 16MiB를 넘으면 그 요청만 안내와 함께 거절한다(`claude_approval`).
+  - 프로젝트 '명령 실행 허용'을 끄면 Claude는 모든 Bash를, Codex는 스레드를 `untrusted`로 시작해 안전한 읽기 외 명령을 묻는다(2026-11-27 결정). Codex 0.171은 `untrusted`를 프로세스 설정으로는 거부하고 `thread/start`로만 받는다. 규칙 제안(`proposedExecpolicyAmendment`)은 읽기만 하고 적용하지 않는다.
+  - 큰 도구 입력의 승인 카드는 64KiB 쪽을 모두 불러와 크기·SHA-256이 맞을 때만 허용을 켠다. 엔진도 모든 쪽을 내준 뒤에만 허용한다. 큰 입력 예산은 허용 응답이 다 쓰일 때까지 유지된다.
   - 동시 스트림 16개를 넘으면 엔진이 재시작됐다(D1). 누수는 PR #15, 한도 초과를 그 요청만의 실패로 바꾼 것은 ade-stability.
 
 - **색은 토큰 블록 두 곳에만(2026-11-26, 화면 통일 U0·U1)**: `styles.css`의 다크 `:root`와 라이트 `:root[data-theme="light"]` 밖에는 hex·`rgb()`를 쓰지 않는다. 화면 코드에도 색 리터럴을 쓰지 않는다(Monaco는 `theme.ts`가 토큰에서 읽음). `tests/m5-style-tokens.test.mts`가 대비(다크·라이트 각 95쌍)·블록 밖 색 0·정의되지 않은 토큰 0을 막는다. 라이트 값은 1단 `--p-*`만 바꾼다. 새 화면은 공용 컴포넌트 클래스(`.m5-btn-*`·`.m5-badge`·`.m5-banner`·`.m5-card`·`.m5-group`·`.m5-empty-state`·`.m5-steps`·`.m5-recover`)를 쓴다.

@@ -427,8 +427,14 @@ impl AgentRuntime {
             .ok_or_else(invalid)?;
         let keys: &[&str] = match action {
             "list" => &["action", "identity"],
+            // A large Claude tool input is read in pages (PR #19 review B1).
+            "inspect" if params.get("page").is_some() => &["action", "identity", "approvalId", "page"],
             "decline" | "inspect" | "acceptOnce" => &["action", "identity", "approvalId"],
             _ => return Err(invalid()),
+        };
+        let page = match params.get("page") {
+            None => None,
+            Some(value) => Some(value.as_u64().filter(|page| *page < 4096).ok_or_else(invalid)? as usize),
         };
         let object = params.as_object().ok_or_else(invalid)?;
         if object.len() != keys.len() || !keys.iter().all(|key| object.contains_key(*key)) {
@@ -477,8 +483,12 @@ impl AgentRuntime {
                 if !same_identity(&registered, &identity) {
                     return Err(invalid());
                 }
-                return owner.approval_request(action, params.get("approvalId").and_then(Value::as_str), &raw);
+                return owner.approval_request(action, params.get("approvalId").and_then(Value::as_str), page, &raw);
             }
+        }
+        // Only a Claude tool input is read in pages.
+        if page.is_some() {
+            return Err(invalid());
         }
         // A run that already ended has nothing waiting. The screen keeps asking
         // until it learns the run ended (a few 750 ms polls); that is not an

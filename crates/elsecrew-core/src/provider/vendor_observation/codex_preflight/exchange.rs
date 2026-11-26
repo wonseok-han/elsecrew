@@ -35,6 +35,7 @@ pub struct PreflightExchange {
     effort: String,
     expected_home: String,
     permission: ExpectedPermission,
+    approval: super::CodexApprovalPolicy,
     state: PreflightState,
     started: bool,
     thread_cwd: Option<std::path::PathBuf>,
@@ -104,6 +105,7 @@ impl PreflightExchange {
             effort: profile.reasoning_effort.into(),
             expected_home: expected_home.into(),
             permission,
+            approval: profile.approval,
             state: PreflightState::Checking,
             started: false,
             thread_cwd: None,
@@ -240,7 +242,7 @@ impl PreflightExchange {
         }
         let mut request = serde_json::json!({"id":5,"method":"thread/start","params":{
             "model":self.model,"modelProvider":"openai","cwd":path,
-            "approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":self.permission.sandbox_mode(),
+            "approvalPolicy":self.approval.as_str(),"approvalsReviewer":"user","sandbox":self.permission.sandbox_mode(),
             "config":{"model_reasoning_effort":self.effort},"ephemeral":true,
             "baseInstructions":"","developerInstructions":""
         }});
@@ -293,7 +295,8 @@ impl PreflightExchange {
         text: &str,
     ) -> Result<crate::provider::vendor_observation::codex_turn::TurnStart, ProviderError> {
         let thread = self.matched_thread_id().ok_or_else(invalid)?;
-        crate::provider::vendor_observation::codex_turn::TurnStart::new(thread, text)
+        Ok(crate::provider::vendor_observation::codex_turn::TurnStart::new(thread, text)?
+            .in_untrusted_thread(self.approval == super::CodexApprovalPolicy::Untrusted))
     }
 
     /// Split initialized and its following request into individual JSONL frames.
@@ -435,6 +438,7 @@ impl PreflightExchange {
                     &ExpectedProfile {
                         model: &self.model,
                         reasoning_effort: &self.effort,
+                        approval: self.approval,
                     },
                     self.thread_cwd.as_deref().ok_or_else(invalid)?,
                 )?;
@@ -444,6 +448,7 @@ impl PreflightExchange {
                     &ExpectedProfile {
                         model: &self.model,
                         reasoning_effort: &self.effort,
+                        approval: self.approval,
                     },
                     self.thread_cwd.as_deref().ok_or_else(invalid)?,
                     self.permission,
@@ -491,6 +496,7 @@ impl PreflightExchange {
         let profile = ExpectedProfile {
             model: &self.model,
             reasoning_effort: &self.effort,
+            approval: self.approval,
         };
         match kind {
             ObservationKind::Usage => { self.display_usage = super::super::account_usage::codex(&observation).ok(); }
@@ -629,6 +635,19 @@ impl PreflightExchange {
 
 #[cfg(test)]
 mod tests {
+    /// The thread is started with the run's approval policy (2026-11-27).
+    #[test]
+    fn thread_start_asks_for_the_runs_approval_policy() {
+        for (approval, wire) in [(super::super::CodexApprovalPolicy::OnRequest, "on-request"), (super::super::CodexApprovalPolicy::Untrusted, "untrusted")] {
+            let profile = ExpectedProfile { model: "test-model", reasoning_effort: "medium", approval };
+            let mut flow = PreflightExchange::new(&profile, test_path!("/profile")).unwrap();
+            flow.state = PreflightState::ObservationsMatched;
+            let request = flow.start_thread(std::path::Path::new(test_path!("/managed/snapshot"))).unwrap();
+            let value: serde_json::Value = serde_json::from_str(request.as_str()).unwrap();
+            assert_eq!(value["params"]["approvalPolicy"], wire);
+        }
+    }
+
     use super::*;
     use serde_json::{json, Value};
 
@@ -636,7 +655,7 @@ mod tests {
     fn model_name_cannot_opt_a_normal_preflight_into_usage_queries() {
         for opt_in in [false, true] {
             let mut flow = PreflightExchange::with_named_permission(
-                &ExpectedProfile { model: "catalog-probe", reasoning_effort: "medium" },
+                &ExpectedProfile { model: "catalog-probe", reasoning_effort: "medium", approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest },
                 test_path!("/app/home"), std::path::Path::new(test_path!("/app/workspace")), ExpectedPermission::ReadOnly,
             ).unwrap();
             if opt_in { flow.enable_usage_display().unwrap(); }
@@ -655,6 +674,7 @@ mod tests {
             &ExpectedProfile {
                 model: "test-model",
                 reasoning_effort: "medium",
+                approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
             },
             test_path!("/app/profile"),
         )
@@ -886,6 +906,7 @@ mod tests {
             &ExpectedProfile {
                 model: "test-model",
                 reasoning_effort: "medium",
+                approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
             },
             test_path!("/app/profile"),
             ExpectedPermission::WorkspaceWrite,
@@ -905,6 +926,7 @@ mod tests {
                     &ExpectedProfile {
                         model: "test-model",
                         reasoning_effort: "medium",
+                        approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
                     },
                     test_path!("/app/profile"),
                     cwd,
@@ -983,6 +1005,7 @@ mod tests {
                         &ExpectedProfile {
                             model: "test-model",
                             reasoning_effort: "medium",
+                            approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
                         },
                         test_path!("/app/profile"),
                     )
@@ -1026,6 +1049,7 @@ mod tests {
             &ExpectedProfile {
                 model: "test-model",
                 reasoning_effort: "medium",
+                approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
             },
             test_path!("/app/profile"),
         )
@@ -1057,6 +1081,7 @@ mod tests {
                 &ExpectedProfile {
                     model: "test-model",
                     reasoning_effort: "medium",
+                    approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
                 },
                 test_path!("/app/profile"),
             )
@@ -1083,6 +1108,7 @@ mod tests {
             &ExpectedProfile {
                 model: "test-model",
                 reasoning_effort: "medium",
+                approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
             },
             test_path!("/app/profile"),
         )

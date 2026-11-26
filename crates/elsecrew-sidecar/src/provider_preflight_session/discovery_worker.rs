@@ -43,21 +43,23 @@ impl DiscoveryWorker {
         model: String,
         effort: String,
         permission: ExpectedPermission,
+        approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy,
         workspace: PathBuf,
     ) -> Result<Self, SidecarError> {
-        Self::spawn_inner(profile, model, effort, permission, workspace, false)
+        Self::spawn_inner(profile, model, effort, permission, approval, workspace, false)
     }
     pub(crate) fn spawn_catalog(
         profile: CodexProfileBinding, model: String, effort: String,
         permission: ExpectedPermission, workspace: PathBuf,
     ) -> Result<Self, SidecarError> {
-        Self::spawn_inner(profile, model, effort, permission, workspace, true)
+        Self::spawn_inner(profile, model, effort, permission, elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest, workspace, true)
     }
     fn spawn_inner(
         profile: CodexProfileBinding,
         model: String,
         effort: String,
         permission: ExpectedPermission,
+        approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy,
         workspace: PathBuf,
         include_usage: bool,
     ) -> Result<Self, SidecarError> {
@@ -88,6 +90,7 @@ impl DiscoveryWorker {
                 let expected = ExpectedProfile {
                     model: &model,
                     reasoning_effort: &effort,
+                    approval,
                 };
                 match inspect_named_preflight_display_candidate(
                     profile,

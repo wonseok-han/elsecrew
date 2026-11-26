@@ -1000,6 +1000,9 @@ fn text_candidate_cases_with_output(
             settings["sandbox_workspace_write"] = json!({"writable_roots":[],"network_access":false,"exclude_tmpdir_env_var":true,"exclude_slash_tmp":true});
             sandbox = json!({"type":"workspaceWrite","writableRoots":[],"networkAccess":false,"excludeTmpdirEnvVar":true,"excludeSlashTmp":true});
         }
+        // The thread reports the policy the run asked for: `untrusted` here,
+        // as this project has no command permission (2026-11-27 decision).
+        let approval = crate::agent_runtime::preparation::codex_approval_policy(&fixture.storage, &fixture.projects, &address.project_id).unwrap().as_str();
         let messages = [
             json!({"id":1,"result":{"userAgent":"test","codexHome":home,"platformFamily":"unix","platformOs":"macos"}}),
             json!({"id":2,"result":{"config":settings,"layers":[
@@ -1009,7 +1012,7 @@ fn text_candidate_cases_with_output(
             ]}}),
             json!({"id":3,"result":{"account":{"type":"chatgpt"},"requiresOpenaiAuth":true}}),
             json!({"id":4,"result":{"data":[{"id":"test-model","model":"test-model","hidden":false,"supportedReasoningEfforts":[{"reasoningEffort":"medium"}]}],"nextCursor":null}}),
-            json!({"id":5,"result":{"thread":{"id":"thread-test"},"model":"test-model","modelProvider":"openai","cwd":snapshot["worktreePath"],"instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":sandbox,"reasoningEffort":"medium"}}),
+            json!({"id":5,"result":{"thread":{"id":"thread-test"},"model":"test-model","modelProvider":"openai","cwd":snapshot["worktreePath"],"instructionSources":[],"approvalPolicy":approval,"approvalsReviewer":"user","sandbox":sandbox,"reasoningEffort":"medium"}}),
             json!({"id":6,"result":{"turn":{"id":"t1","status":"inProgress","items":[],"error":null}}}),
         ];
         let mut replies: Vec<String> = messages.iter().map(Value::to_string).collect();
@@ -1091,6 +1094,8 @@ fn text_candidate_cases_with_output(
             &ExpectedProfile {
                 model: "test-model",
                 reasoning_effort: "medium",
+                // The same policy the fake thread reports for this project.
+                approval: crate::agent_runtime::preparation::codex_approval_policy(&fixture.storage, &fixture.projects, &address.project_id).unwrap(),
             },
             home.to_str().unwrap(),
         )

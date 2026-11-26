@@ -1373,6 +1373,7 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-approval-target { min-width: 0; overflow-wrap: anywhere; padding: 1px 6px; border-radius: 4px; background: var(--m5-bg); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .m5-approval-reading { color: var(--m5-muted); }
 .m5-approval-why { margin: 4px 0 0; color: var(--m5-muted); }
+.m5-approval-partial { margin: 4px 0; color: var(--m5-muted); overflow-wrap: anywhere; }
 .m5-approval-accept-note { margin: 6px 0 0; font-size: 12px; color: var(--m5-muted); }
 .m5-approval-actions { display: flex; flex-wrap: wrap; }
 .m5-approval-withdrawn { margin: 8px 0 0; color: var(--m5-muted); font-size: 12px; }

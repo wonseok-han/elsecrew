@@ -55,7 +55,11 @@ struct ClaudePending {
     id: String,
     request: elsecrew_core::provider::vendor_observation::claude_approval::Request,
     declined: bool,
+    /// Every page of the input has been read for the card (PR #19 review B1):
+    /// a large input can only be allowed once the person could see all of it.
     inspected: bool,
+    /// How many pages, from the first, the card has read.
+    pages_read: usize,
     accepted: bool,
 }
 
@@ -164,7 +168,7 @@ impl OwnedClaudeRun {
     pub(crate) fn polling_finished(&self) -> bool {
         self.output.finished
     }
-    pub(crate) fn approval_request(&mut self, action: &str, id: Option<&str>, identity: &Value) -> Result<Value, SidecarError> {
+    pub(crate) fn approval_request(&mut self, action: &str, id: Option<&str>, page: Option<usize>, identity: &Value) -> Result<Value, SidecarError> {
         let failure = || SidecarError::new("agentApprovalChanged", "Claude approval is no longer live");
         self.approvals.retain(|entry| self.channel.is_permission_pending(&entry.request.request_id));
         let mut inspection = None;
@@ -189,9 +193,15 @@ impl OwnedClaudeRun {
                     && self.output.initialized && !self.output.finished => {
                     entry.accepted = true; queued = Some(id);
                 },
-                "inspect" => { entry.inspected = true; inspection = Some(json!({"approvalId":id,"kind":"tool","command":null,
-                    "cwd":null,"reason":entry.request.tool_name,"grantRoot":null,"host":null,"protocol":null,
-                    "toolInput":entry.request.inspect_input()})); },
+                "inspect" => {
+                    let page = page.unwrap_or(0);
+                    let view = tool_inspection(id, &entry.request, page).ok_or_else(failure)?;
+                    // Pages are read in order from the first; a page may be read again.
+                    if page > entry.pages_read { return Err(failure()); }
+                    if page == entry.pages_read { entry.pages_read += 1; }
+                    entry.inspected = entry.pages_read >= tool_input_pages(entry.request.inspect_input()).len();
+                    inspection = Some(view);
+                },
                 _ => return Err(failure()),
             }
         }
@@ -337,8 +347,12 @@ impl OwnedClaudeRun {
                 self.cancel.store(true, std::sync::atomic::Ordering::Release);
             }
         }
+        // Once the run has ended no request can be answered: let them go now,
+        // with their large-input budget, whether or not the end is recorded
+        // yet (PR #19 review I2).
+        release_unanswerable(&mut self.approvals, self.output.completion.is_some() || self.output.finished);
         let approvals = &mut self.approvals;
-        self.reservation.advance_claude_output(
+        let result = self.reservation.advance_claude_output(
             storage,
             projects,
             &mut self.process,
@@ -353,7 +367,7 @@ impl OwnedClaudeRun {
                         if approvals.len() >= 128 || approvals.iter().any(|entry| entry.request.request_id == request.request_id) {
                             return Err(SidecarError::new("agentApprovalChanged", "Claude approval queue is invalid"));
                         }
-                        approvals.push(ClaudePending {id:format!("approval_{}", Uuid::new_v4().simple()),request,declined:false,inspected:false,accepted:false});
+                        approvals.push(ClaudePending {id:format!("approval_{}", Uuid::new_v4().simple()),request,declined:false,inspected:false,pages_read:0,accepted:false});
                         Ok(())
                     },
                     Event::Permission(Observation::Cancelled) => { approvals.retain(|entry| channel.is_permission_pending(&entry.request.request_id)); Ok(()) },
@@ -361,7 +375,12 @@ impl OwnedClaudeRun {
                     event => handle(process, channel, event),
                 }
             },
-        )
+        );
+        // The same poll may have seen the end. Release right away: if reading
+        // the end then fails the owner is kept, and no later poll would get
+        // here again to release them (PR #19 re-review 2).
+        release_unanswerable(&mut self.approvals, self.output.completion.is_some() || self.output.finished);
+        result
     }
 
     fn deliver_approval(&mut self, storage: &mut Storage, projects: &ProjectManager) -> Result<(), SidecarError> {
@@ -386,7 +405,10 @@ impl OwnedClaudeRun {
             _ => crate::provider_claude_session::ToolAccess::ReadOnly,
         };
         let cwd = self.channel.cwd().to_path_buf();
-        let within = |entry: &ClaudePending| crate::provider_claude_session::admission::tool_policy(&cwd, access, &entry.request).is_ok();
+        // A request too large to keep for review is refused on its own, with
+        // guidance to write in smaller parts; the session carries on.
+        let within = |entry: &ClaudePending| !entry.request.withheld()
+            && crate::provider_claude_session::admission::tool_policy(&cwd, access, &entry.request).is_ok();
         if self.channel.can_queue_reply() {
             if let Some(index) = self.approvals.iter().position(|entry| entry.declined || entry.accepted || auto_allowed(entry) || !within(entry)) {
                 let entry = self.approvals.remove(index);
@@ -855,5 +877,140 @@ impl ClaudeOutputState {
             _ => "unknown",
         };
         self.failure = Some(json!({"stage":stage,"code":code}));
+    }
+}
+
+/// Largest tool input an approval card receives whole. The renderer contract
+/// takes at most 128 KiB; past this the card reads it in pages.
+const TOOL_INSPECTION_WHOLE_MAX_BYTES: usize = 96 * 1024;
+/// One page of a large tool input, cut at a UTF-8 character boundary.
+const TOOL_INSPECTION_PAGE_BYTES: usize = 64 * 1024;
+
+/// Where each page of `input` starts and ends. One page for an input the card
+/// takes whole; the pages joined are exactly `input`.
+fn tool_input_pages(input: &str) -> Vec<(usize, usize)> {
+    if input.len() <= TOOL_INSPECTION_WHOLE_MAX_BYTES {
+        return vec![(0, input.len())];
+    }
+    let mut pages = Vec::new();
+    let mut start = 0;
+    while start < input.len() {
+        let mut end = (start + TOOL_INSPECTION_PAGE_BYTES).min(input.len());
+        while !input.is_char_boundary(end) { end -= 1; }
+        pages.push((start, end));
+        start = end;
+    }
+    pages
+}
+
+/// The approval card's view of one page of a Claude tool request. A large
+/// input (a file written whole) comes in pages, each with the input's full
+/// size, its SHA-256 and the page count; the card joins every page and checks
+/// both before the person can allow it. The text is the exact input the allow
+/// reply echoes, a JSON object (2026-11-26 big Write, PR #19 review B1).
+fn tool_inspection(id: &str, request: &elsecrew_core::provider::vendor_observation::claude_approval::Request, page: usize) -> Option<Value> {
+    let input = request.inspect_input();
+    let pages = tool_input_pages(input);
+    let (start, end) = *pages.get(page)?;
+    let mut inspection = json!({"approvalId":id,"kind":"tool","command":null,"cwd":null,"reason":request.tool_name,
+        "grantRoot":null,"host":null,"protocol":null,"toolInput":&input[start..end]});
+    if pages.len() > 1 {
+        inspection["toolInputBytes"] = json!(input.len());
+        inspection["toolInputSha256"] = json!(format!("{:x}", Sha256::digest(input.as_bytes())));
+        inspection["toolInputPage"] = json!(page);
+        inspection["toolInputPages"] = json!(pages.len());
+    }
+    Some(inspection)
+}
+
+#[cfg(test)]
+mod tool_inspection_tests {
+    use super::*;
+    use elsecrew_core::provider::vendor_observation::claude_approval::{Observation, Permissions};
+    use elsecrew_core::provider::BoundedObservation;
+
+    fn request(content: &str) -> elsecrew_core::provider::vendor_observation::claude_approval::Request {
+        let frame = json!({"type":"control_request","request_id":"r","request":{"subtype":"can_use_tool","tool_name":"Write",
+            "input":{"file_path":"big.txt","content":content},"tool_use_id":"t"}});
+        let mut bytes = frame.to_string().into_bytes();
+        bytes.push(b'\n');
+        let observed = if bytes.len() <= elsecrew_core::provider::PROVIDER_OBSERVATION_LINE_MAX_BYTES {
+            BoundedObservation::new(bytes).unwrap()
+        } else {
+            elsecrew_core::provider::oversized_line::reduce_oversized_line(&bytes, elsecrew_core::provider::oversized_line::OversizedLinePolicy::ClaudeStreamJson).unwrap()
+        };
+        match Permissions::default().observe(&observed).unwrap() {
+            Observation::Requested(request) => request,
+            _ => panic!("expected a request"),
+        }
+    }
+
+    /// PR #19 review B1: a small input comes whole on one page; a large one in
+    /// pages that join to exactly the input the allow reply echoes, each page
+    /// under the renderer's bound, with the input's size and SHA-256. Multi-byte
+    /// text is never split inside a character.
+    #[test]
+    fn a_large_tool_input_is_read_in_pages_that_join_to_the_exact_input() {
+        let _held = crate::provider_login_io::LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let small = request("hello");
+        let view = tool_inspection("approval_1", &small, 0).unwrap();
+        assert_eq!(view["toolInput"], json!(small.inspect_input()));
+        assert!(view.get("toolInputBytes").is_none() && view.get("toolInputPages").is_none());
+        assert!(tool_inspection("approval_1", &small, 1).is_none());
+
+        let content = "한글과 English 줄\n".repeat(15_000);
+        let large = request(&content);
+        let original = large.inspect_input();
+        let count = tool_input_pages(original).len();
+        assert!(count > 1);
+        let mut joined = String::new();
+        for page in 0..count {
+            let view = tool_inspection("approval_2", &large, page).unwrap();
+            assert_eq!(view["toolInputBytes"], json!(original.len()));
+            assert_eq!(view["toolInputSha256"], json!(format!("{:x}", Sha256::digest(original.as_bytes()))));
+            assert_eq!((view["toolInputPage"].as_u64(), view["toolInputPages"].as_u64()), (Some(page as u64), Some(count as u64)));
+            let text = view["toolInput"].as_str().unwrap();
+            assert!(text.len() <= TOOL_INSPECTION_PAGE_BYTES);
+            joined.push_str(text);
+        }
+        assert!(tool_inspection("approval_2", &large, count).is_none());
+        assert_eq!(joined, original, "the pages join to exactly the input");
+    }
+}
+
+/// Once a run has ended no request of it can be answered: let them go, and
+/// with them their large-input budget, whether or not the end was recorded.
+fn release_unanswerable(approvals: &mut Vec<ClaudePending>, ended: bool) {
+    if ended { approvals.clear(); }
+}
+
+#[cfg(test)]
+mod release_tests {
+    use super::*;
+    use elsecrew_core::provider::vendor_observation::claude_approval::{large_tool_inputs_held, Observation, Permissions};
+
+    /// PR #19 re-review 2: requests still waiting when the run ends (even if
+    /// reading its end fails and the owner is kept) give back their budget.
+    #[test]
+    fn requests_of_an_ended_run_give_back_their_budget() {
+        let _held = crate::provider_login_io::LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let before = large_tool_inputs_held();
+        let frame = format!("{{\"type\":\"control_request\",\"request_id\":\"r\",\"request\":{{\"subtype\":\"can_use_tool\",\"tool_name\":\"Write\",\"input\":{{\"file_path\":\"a.txt\",\"content\":\"{}\"}},\"tool_use_id\":\"t\"}}}}\n", "x".repeat(300_000));
+        let observed = elsecrew_core::provider::oversized_line::reduce_oversized_line(frame.as_bytes(), elsecrew_core::provider::oversized_line::OversizedLinePolicy::ClaudeStreamJson).unwrap();
+        let Observation::Requested(request) = Permissions::default().observe(&observed).unwrap() else { panic!("expected a request") };
+        let mut approvals = vec![ClaudePending { id: "approval_1".into(), request, declined: false, inspected: false, pages_read: 0, accepted: false }];
+        assert!(large_tool_inputs_held() >= before + 300_000);
+        release_unanswerable(&mut approvals, false);
+        assert_eq!(approvals.len(), 1, "still running: kept");
+        release_unanswerable(&mut approvals, true);
+        assert!(approvals.is_empty());
+        assert_eq!(large_tool_inputs_held(), before, "ended: budget back");
+        // An owner dropped with requests still queued (the connection let go):
+        // dropping the queue gives the budget back too.
+        let Observation::Requested(request) = Permissions::default().observe(&observed).unwrap() else { panic!("expected a request") };
+        let approvals = vec![ClaudePending { id: "approval_2".into(), request, declined: false, inspected: false, pages_read: 0, accepted: false }];
+        assert!(large_tool_inputs_held() >= before + 300_000);
+        drop(approvals);
+        assert_eq!(large_tool_inputs_held(), before, "dropped: budget back");
     }
 }

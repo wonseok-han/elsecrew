@@ -24,6 +24,16 @@ enum CodexLaunchMode {
     NamedTools,
 }
 
+/// Codex's approval policy for a run of this project, from its command
+/// permission when the run starts (2026-11-27 user decision): off makes Codex
+/// ask before every command that is not a known safe read.
+pub(crate) fn codex_approval_policy(storage: &Storage, projects: &ProjectManager, project_id: &str)
+    -> Result<elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy, SidecarError> {
+    let consent = projects.automation_permissions(storage, project_id)
+        .map_err(|_| SidecarError::new("agentInputChanged", "project consent unavailable"))?;
+    Ok(elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::for_commands_allowed(consent.commands))
+}
+
 fn codex_permission(profile: &AgentResolvedProfileV1) -> Result<ExpectedPermission, SidecarError> {
     match (profile.runtime.as_str(), profile.permission.as_str()) {
         ("codex", "readOnly") => Ok(ExpectedPermission::ReadOnly),
@@ -323,6 +333,7 @@ impl RunReservation {
         let expected = elsecrew_core::provider::vendor_observation::codex_preflight::ExpectedProfile {
             model: &profile.model_selector,
             reasoning_effort: profile.reasoning_effort.as_deref().ok_or_else(failure)?,
+            approval: codex_approval_policy(storage, projects, self.run["projectId"].as_str().ok_or_else(failure)?)?,
         };
         if !observation.matches(&expected, permission, workspace, &process.codex_preflight_home()?) {
             return Err(failure());
@@ -530,6 +541,7 @@ impl RunReservation {
         let expected = ExpectedProfile {
             model: &profile.model_selector,
             reasoning_effort: profile.reasoning_effort.as_deref().ok_or_else(failure)?,
+            approval: codex_approval_policy(storage, projects, self.run["projectId"].as_str().ok_or_else(failure)?)?,
         };
         executable.revalidate()?;
         helper.revalidate()?;
@@ -727,6 +739,7 @@ impl RunReservation {
         let expected = ExpectedProfile {
             model: &profile.model_selector,
             reasoning_effort: profile.reasoning_effort.as_deref().ok_or_else(failure)?,
+            approval: codex_approval_policy(storage, projects, self.run["projectId"].as_str().ok_or_else(failure)?)?,
         };
         let text = std::str::from_utf8(&self.prompt).map_err(|_| failure())?;
         let address = address_from_chat(&self.run).map_err(|_| failure())?;

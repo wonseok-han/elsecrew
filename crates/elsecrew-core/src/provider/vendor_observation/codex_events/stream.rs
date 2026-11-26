@@ -258,6 +258,8 @@ pub struct TurnStream {
     diagnostic_stage: &'static str,
     retained_item_bytes: usize,
     budget: crate::provider::ProviderEventBudget,
+    /// The thread started with `untrusted` (see `PendingApproval::parse_in_thread`).
+    untrusted: bool,
 }
 
 #[derive(Deserialize)]
@@ -300,7 +302,14 @@ impl TurnStream {
             diagnostic_stage: "turn stream state",
             retained_item_bytes: 0,
             budget,
+            untrusted: false,
         })
+    }
+
+    /// The thread started with Codex's `untrusted` policy. Set before observing.
+    pub fn with_untrusted_thread(mut self, untrusted: bool) -> Self {
+        self.untrusted = untrusted;
+        self
     }
 
     pub fn observe(&mut self, input: &BoundedObservation) -> Result<Observed, ProviderError> {
@@ -431,10 +440,11 @@ impl TurnStream {
         input: &BoundedObservation,
     ) -> Result<PendingApproval, ProviderError> {
         let result = (|| {
-            let mut request = PendingApproval::parse(
+            let mut request = PendingApproval::parse_in_thread(
                 input,
                 &self.projection.thread_id,
                 &self.projection.turn_id,
+                self.untrusted,
             )?;
             // One answer per request id: a refused id never comes back as an approval.
             if self.approvals.contains_key(&request.request_id) || self.refused.contains(&request.request_id) {
@@ -1514,6 +1524,25 @@ mod tests {
             .observe(&turn("turn/completed", "completed"))
             .unwrap();
         assert_eq!(stream.finish().unwrap(), TurnOutcome::Completed);
+    }
+
+    /// PR #19 re-review 2: a command request carrying a proposed trust rule
+    /// is declined at once in an on-request thread (as before), and read as an
+    /// approval only in a thread that started `untrusted`.
+    #[test]
+    fn a_trust_rule_proposal_is_an_approval_only_in_an_untrusted_thread() {
+        let proposal = || BoundedObservation::new(json!({"id":12,"method":"item/commandExecution/requestApproval","params":{"threadId":"t","turnId":"r",
+            "itemId":"i","startedAtMs":1,"kind":"command","environmentId":null,"proposedExecpolicyAmendment":["echo","test"]}}).to_string().into_bytes()).unwrap();
+        let mut on_request = started();
+        on_request.observe(&item("item/started", "commandExecution")).unwrap();
+        assert!(matches!(on_request.observe(&proposal()).unwrap(), Observed::Refused(_)), "on-request: declined as before");
+        let mut untrusted = TurnStream::new("t", "r").unwrap().with_untrusted_thread(true);
+        untrusted.observe(&turn("turn/started", "inProgress")).unwrap();
+        untrusted.observe(&item("item/started", "commandExecution")).unwrap();
+        match untrusted.observe(&proposal()).unwrap() {
+            Observed::Approval(request) => assert!(request.thread_untrusted),
+            _ => panic!("untrusted: the person is asked"),
+        }
     }
 
     #[test]
