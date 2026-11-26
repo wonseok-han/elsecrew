@@ -50,7 +50,7 @@ export function WorkspaceCleanup({ disabled, loadKey, onBusy }: { disabled: bool
       <input type="checkbox" checked={selected.includes(entry.chatId)} disabled={disabled || busy || !entry.eligible} onChange={event => { setConfirm(false); setSelected(ids => event.target.checked ? [...ids,entry.chatId] : ids.filter(id => id !== entry.chatId)); }} />
     </label>)}</div>}
     {!!selected.length && !confirm && <button className="m5-danger" type="button" disabled={disabled || busy} onClick={() => setConfirm(true)}>{t("m5.cleanup.selected",{count:selected.length})}</button>}
-    {confirm && <div className="m5-cleanup-confirm"><p>{t("m5.cleanup.confirm")}</p><div className="m5-storage-actions"><button type="button" disabled={busy} onClick={() => setConfirm(false)}>{t("m5.cleanup.cancel")}</button><button className="m5-danger" type="button" disabled={disabled || busy} onClick={() => void erase()}>{t("m5.cleanup.erase")}</button></div></div>}
+    {confirm && <div className="m5-cleanup-confirm"><p>{t("m5.cleanup.confirm")}</p><div className="m5-storage-actions"><button type="button" disabled={busy} onClick={() => setConfirm(false)}>{t("m5.cleanup.cancel")}</button><button className="m5-danger m5-btn-danger-solid" type="button" disabled={disabled || busy} onClick={() => void erase()}>{t("m5.cleanup.erase")}</button></div></div>}
     {error && <p role="alert">{t("m5.cleanup.error")}</p>}
   </div>;
 }

@@ -62,7 +62,7 @@ export function ChatErasure({ disabled, loadKey, onBusy }: { disabled: boolean; 
     {confirm && <div className="m5-cleanup-confirm" role="alertdialog" aria-labelledby="m5-erasure-confirm-title">
       <p id="m5-erasure-confirm-title"><strong>{t("m5.erasure.confirmTitle")}</strong></p>
       <ul><li>{t("m5.erasure.confirmErased")}</li><li>{t("m5.erasure.confirmKept")}</li><li>{t("m5.erasure.confirmOutside")}</li></ul>
-      <div className="m5-storage-actions"><button type="button" disabled={busy} onClick={() => setConfirm(false)}>{t("m5.erasure.cancel")}</button><button className="m5-danger" type="button" disabled={disabled || busy} onClick={() => void erase()}>{t("m5.erasure.erase")}</button></div>
+      <div className="m5-storage-actions"><button type="button" disabled={busy} onClick={() => setConfirm(false)}>{t("m5.erasure.cancel")}</button><button className="m5-danger m5-btn-danger-solid" type="button" disabled={disabled || busy} onClick={() => void erase()}>{t("m5.erasure.erase")}</button></div>
     </div>}
     {progress && <p role="status">{t("m5.erasure.progress", { done: progress.done, total: progress.total })}</p>}
     {error && <p role="alert">{t("m5.erasure.error")}</p>}
