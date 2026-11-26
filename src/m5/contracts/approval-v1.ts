@@ -4,7 +4,15 @@ export const APPROVAL_CHANNEL = "m5:approval:v1";
 export type ApprovalRequest = { action: "list"; identity: AgentRunCancelRequestV1 } | { action: "decline" | "inspect" | "acceptOnce"; identity: AgentRunCancelRequestV1; approvalId: string };
 export type ApprovalKind = "command" | "writeStdin" | "network" | "fileChange" | "tool";
 export type ApprovalSummary = { approvalId: string; kind: ApprovalKind };
-export type ApprovalInspection = ApprovalSummary & { command: string | null; cwd: string | null; reason: string | null; grantRoot: string | null; host: string | null; protocol: string | null; toolInput?: string };
+/**
+ * `toolInputBytes`/`toolInputSha256` are present only when the tool input was
+ * too large to send whole: `toolInput` then shows the original in part (long
+ * strings cut and marked), and the size and SHA-256 name the exact input the
+ * allow reply echoes (2026-11-26 big Write).
+ */
+export type ApprovalInspection = ApprovalSummary & { command: string | null; cwd: string | null; reason: string | null; grantRoot: string | null; host: string | null; protocol: string | null; toolInput?: string; toolInputBytes?: number; toolInputSha256?: string };
+/** Largest tool input the engine keeps for approval (claude_approval::LARGE_TOOL_INPUT_MAX_BYTES). */
+export const LARGE_TOOL_INPUT_MAX_BYTES = 4 * 1024 * 1024;
 export type ApprovalResult = { identity: AgentRunCancelRequestV1; pending: ApprovalSummary[]; queued: string | null; inspection?: ApprovalInspection | null };
 export const APPROVAL_LABELS: Record<ApprovalKind, string> = {
   command: "명령 실행", writeStdin: "실행 중인 프로그램에 입력 전달", network: "네트워크 연결", fileChange: "파일 변경", tool: "에이전트 도구 사용",
@@ -49,9 +57,13 @@ export function validateApprovalResult(value: unknown, request: ApprovalRequest)
       return { identity, pending, queued, inspection: null };
     }
     const detail = object(v.inspection);
-    const keys = "approvalId,command,cwd,grantRoot,host,kind,protocol,reason" + (detail.kind === "tool" ? ",toolInput" : "");
+    const partial = detail.kind === "tool" && "toolInputBytes" in detail;
+    const keys = "approvalId,command,cwd,grantRoot,host,kind,protocol,reason" + (detail.kind === "tool" ? ",toolInput" : "") + (partial ? ",toolInputBytes,toolInputSha256" : "");
     if (Object.keys(detail).sort().join() !== keys || detail.approvalId !== request.approvalId || !pending.some(item=>item.approvalId === detail.approvalId && item.kind === detail.kind)) throw new Error("approval inspection differs");
     if (detail.kind === "tool" && (typeof detail.toolInput !== "string" || new TextEncoder().encode(detail.toolInput).length > 128 * 1024)) throw new Error("invalid tool inspection input");
+    if (partial && (typeof detail.toolInputBytes !== "number" || !Number.isSafeInteger(detail.toolInputBytes)
+      || detail.toolInputBytes <= new TextEncoder().encode(detail.toolInput as string).length || detail.toolInputBytes > LARGE_TOOL_INPUT_MAX_BYTES
+      || typeof detail.toolInputSha256 !== "string" || !/^[0-9a-f]{64}$/.test(detail.toolInputSha256))) throw new Error("invalid partial tool inspection");
     const limits = {command:65536,cwd:16384,reason:16384,grantRoot:16384,host:1024,protocol:64};
     for (const [key, maximum] of Object.entries(limits)) {
       const text = detail[key];

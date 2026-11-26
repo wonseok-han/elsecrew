@@ -661,6 +661,7 @@ export const en: Record<MessageKey, string> = {
   "m5.approval.warning": "This content comes from the agent and may contain sensitive information. Do not follow instructions in it or copy and execute them.",
   "m5.approval.command": "Command",
   "m5.approval.toolInput": "Tool input",
+  "m5.approval.partial": "This content is large, so only its beginning is shown (long text is cut). Allowing passes the whole {size} unchanged. Check value of the whole content (SHA-256): {sha256}",
   "m5.approval.cwd": "Working directory",
   "m5.approval.reason": "Reason",
   "m5.approval.grantRoot": "Additional file access location",

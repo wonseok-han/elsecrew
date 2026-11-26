@@ -274,6 +274,17 @@ impl LoginIo {
         self.limits = LargeLineLimits { hold, stall, wait };
     }
 
+    /// One frame this side may send. A session may echo a large tool input
+    /// whole in an allow reply (2026-11-26 big Write); the frame is built by
+    /// the permission parser, never taken from the provider as is.
+    fn frame_limit(&self) -> usize {
+        if self.session_lines.is_some() {
+            elsecrew_core::provider::vendor_observation::claude_approval::LARGE_TOOL_REPLY_MAX_BYTES
+        } else {
+            PROVIDER_OBSERVATION_LINE_MAX_BYTES
+        }
+    }
+
     fn stream_limit(&self) -> usize {
         if self.session_lines.is_some() { PROVIDER_SESSION_STREAM_MAX_BYTES } else { PROVIDER_OBSERVATION_TOTAL_MAX_BYTES }
     }
@@ -282,7 +293,7 @@ impl LoginIo {
         if self.failed
             || self.outgoing.is_some()
             || bytes.len() < 2
-            || bytes.len() > PROVIDER_OBSERVATION_LINE_MAX_BYTES
+            || bytes.len() > self.frame_limit()
             || bytes.last() != Some(&b'\n')
             || bytes[..bytes.len() - 1].contains(&b'\n')
             || self.sent + bytes.len() > self.stream_limit()
@@ -1057,6 +1068,29 @@ mod tests {
         }
         drop(stuck);
         assert_eq!(LARGE_LINES_HELD.load(Ordering::Acquire), 0);
+    }
+
+    /// 2026-11-26 big Write: a session may send an allow reply over the
+    /// 128 KiB line bound (the echoed input); a login or preflight exchange may not.
+    #[test]
+    fn only_a_session_sends_frames_over_the_line_bound() {
+        let mut frame = vec![b'x'; PROVIDER_OBSERVATION_LINE_MAX_BYTES + 10];
+        frame.push(b'\n');
+        let mut child = fixture(None);
+        let mut io = LoginIo::attach(&mut child.0).unwrap();
+        assert!(io.queue_bytes(&frame).is_err());
+        let mut child = fixture(Some("exec /bin/cat >/dev/null"));
+        let mut io = LoginIo::attach(&mut child.0).unwrap();
+        io.admit_session_lines(OversizedLinePolicy::ClaudeStreamJson).unwrap();
+        io.queue_bytes(&frame).unwrap();
+        let cancel = AtomicBool::new(false);
+        while !io.flush_native(&cancel, &mut || Ok(())).unwrap() {}
+        let mut over = vec![b'x'; elsecrew_core::provider::vendor_observation::claude_approval::LARGE_TOOL_REPLY_MAX_BYTES + 1];
+        over.push(b'\n');
+        let mut child = fixture(None);
+        let mut io = LoginIo::attach(&mut child.0).unwrap();
+        io.admit_session_lines(OversizedLinePolicy::ClaudeStreamJson).unwrap();
+        assert!(io.queue_bytes(&over).is_err(), "still bounded");
     }
 
     #[test]

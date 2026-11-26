@@ -189,9 +189,7 @@ impl OwnedClaudeRun {
                     && self.output.initialized && !self.output.finished => {
                     entry.accepted = true; queued = Some(id);
                 },
-                "inspect" => { entry.inspected = true; inspection = Some(json!({"approvalId":id,"kind":"tool","command":null,
-                    "cwd":null,"reason":entry.request.tool_name,"grantRoot":null,"host":null,"protocol":null,
-                    "toolInput":entry.request.inspect_input()})); },
+                "inspect" => { entry.inspected = true; inspection = Some(tool_inspection(&id, &entry.request)); },
                 _ => return Err(failure()),
             }
         }
@@ -386,7 +384,10 @@ impl OwnedClaudeRun {
             _ => crate::provider_claude_session::ToolAccess::ReadOnly,
         };
         let cwd = self.channel.cwd().to_path_buf();
-        let within = |entry: &ClaudePending| crate::provider_claude_session::admission::tool_policy(&cwd, access, &entry.request).is_ok();
+        // A request too large to keep for review is refused on its own, with
+        // guidance to write in smaller parts; the session carries on.
+        let within = |entry: &ClaudePending| !entry.request.withheld()
+            && crate::provider_claude_session::admission::tool_policy(&cwd, access, &entry.request).is_ok();
         if self.channel.can_queue_reply() {
             if let Some(index) = self.approvals.iter().position(|entry| entry.declined || entry.accepted || auto_allowed(entry) || !within(entry)) {
                 let entry = self.approvals.remove(index);
@@ -856,4 +857,31 @@ impl ClaudeOutputState {
         };
         self.failure = Some(json!({"stage":stage,"code":code}));
     }
+}
+
+/// Largest tool input an approval card receives whole. The renderer contract
+/// takes at most 128 KiB; past this the card gets the original in part.
+const TOOL_INSPECTION_WHOLE_MAX_BYTES: usize = 96 * 1024;
+/// How much of each long string the partial view keeps.
+const TOOL_INSPECTION_STRING_KEEP_BYTES: usize = 2 * 1024;
+
+/// The approval card's view of one Claude tool request. A large input (a file
+/// written whole) is shown in part, with its full size and the SHA-256 of the
+/// exact input the allow reply will echo, so what the person approves is the
+/// original even when only its beginning is on screen (2026-11-26 big Write).
+fn tool_inspection(id: &str, request: &elsecrew_core::provider::vendor_observation::claude_approval::Request) -> Value {
+    let input = request.inspect_input();
+    let mut inspection = json!({"approvalId":id,"kind":"tool","command":null,"cwd":null,"reason":request.tool_name,
+        "grantRoot":null,"host":null,"protocol":null,"toolInput":input});
+    if input.len() > TOOL_INSPECTION_WHOLE_MAX_BYTES {
+        let mut preview = request.inspect_preview(TOOL_INSPECTION_STRING_KEEP_BYTES);
+        if preview.len() > TOOL_INSPECTION_WHOLE_MAX_BYTES {
+            // Many keys or long arrays: an empty view rather than a cut one.
+            preview = String::new();
+        }
+        inspection["toolInput"] = json!(preview);
+        inspection["toolInputBytes"] = json!(input.len());
+        inspection["toolInputSha256"] = json!(format!("{:x}", Sha256::digest(input.as_bytes())));
+    }
+    inspection
 }

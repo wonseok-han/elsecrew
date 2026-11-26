@@ -187,6 +187,7 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
           onToggle={event => { if (event.currentTarget.open) setOpened(current => current.has(request.approvalId) ? current : new Set(current).add(request.approvalId)); }}>
           <summary>{t("m5.approval.fullContent")}</summary>
           <p>{t("m5.approval.warning")}</p>
+          {shown.toolInputBytes !== undefined && <p className="m5-approval-partial">{t("m5.approval.partial", { size: formatApprovalBytes(shown.toolInputBytes), sha256: shown.toolInputSha256 ?? "" })}</p>}
           <dl>{approvalFields(shown).map(item => <div key={item.field}><dt>{t(FIELD_KEYS[item.field])}</dt><dd><pre className="m5-approval-verbatim">{item.text}</pre></dd></div>)}</dl>
         </details>}
         {shown && <p className="m5-approval-accept-note">{t(opened.has(request.approvalId) ? "m5.approval.acceptWarning" : "m5.approval.openFirst")}</p>}
@@ -208,4 +209,11 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
 export function ApprovalWithdrawnNote({ item }: { item: WithdrawnApproval }) {
   const { t } = useI18n();
   return <p role="status" className="m5-approval-withdrawn">{t(item.answerFailed ? "m5.approval.answerFailed" : "m5.approval.withdrawn")}{item.summary ? <> · <code dir="auto">{item.summary}</code></> : <> · {t(`m5.approval.kind.${item.kind}`)}</>}</p>;
+}
+
+/** A tool input's size for the partial-view note, in the units a person reads. */
+export function formatApprovalBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
