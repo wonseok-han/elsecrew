@@ -19,6 +19,7 @@
   - 시험: core `the_requested_approval_policy_must_be_the_one_reported`, `thread_start_asks_for_the_runs_approval_policy`, `a_proposed_trust_rule_is_read_but_never_adopted`; sidecar `codex_launch_and_observation_follow_the_approval_policy`, `a_codex_command_asks_the_person_when_commands_are_off`.
   - **실제 Codex 확인(기본 프로필, 제 앱 PID만)**: 명령 허용을 끄고 검증 역할에 `touch codex-probe.txt`를 시켰다. 1차는 0.171의 프로세스 설정 거부로 실행 준비가 실패했다(위 원인). 2차는 규칙 제안 때문에 앱이 자동 거절했다. 수정 뒤 3차에서 카드가 떴고, 40초 남아 있다가 '이번만 허용' 뒤 실행됐다(파일 생성, 종료 코드 0). 권한은 다시 켜고 다시 열어 확인했다. 정상 종료(engine exit 0). 증거 `~/Documents/elsecrew-ade-d3-bigwrite-2026-11-26/codex-*`.
 - **검증**: core 264, sidecar 관련 묶음, `npm test` 996/996, `pnpm build`. 전체 Rust·CI는 아래에 덧붙인다.
+- **전체 검증(c7face2b, feature/ade PR #18 병합 뒤)**: `cargo test --workspace` core 266·protocol 75·sidecar lib 948·stdio_process 16 실패 0, `npm test` 1010/1010, `pnpm build`, 렌더러 스모크 `pnpm m5:test:editor` 69/69. 병합 직후 sidecar의 Codex 채팅 시험 4개가 가짜 스레드의 고정 `on-request` 때문에 실패해, 가짜·시험 프로필을 `codex_approval_policy`에 맞췄다. CI(run 45858722062) macOS·Windows·website·GitGuardian 모두 통과. 그 앞 run 45854467204의 macOS 렌더러 스모크 1건(첫 작업 보내기 대기)은 재실행에서 통과한 일시 실패다. 남은 것: 노예의 B1 재확인, 머지.
 - **함정**: Codex 0.171에서 `approval_policy="untrusted"`는 프로세스 설정으로는 거부, 스레드 단위로는 허용. 정책을 바꿀 때 설치 버전으로 두 경로를 모두 확인한다.
 
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — D3 실제 확인과 큰 Write 권한 요청 (`orca/ade-d3-bigwrite`, 기준 feature/ade f2d50132)
