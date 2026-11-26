@@ -2,6 +2,50 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #13 검토(차단 1·중요 2·경미 2) 반영 (`orca/ade-v-check`)
+검토 `~/Documents/elsecrew-ade-v-2026-11-26/REVIEW-pr13.md`(대상 4fa7db56) 반영. 사용량 한도로 멈췄다가 19:10 이후 이어서 마쳤다.
+
+- **B1(아카이브 유실)**
+  - 원인: 롤오버 스크립트가 아카이브를 쓰기 모드로 먼저 열고 나서 읽었다. 그래서 파일이 비워졌고 11월 엔트리 446개가 사라졌다(검토는 11-02~26 제목 74개로 셈).
+  - 복구: `feature/ade` 7378332a의 아카이브 원문 그대로 되살리고, 그 위에 PR #9 엔트리 3개를 얹었다.
+  - 검사 추가: `scripts/m5-history-entries.mjs`(`pnpm m5:check:history`). 기준의 모든 `### YYYY-MM-DD` 엔트리가 원문 그대로 history.md나 archive에 있는지 본다. 결과는 기준 451 → 현재 451 보존, 새 엔트리 2이다. 옛 PR 머리(`--tree 4fa7db56`)에는 446 유실을 보고한다.
+  - CLAUDE.md·AGENTS.md 롤오버 규칙에 이 검사와 "읽은 뒤 쓴다"를 넣었다.
+  - 날짜 경계와 고정 섹션 분량(366줄)이 충돌하는 문제는 문서 관리 합의가 필요해 남긴다.
+- **I1(표시 순서)**: 0.5초 타이머(`settleLimitMs`)를 없앴다. 띠 변경은 `PreviewBands`(preview-tab-model)를 거친다. 숨김 응답 뒤에 띠를 바꾸고, 페이지 배치 보고(`rendered`) 뒤에만 다시 보인다. 결과가 화면과 같으면 그 자리에서 `settled`를 알린다.
+- **I2(새 결과 알림)**: 띠를 넣을지 뺄지는 화면값이 아니라 목표값(`target`)으로 정한다. 그래서 다시 불러오는 동안 띠를 내리라는 변경이 대기 중이어도 새 결과 신호가 사라지지 않는다.
+- **M1**: 보고서의 스모크 집계를 바로잡았다. `ui-smoke/`는 병합본 1회차 34/35로 덮어쓰인 결과였다.
+- **M2**: 출력 조회 실패 중이거나 이미 활동을 보인 실행에는 시작 문장을 내지 않는다.
+- **기준 6 판정 정정**: 정상 흐름은 충족이다. 오류·예외 경로(합치기 차단·충돌·다른 브랜치 안내, 설정 도움말)에는 '브랜치'·'(커밋)'이 남아 미충족이다.
+- **시험**
+  - `tests/m5-preview-layout-loop.test.mts`: "a band the page lays out late keeps the view hidden until it is laid out — no timer shows it at the old place", "a new result while taking the band down for a reload keeps the band", "a band change that would change nothing hides nothing"
+  - `tests/m5-preview-tab.test.mts`: 구조 검사, 타이머 없음
+  - `tests/m5-ade-v-check.test.mts`: M2
+  - UI 스모크: "I1 the view is never shown between the hide and the band laid out", "I2 a new result while the band goes for a reload keeps the band, and the view returns". 응답 900ms 지연 상태에서 시험했다. 실행 종료 신호만 띠 모델에 직접 넣었다.
+- **검증**: `npm test` 925/925, `pnpm build`, 렌더러 마운트 스모크 69, UI 스모크 37/37(`~/Documents/elsecrew-ade-v-2026-11-26/ui-smoke-pr13-review/`), 기록 엔트리 검사 통과.
+- **다음**: 노예 재검토·머지. 기준 6의 오류 경로 문구, 롤오버 날짜 경계 규칙 합의, D1~D3는 별도로 진행한다.
+
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — ADE 1차 통합 검증(V): 완료 기준 6개 실제 todo 측정 (`orca/ade-v-check`, 기준 feature/ade 613dafde)
+진단 보고서 4장의 1차 완료 기준을 실제 앱으로 측정했다. 대상은 개발 앱·기본 프로필이다. 임시 프로필에는 공급자 로그인이 없어 실제 실행이 안 되므로 노예 승인 (A)로 기본 프로필을 썼다. 시나리오는 실제 유료 todo 실행 두 가지다. git 모드는 `todo-test-1126g`, 사본 모드는 `todo-test-1126c`(`ELSECREW_GIT_WORKTREES=0`)이고, 역할은 기획 Codex·나머지 Claude Code다. 보고서는 `~/Documents/elsecrew-ade-v-2026-11-26/REPORT.md`(캡처 207개, 1초 표본·분석·앱 로그 `data/`)에 있다.
+
+- **판정(613dafde 기준)**
+  - 충족 4: 1 폭 50.0%·640×699(경계), 3 다섯 상태 네 곳 일치, 4 마크다운 원문 0, 5 미리보기 넓게 623·좁게 390 실제 입력.
+  - 미충족 2: 2 매 실행 시작 11~31초 문장 공백, 6 반영 확인 문구의 "커밋".
+  - 둘 다 이 브랜치에서 고쳤다. 기준 2는 수정 뒤 짧은 실제 실행에서 공백 0이었다.
+- **함께 확인**
+  - 사용자 정의 역할 '접근성 점검'에 총괄이 위임했고, 확인 뒤 팀을 되돌렸다.
+  - 재시작 3번 모두 마지막 프로젝트·작업이 복원됐다.
+  - 권한 카드 29번이 모두 2~4초 만에 에이전트 쪽에서 거둬졌고, 그동안 '이번만 허용'은 한 번도 켜지지 않았다.
+- **고친 것(8cba9ad3)**
+  - 실행 시작 문장: `startingSentence`, "받은 일을 읽고 시작하는 중이에요".
+  - 미리보기 '다시 불러오기'(띠 없음) 뒤 뷰가 영원히 숨는 결함: PR #9 배치 순서. 변화 없는 띠는 숨김 순서를 타지 않고, `settleLimitMs` 0.5초 뒤 다시 놓는다.
+  - 반영 확인 문구에서 "커밋" 제거.
+- **남긴 큰 결함**
+  - D1: main sidecar 클라이언트의 동시 스트림 16개 한도를 넘으면 늦게 온 `blob.chunk`가 `protocolInvalid`가 되어 엔진이 재시작되고, 실행 중인 에이전트가 '중단됨'이 된다(사본 세션 로그).
+  - D2: 에이전트가 55KB PNG를 읽으면 Claude stream-json 한 줄(약 148KB)이 관측 한도 128KiB를 넘어 `sessionChannel/unknown`으로 실행이 멈춘다.
+  - D3: 권한 카드 깜박임.
+- **실수 기록**: 프로젝트 ID 조회 필드를 잘못 써(`path` → 실제 `canonicalPath`) 기존 `todo-test-1118a`의 팀 배정을 바꿨다. 1분 안에 원래 값으로 되돌렸다(설정 버전 2→4, 내용 동일, 브리지 사용·DB 직접 수정 없음).
+- **검증**: `npm test` 900/900, `pnpm build`, 렌더러 마운트 스모크 68, 실제 앱 미리보기 UI 스모크 35/35(새 검사: 띠 없이 다시 불러오기).
+- **다음**: D1(스트림 한도와 프로토콜 오류 처리)·D2(큰 도구 결과 줄 처리)를 따로 설계한다. 권한 카드 깜박임(D3)과 기준 3 주의(누른 직후 잠깐 섞이는 문구, git 작업의 '내 폴더에 넣기' 상위 표현)를 정리한다.
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #10 독립 검토(차단 0·중요 4·경미 3) 전부 반영 (`orca/ade-theme-tokens`)
 검토 `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr10.md`(대상 db5009d6). 재현 시험은 `tests/m5-pr10-review.test.mts`(13개)에 모았다.
 
@@ -63,63 +107,6 @@
 - **PR**: https://github.com/wonseok-han/elsecrew/pull/10 (`--base feature/ade`). CI(236e43f3~6de534d4) macOS·Windows·website·GitGuardian 모두 통과. 본문 전후 캡처는 f8f7f180에 올렸다가 6de534d4에서 지웠다(공개 저장소의 커밋 고정 주소).
 - **다음**: Codex 검토(조정자), U2(홈·첫 실행·프로젝트 전환)~U4. 설계 6장 열린 질문 Q1·Q4~Q9.
 
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #9 재확인(B1·I1 부분 해결) 마지막 라운드 (`orca/ade-preview-ui`)
-재확인 `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr9-2.md` 결과 I2·I3은 해결, B1·I1은 부분 해결이었다. 핵심 요구는 "네이티브 뷰가 숨겨진 것이 확인된 뒤에만 좌표를 바꾸거나 덮개를 보인다"였다. 이번 라운드로 둘 다 닫고 **macOS 기본 켜짐을 유지**한다. 코드는 89459c38이다.
-
-- **main이 먼저 숨김**: 창 `will-resize`·`resize`·전체 화면 전환에서 `geometryChanged()`가 바로 숨기고 위치를 잊는다. 보기 메뉴의 확대·축소는 기본 role 대신 직접 만든 항목(`electron/zoom-menu.ts`)이라, 숨김이 확대보다 먼저다. 계약에 측정 시점의 페이지 크기(`page`)를 넣어, 크기·배율 변화 전의 측정은 쓰지 않는다(`pageSizeMatches`). 보이는 뷰가 자리를 옮기면 숨김→이동→표시 순서다.
-- **렌더러 순서는 `src/m5/preview-layout-loop.ts`**: 숨김은 대기열을 건너뛰어 바로 보낸다. 표시는 앞선 응답을 모두 기다린다. 받아들여진 배치만 사실로 치고, 3초 무응답은 실패로 보고 다시 보낸다. 숨겨진 동안에는 측정이 바뀌어도 더 보내지 않는다. 붙잡은 덮개는 main 숨김 확인 뒤 **모두 함께** 놓는다. 1.5초 무응답이면 떼어 내고(close), 그 응답 뒤에만 놓은 다음 탭이 다시 연다.
-- **덮개**: 붙잡힌 요소는 본문과 `::backdrop`을 함께 숨기고(`opacity 0`, backdrop-filter 없음) `inert`로 포커스·입력을 막는다. 놓을 때 포커스를 돌려준다. '새 결과'·차단 안내 띠는 숨김 확인 뒤에만 나타나고, 배치가 끝난 뒤(`settled`) 새 자리로 다시 보인다.
-- **발견(재조사 방지)**
-  - 덮개 두 개(종 버튼과 그 안 패널)를 하나씩 놓으며 그때마다 가림을 판정하면, 아직 `inert`인 쪽이 hit test에 잡히지 않는다. 그래서 뷰가 보였다 숨었다를 수십 ms 간격으로 반복했다. 모두 놓은 뒤 한 번만 판정해야 한다.
-  - 닫힌 서랍에서는 무대 측정이 '없음'과 실제 값을 오간다. 숨김 상태에서도 좌표가 바뀔 때마다 숨김을 다시 보내면 요청이 폭주한다(4분에 1,600개 → 수정 뒤 89개).
-  - 떼어 낼 때 main의 `closed{requested}` 알림이 close 응답보다 먼저 온다. 그래서 현재 미리보기의 `requested` 닫힘은 다시 열기로 처리한다.
-  - 격리 프로브는 페이지 크기를 요청마다 새로 재야 하고, 권한 호출 전에 창 포커스를 다시 가져와야 한다(이 컴퓨터는 다른 작업과 같이 써서 다른 앱이 앞에 올 수 있다).
-- **검증**
-  - 단위·빌드: `npm test` 897/897, 보안 묶음(`m5:test:security`) 93/93, `pnpm build`, 렌더러 마운트 스모크 68 통과.
-  - 실제 앱 UI 스모크: 검사 34개 PASS(커밋 89459c38). 응답을 일부러 900ms 늦추거나(적용 전·후) 끊은 상태에서 확인했다.
-    - 대화상자·backdrop·검토 시트가 숨김 응답 전까지 보이지 않고 입력을 받지 않았다.
-    - 띠는 숨김 응답 뒤에 생겼고, 뷰는 새 무대 위치로 돌아왔다.
-    - 창 크기를 바꾸자 main이 즉시 숨겼다.
-    - 무응답이면 떼어 냈고, 닫기 응답 뒤에만 덮개를 보였다.
-  - 격리 프로브: 두 모드 모두 관측 70/70 PASS, 관측 불가 16(IPv6), dirty 없음.
-  - 기본값 확인: 개발·패키지 모두 PASS.
-  - 증거는 `~/Documents/elsecrew-ade-preview-ui-2026-11-26/pr9-review2/`(`isolation/` 포함)에 있다.
-- **남은 과제**: 라우팅 가능한 IPv6가 있는 기기에서 IPv6 WebRTC 차단 관측, 패키지 앱 안의 격리 프로브, Windows 실행·검증(기본 꺼짐 유지).
-
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #9 독립 검토(차단 1·중요 5·경미 3) 전부 반영 (`orca/ade-preview-ui`)
-검토 `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr9.md`(대상 e5819e0e). B1·I1을 해결해 **macOS 기본 켜짐은 유지**하고, 확인하지 않은 Windows·Linux는 기본으로 껐다.
-
-- **B1(확대·축소)**: 렌더러가 측정마다 `devicePixelRatio`를 보낸다(계약 `pixelRatio`, 0.25~16). main은 CSS px × `getZoomFactor()`를 안쪽으로 반올림하고 창 내용으로 자른다(`windowBounds`). 비율이 확대×화면 배율과 다르면 쓰지 않고 숨긴다(`pixelRatioMatches`). 맞지 않는 측정은 오류가 아니라 숨김이다. `obscured:true`는 좌표보다 먼저 적용한다(숨김이 항상 이김). 렌더러는 받아들여진 배치만 기억하고 실패하면 다시 보낸다. 창 크기·비율이 바뀌면 즉시 숨기고 0.15초 뒤 다시 놓는다.
-- **I1(숨김 먼저)**: 새 뷰는 숨긴 채 붙고 화면의 첫 배치 뒤에만 보인다. MutationObserver(그리기 전)가 무대와 겹치는 새·바뀐 앱 요소를 `data-preview-wait`(opacity 0)로 붙잡고, main이 숨김을 받아들인 뒤 놓는다. 모달은 항상, 탭 전환은 마지막 무대 위치로 판단한다. 가림 감지는 49점(2px 안쪽)과 바뀐 요소의 사각형 교차(`coveredByRect`)로 바꿨다. 무대를 담은 요소는 가림으로 치지 않는다.
-- **I2**: 프로브 판정은 관측된 검사만으로 낸다. 대조가 닿지 않은 전송은 '관측 불가'로 이유와 함께 따로 센다. TURN TCP/TLS IPv6 전송을 추가했다. 기본 활성화를 `PREVIEW_DEFAULT_PLATFORMS=["darwin"]`로 제한했다.
-- **I3**: main이 거절마다 `{previewId, kind, permission}`을 남긴다(`denials`). 프로브는 그 호출 동안 그 미리보기의 같은 권한 거절(예: 전체 화면 `request:fullscreen`) 또는 정책 거절을 요구한다. 시간 초과만 남으면 관측 불가다.
-- **I4**: `closed{quitting}` → "앱을 끝낼 준비를 하는 동안 미리보기를 닫았어요" 화면을 보인다. 1초마다 `status()`를 묻고, 다시 켜지면 저절로 연다.
-- **I5**: 화면 스모크는 `scripts/m5-preview-ui-run.mjs`로 띄운다(POSIX 환경 변수 문법 없음). 격리 프로브·화면 스모크는 macOS가 아니면 종료 코드 2(미실행, 하네스 NOT_READY)로 끝난다. 기본값 확인은 Windows 패키지 경로를 알고 기본·0·1을 본다. CI에서 돌리지 않는 이유는 `ci.yml` 주석에 남겼다.
-- **경미**: 미리보기에 포커스가 있어도 ⌘/Ctrl+1·2·3·\\·N은 앱으로 넘긴다(`isAppShortcut`, workbench와 같은 수식키 규칙). `loadFailed`는 실패 화면 + 다시 열기로 연결했다. 기본 탭은 변경에 페이지가 있으면 미리보기다(`hasPreviewPage`, 변경이 늦게 오면 자동 선택된 탭만 바꿈).
-- **발견**: TURN IPv6 전송 2개를 더하자 WebRTC 시도 전체가 페이지 `attempt` 기본 기한 4초를 넘었다(전송당 약 0.43초). 이 시도에만 전송 수 × 8.5초 기한을 준다. 확대 상태의 렌더러 `devicePixelRatio`는 확대×화면 배율이다(Retina 150% → 3).
-- **검증**: `npm test` 884/884, `pnpm build`, 렌더러 마운트 스모크 68. 실제 앱 UI 스모크 검사 28개 PASS — 확대 125·150·80·67%에서 무대 안·틀 밖·대화상자 숨김, 대화상자 연 채 50% 축소해도 숨김 유지, 덮개 붙잡기→뷰 숨김→놓기 순서(알림·대화상자·다른 탭·가장자리 1.5px 알림), 열기 지연 중 대화상자·작업 전환, 종료 취소 복구, 단축키. 캡처는 `~/Documents/elsecrew-ade-preview-ui-2026-11-26/pr9-review/`. 격리 프로브는 git·사본 모두 관측 70/70 PASS이고 관측 불가 16(IPv6 WebRTC, 이 기기에 라우팅 가능한 IPv6 없음)이다. 증거는 같은 폴더 `isolation/`. 기본값 확인은 개발·패키지 모두 PASS(기본 켜짐·0 꺼짐·1 켜짐).
-- **다음**: 재검토 대응. Windows·IPv6 기기에서 프로브를 돌리고, 패키지 앱 격리를 확인한다. `m5-project-ui-smoke.cjs` 공급자 선택 단계 수정은 별도 작업이다.
-
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 미리보기 화면(P3)·I5 완결·기본 활성화 (`orca/ade-preview-ui`, 기준 feature/ade 8493496e)
-PR #6은 머지됐다(8493496e). 재확인(`REVIEW-pr6-2.md`)에서 B1 해결, I5 부분 해결(STUN/TURN 개별 관측·권한의 명시적 거절 부족)이라 이번에 완결하고, 화면·기본 활성화를 붙였다.
-
-- **I5 완결**: WebRTC를 전송마다 따로 시도한다(STUN v4/v6, TURN udp v4/v6, TURN tcp, TURN tls, 바깥 STUN 이름). 전송마다 수집기가 따로 있고, 판정은 "후보 0 + 수집 완료 또는 서버 오류"다. 기한 내 무응답은 `unobserved`로 따로 남기며 불합격이다.
-  - 양성 대조: 같은 코드를 제한 없는 앱 기본 세션 창에서 대조 수집기로 돌려 IPv4 전송 4개가 모두 닿는 것(STUN 6·TURN udp 12·tcp 1·tls 2건)과, net log에 그 TCP 연결이 보이는 것을 요구한다.
-  - IPv6 전송은 이 컴퓨터에 라우팅 가능한 IPv6가 없어 대조가 닿지 않는다. 그래서 "관측 불가"로 기록하고 합격으로 치지 않는다(IPv6 있는 기기에서는 대조 도달이 필수).
-  - 권한: 호출 직전 사용자 활성화·포커스를 기록하고, 명시적 거절만 합격으로 친다. 명시적 거절은 main 권한 처리기의 거절 수가 그 호출 동안 늘었거나, 페이지의 Permissions-Policy 판정(`allowsFeature`)이 false인 경우다.
-  - 커밋 725674ab에서 git·사본 두 모드 모두 PASS(모드당 검사 60개).
-- **P3 미리보기 탭**(`src/m5/preview-tab.tsx`, 규칙은 `preview-tab-model.ts`): bounds 동기화, 넓게/좁게(390px), 다시 불러오기, 실행이 끝나면 "새 결과" 띠, 빈 상태("화면으로 볼 결과가 없어요"), 실패·멈춤·폴더 정리됨 상태가 있다. 파일 탭과 편집기 시트의 '미리보기로 열기'(시트를 닫고 미리보기 탭으로)도 붙였다.
-  - **T8**: 앱의 틀("미리보기 — 팀이 만든 결과"·"읽기 전용"·"인터넷 차단")은 무대 밖에 있고, 뷰 사각형은 무대 안쪽으로 반올림한다.
-  - **T16**: 레이아웃의 명시 목록에 더해, 무대 위 25점에서 페이지 최상단 요소를 묻는다. 무대가 아니면 즉시 숨기고 미리 찍어 둔 정지 이미지를 보인다. 덮개가 전환으로 사라질 수 있어, 덮인 동안 0.25초마다 다시 본다.
-  - 발견: 무대의 둥근 모서리 1px 점이 부모 요소로 잡혀 늘 덮였다고 판정됐다. 표본은 8px 안쪽에서 찍는다.
-- **멈춘 페이지**: 뷰를 숨기면 Chromium이 멈춤 감시를 멈추고 'responsive'를 보내 숨김↔표시가 번갈아 바뀌었다. main이 'unresponsive'에서 바로 닫고(설계 2.3), 탭은 "멈췄어요 · 다시 열기"를 보인다.
-- **기본 활성화**: `ELSECREW_PREVIEW=0`일 때만 끈다. `scripts/m5-preview-default-check.mjs`로 개발 빌드와 패키지 앱(`pnpm m5:package`)이 같음을 확인했다(기본: 상태 켜짐 + 브라우저 명령줄에 `--blink-settings=dnsPrefetchingEnabled=false`, `=0`: 꺼짐·스위치 없음).
-  - 메인 앱 영향: 렌더러 마운트 스모크 68개 통과, 실제 앱 미리보기 UI 스모크 통과.
-  - 기존 `m5-project-ui-smoke.cjs`는 공급자 선택 단계에서 멈춘다. 미리보기를 켠 것과 끈 것이 같은 지점에서 멈추므로 미리보기와 무관한 기존 문제(레이아웃 변경 뒤 스모크 미갱신 추정)다.
-- **실제 앱 확인**(`scripts/m5-preview-ui-smoke.cjs`, `pnpm m5:test:preview-ui`, g6-release 연결): todo 결과물을 실제 클릭·키 입력으로 조작했다. 넓게(503px)와 좁게(390px)에서 추가·완료가 됐다. 알림 패널·새 작업 대화상자·다른 탭·닫힌 서랍에서 뷰가 숨고 정지 이미지가 깔렸다가 돌아왔다. 무대에 닿지 않는 메뉴는 뷰를 숨기지 않았다. 검사 14개 PASS, 캡처 `~/Documents/elsecrew-ade-preview-ui-2026-11-26/`.
-- **검증**: `npm test` 853/853, `pnpm build`, 렌더러 마운트 스모크, 격리 프로브(두 모드), UI 스모크, 기본값 확인(개발·패키지) 통과. Rust 변경 없음. `feature/ade`(PR #8 팀 역할)를 병합한 acc66fda에서 `npm test` 875/875·`pnpm build`·렌더러 마운트 스모크 68·격리 프로브 두 모드·UI 스모크(플래그 미설정) 다시 PASS.
-- **다음**: Codex 검토 대응. `m5-project-ui-smoke.cjs` 공급자 선택 단계 수정은 별도 작업이다. Windows·IPv6 기기에서 프로브를 다시 돌린다.
-
 ## 프로젝트 요약 (고정)
 터미널을 한 번도 안 열어본 비개발자를 **코딩 에이전트(Claude Code·Codex)가 굴러가는 상태까지** 데려다주는 데스크톱 GUI 앱. 현재 배포 경로는 Tauri 2 + React 19이고, M5는 Electron + React/TypeScript + Monaco와 Rust sidecar의 별도 작업대 골격으로 전환 중이다.
 - 기획 원본: `~/Library/CloudStorage/OneDrive-개인/ObsidianVault/오픈소스/아이디어/후보/에이전트-스타터.md`
@@ -127,6 +114,12 @@ PR #6은 머지됐다(8493496e). 재확인(`REVIEW-pr6-2.md`)에서 B1 해결, I
 - 위저드 6단계: 에이전트 선택 → 진단 → 설치 → 로그인 → 첫 프로젝트 → 졸업식
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+- **실제 앱 시험의 함정(2026-11-26, ADE V)**
+  - 앱 전용 로그인은 프로필 안에 있다(Codex `…/m5/codex-profile-v1/auth.json`, Claude는 설정 폴더 경로 해시로 구분된 Keychain 항목). 그래서 임시 `--user-data-dir`로는 실제 실행이 안 된다.
+  - 개발 앱 창이 다른 창에 완전히 가려지면 macOS Electron이 `hide`를 보내 미리보기가 숨고, rAF도 멈춘다. CDP 측정 중 "뷰가 안 보임"은 이것부터 의심한다(창을 앞으로 가져오면 다시 보인다).
+  - main 디버거(`--inspect=<port>`)에서는 `require.cache[".../.vite/build/main.cjs"].exports.previewManager`로 미리보기 상태(`currentLayout`·`visibility`·`refusedMeasurements`)를 읽을 수 있다.
+  - 큰 도구 결과(이미지)가 Claude 출력 한 줄 128KiB를 넘으면 실행이 멈춘다(D2).
+  - 동시 스트림 16개를 넘으면 엔진이 재시작된다(D1).
 
 - **색은 토큰 블록 두 곳에만(2026-11-26, 화면 통일 U0·U1)**: `styles.css`의 다크 `:root`와 라이트 `:root[data-theme="light"]` 밖에는 hex·`rgb()`를 쓰지 않는다. 화면 코드에도 색 리터럴을 쓰지 않는다(Monaco는 `theme.ts`가 토큰에서 읽음). `tests/m5-style-tokens.test.mts`가 대비(다크·라이트 각 95쌍)·블록 밖 색 0·정의되지 않은 토큰 0을 막는다. 라이트 값은 1단 `--p-*`만 바꾼다. 새 화면은 공용 컴포넌트 클래스(`.m5-btn-*`·`.m5-badge`·`.m5-banner`·`.m5-card`·`.m5-group`·`.m5-empty-state`·`.m5-steps`·`.m5-recover`)를 쓴다.
   - 화면 밝기 기록의 기준은 main의 `userData/appearance.json`이다(PR #10 검토 I1로 바꿈). 렌더러 `localStorage`(`elsecrew.theme.v1`)는 첫 페인트용 사본이다. 렌더러는 시작 때 `m5Appearance.get()`으로 기록을 받아 따르고, main에 읽을 수 있는 기록이 없을 때만 올바른 사본으로 복구한다(손상 사본은 보내지 않음). 기록은 `.tmp` + rename으로 바꾸며 실패는 `saved: false`로 화면에 알린다. 시스템 밝기 변경은 `nativeTheme.updated`가 창 배경을, `prefers-color-scheme`이 CSS·Monaco를 바꾼다.
@@ -490,3 +483,5 @@ PR #6은 머지됐다(8493496e). 재확인(`REVIEW-pr6-2.md`)에서 B1 해결, I
 2026-11-26 워크로그 중 이미 main 쪽 `feature/ade`에 머지된 PR #3·#4(Keychain 수정 포함) 엔트리는 같은 날 롤오버로 `docs/archive/history-2026-11.md` 맨 위로 옮겼다. 모든 엔트리가 11-26이라 날짜 경계로는 자를 수 없어, 머지된 PR 단위로 나눴다.
 
 2026-11-26 워크로그 중 `feature/ade`에 머지된 PR #5(레이아웃)·#6(미리보기 백엔드)·#7(스모크 복구)·#8(팀 역할) 엔트리는 같은 날 두 번째 롤오버로 `docs/archive/history-2026-11.md` 맨 위로 옮겼다(머지된 PR 단위).
+
+2026-11-26 워크로그 중 `feature/ade`에 머지된 PR #9(미리보기 화면·검토 반영 두 라운드) 엔트리는 같은 날 세 번째 롤오버로 `docs/archive/history-2026-11.md` 맨 위로 옮겼다(머지된 PR 단위).
