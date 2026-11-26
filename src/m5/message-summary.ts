@@ -12,6 +12,9 @@ export interface MessageSummary {
   long: boolean;
   /** The first two or three sentences as plain words (no Markdown marks). */
   summary: string;
+  /** Long, but its start has no prose to summarise (code or a table): it
+   * stays folded behind "more" rather than opening whole. */
+  noProse?: boolean;
 }
 
 /** Sentence ends: Latin punctuation and Korean endings followed by space. */
@@ -42,6 +45,6 @@ export function messageSummary(text: string): MessageSummary {
   }
   let summary = picked.join(" ");
   if (Array.from(summary).length > SUMMARY_CHARS) summary = `${Array.from(summary).slice(0, SUMMARY_CHARS - 1).join("")}…`;
-  // Nothing prose-like (a table or code only): show it whole.
-  return summary ? { long: true, summary } : { long: false, summary: "" };
+  // Nothing prose-like at the start (code or a table): keep it folded.
+  return summary ? { long: true, summary } : { long: true, summary: "", noProse: true };
 }

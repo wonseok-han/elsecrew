@@ -24,7 +24,9 @@ const READ_TRIES = 3;
 export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn }: { identity: AgentRunCancelRequestV1; onCancel(): void;
   /** How many requests wait for the person (the task shows "needs you"). */
   onPendingChange?: (count: number) => void;
-  /** Requests still unanswered when this run's card goes away (the run ended). */
+  /** Requests the agent took back before anyone answered them, as seen here
+   * or still waiting when this run's card goes away. The conversation keeps
+   * the short notice, so it outlives this card (review #8). */
   onWithdrawn?: (items: WithdrawnApproval[]) => void }) {
   const { t } = useI18n();
   /** The last list the engine answered; an error never empties it. */
@@ -36,11 +38,12 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
   const [inspections, setInspections] = useState<ReadonlyMap<string, ApprovalInspection>>(() => new Map());
   /** Requests whose full content the person opened on this card. */
   const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
-  /** Requests the agent took back before anyone answered: said briefly, then folded. */
-  const [withdrawn, setWithdrawn] = useState<WithdrawnApproval[]>([]);
   /** Requests whose content could not be read after a few tries. */
   const [unreadable, setUnreadable] = useState<ReadonlySet<string>>(() => new Set());
+  /** Requests the engine confirmed as answered (allowed or declined). */
   const decided = useRef(new Set<string>());
+  /** Requests being answered right now (not yet confirmed). */
+  const deciding = useRef(new Set<string>());
   const tries = useRef(new Map<string, number>());
   const pendingRef = useRef<ApprovalSummary[]>([]);
   const inspectionsRef = useRef(inspections);
@@ -54,25 +57,22 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
 
   /** A new list from the engine: say what was taken back, forget what is gone. */
   const takeList = (next: ApprovalSummary[]) => {
-    const gone = withdrawnRequests(pendingRef.current, next, decided.current);
+    const gone = withdrawnRequests(pendingRef.current, next, new Set([...decided.current, ...deciding.current]));
     pendingRef.current = next;
     setPending(next);
     const still = new Set(next.map(item => item.approvalId));
     setInspections(current => [...current.keys()].every(id => still.has(id)) ? current : new Map([...current].filter(([id]) => still.has(id))));
     setOpened(current => [...current].every(id => still.has(id)) ? current : new Set([...current].filter(id => still.has(id))));
     if (!gone.length) return;
-    const items = gone.map(item => ({ approvalId: item.approvalId, kind: item.kind, summary: inspectionsRef.current.has(item.approvalId) ? approvalHeadline(inspectionsRef.current.get(item.approvalId)!).target : null }));
-    setWithdrawn(list => [...list, ...items]);
-    const ids = new Set(items.map(item => item.approvalId));
-    setTimeout(() => { if (live.current) setWithdrawn(list => list.filter(item => !ids.has(item.approvalId))); }, 8000);
+    withdrawnCallback.current?.(gone.map(item => ({ approvalId: item.approvalId, kind: item.kind, summary: inspectionsRef.current.has(item.approvalId) ? approvalHeadline(inspectionsRef.current.get(item.approvalId)!).target : null })));
   };
 
   useEffect(() => {
     live.current = true;
     epoch.current++;
     busy.current = false;
-    setPending([]); setError(false); setSending(false); setQueued(false); setInspections(new Map()); setOpened(new Set()); setWithdrawn([]); setUnreadable(new Set());
-    decided.current = new Set(); tries.current = new Map(); pendingRef.current = [];
+    setPending([]); setError(false); setSending(false); setQueued(false); setInspections(new Map()); setOpened(new Set()); setUnreadable(new Set());
+    decided.current = new Set(); deciding.current = new Set(); tries.current = new Map(); pendingRef.current = [];
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
     const bridge = window.m5Approval;
@@ -95,7 +95,7 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
     return () => {
       disposed = true; live.current = false; epoch.current++; clearTimeout(timer);
       // The run ended with requests still waiting: the agent no longer asks them.
-      const left = pendingRef.current.filter(item => !decided.current.has(item.approvalId));
+      const left = pendingRef.current.filter(item => !decided.current.has(item.approvalId) && !deciding.current.has(item.approvalId));
       if (left.length) withdrawnCallback.current?.(left.map(item => ({ approvalId: item.approvalId, kind: item.kind, summary: inspectionsRef.current.has(item.approvalId) ? approvalHeadline(inspectionsRef.current.get(item.approvalId)!).target : null })));
     };
     // The complete immutable identity is the lifecycle key, not object allocation.
@@ -106,16 +106,19 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
     if (busy.current || !window.m5Approval) return;
     if (action === "acceptOnce" && !canAcceptApproval({ approvalId, inspectedId: inspections.get(approvalId)?.approvalId ?? null, openedIds: opened, sending, error })) return;
     busy.current = true;
-    decided.current.add(approvalId);
+    deciding.current.add(approvalId);
     const revision = ++epoch.current;
     setSending(true);
     const request = { action, identity, approvalId };
     try {
       const result = validateApprovalResult(await window.m5Approval.request(request), request);
+      // Only an answer the engine confirmed counts as answered.
+      decided.current.add(approvalId);
       if (live.current && revision === epoch.current) { takeList(result.pending); setQueued(true); setError(false); }
     } catch {
       if (live.current && revision === epoch.current) setError(true);
     } finally {
+      deciding.current.delete(approvalId);
       if (live.current && revision === epoch.current) { busy.current = false; setSending(false); }
     }
   }
@@ -157,7 +160,7 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
   useEffect(() => { onPendingChange?.(pending.length); }, [pending.length, onPendingChange]);
   useEffect(() => () => onPendingChange?.(0), [onPendingChange]);
 
-  if (!pending.length && !error && !withdrawn.length) return null;
+  if (!pending.length && !error) return null;
   return <section className="m5-approval-card" aria-label={t("m5.approval.title")}>
     <strong>{t("m5.approval.title")}</strong>
     {pending.map(request => {
@@ -184,7 +187,6 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
       </div>;
     })}
     {pending.length > 0 && <details className="m5-approval-help"><summary>{t("m5.approval.helpTitle")}</summary><p>{t("m5.approval.help")}</p></details>}
-    {withdrawn.map(item => <ApprovalWithdrawnNote key={item.approvalId} item={item} />)}
     {queued && <p role="status">{t("m5.approval.queued")}</p>}
     {error && <p role="alert">{t("m5.approval.error")}</p>}
     {(pending.length > 0 || error) && <button type="button" className="m5-secondary" onClick={onCancel}>{t("m5.approval.cancel")}</button>}

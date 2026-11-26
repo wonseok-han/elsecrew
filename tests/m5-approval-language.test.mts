@@ -16,7 +16,7 @@ const compiled = ts.transpileModule(readFileSync(new URL("../src/m5/approval-car
 }).outputText;
 
 /** Renders the card with fixed hook state.
- * useState order: pending, error, sending, queued, inspections, opened, withdrawn, unreadable. */
+ * useState order: pending, error, sending, queued, inspections, opened, unreadable. */
 function renderCard(dictionary: typeof ko, states: unknown[]): string {
   let index = 0;
   const context: any = { exports: {}, require(name: string) {
@@ -41,7 +41,7 @@ const acceptButton = (html: string, dictionary: typeof ko) => {
 
 test("approval translations preserve warnings, raw detail and inspected acceptance controls", () => {
   for (const dictionary of [ko, en]) {
-    const html = renderCard(dictionary, [pendingOne, false, false, true, new Map([["approval_test", command]]), new Set(["approval_test"]), [], new Set()]);
+    const html = renderCard(dictionary, [pendingOne, false, false, true, new Map([["approval_test", command]]), new Set(["approval_test"]), new Set()]);
     for (const key of ["help", "warning", "queued", "cancel", "decline", "acceptWarning", "fullContent"] as const) {
       assert.ok(html.includes(renderToStaticMarkup(dictionary[`m5.approval.${key}`])), key);
     }
@@ -56,7 +56,7 @@ test("approval translations preserve warnings, raw detail and inspected acceptan
 test("allowing needs the full request opened on the card: summary alone is not enough (review #1)", () => {
   for (const dictionary of [ko, en]) {
     // Read automatically but not opened: the button is there and locked.
-    const closed = renderCard(dictionary, [pendingOne, false, false, false, new Map([["approval_test", command]]), new Set(), [], new Set()]);
+    const closed = renderCard(dictionary, [pendingOne, false, false, false, new Map([["approval_test", command]]), new Set(), new Set()]);
     assert.ok(acceptButton(closed, dictionary)?.includes("disabled"), "unopened: allowing is locked");
     assert.ok(closed.includes(renderToStaticMarkup(dictionary["m5.approval.openFirst"])));
     // The full content is there exactly: every option, the place, inner spaces kept.
@@ -65,14 +65,14 @@ test("allowing needs the full request opened on the card: summary alone is not e
     assert.ok(full.includes("--last-option=keep") && full.includes("--   --workspace  packages"));
     assert.ok(full.includes("/work space/app"), "where it runs");
     // Opened for another request (an earlier id) does not count for this one.
-    const otherOpened = renderCard(dictionary, [pendingOne, false, false, false, new Map([["approval_test", command]]), new Set(["approval_other"]), [], new Set()]);
+    const otherOpened = renderCard(dictionary, [pendingOne, false, false, false, new Map([["approval_test", command]]), new Set(["approval_other"]), new Set()]);
     assert.ok(acceptButton(otherOpened, dictionary)?.includes("disabled"));
     // Not read yet: no allow button at all.
-    const unread = renderCard(dictionary, [pendingOne, false, false, false, new Map(), new Set(["approval_test"]), [], new Set()]);
+    const unread = renderCard(dictionary, [pendingOne, false, false, false, new Map(), new Set(["approval_test"]), new Set()]);
     assert.equal(acceptButton(unread, dictionary), null);
     // Sending or an error locks it again.
     for (const [sending, error] of [[true, false], [false, true]]) {
-      const locked = renderCard(dictionary, [pendingOne, error, sending, false, new Map([["approval_test", command]]), new Set(["approval_test"]), [], new Set()]);
+      const locked = renderCard(dictionary, [pendingOne, error, sending, false, new Map([["approval_test", command]]), new Set(["approval_test"]), new Set()]);
       assert.ok(acceptButton(locked, dictionary)?.includes("disabled"));
     }
   }
@@ -84,26 +84,42 @@ test("allowing needs the full request opened on the card: summary alone is not e
 
 test("every waiting request shows its own summary, and an error keeps the list (review #7, #8)", () => {
   const second = { ...command, approvalId: "approval_two", command: "rm -rf build", reason: "clean" };
-  const html = renderCard(ko, [[...pendingOne, { approvalId: "approval_two", kind: "command" }], false, false, false, new Map([["approval_test", command], ["approval_two", second]]), new Set(), [], new Set()]);
+  const html = renderCard(ko, [[...pendingOne, { approvalId: "approval_two", kind: "command" }], false, false, false, new Map([["approval_test", command], ["approval_two", second]]), new Set(), new Set()]);
   assert.equal((html.match(/m5-approval-reading/g) ?? []).length, 0, "nothing shows as loading once read");
   assert.ok(html.includes("rm -rf build") && html.includes("npm run build"));
   // After a failed list the last answered list stays (nothing can be answered meanwhile).
-  const failed = renderCard(ko, [pendingOne, true, false, false, new Map([["approval_test", command]]), new Set(["approval_test"]), [], new Set()]);
+  const failed = renderCard(ko, [pendingOne, true, false, false, new Map([["approval_test", command]]), new Set(["approval_test"]), new Set()]);
   assert.ok(failed.includes("data-approval-id=\"approval_test\""));
   assert.ok(failed.includes(renderToStaticMarkup(ko["m5.approval.error"])));
 });
 
-test("a request the agent took back is said briefly instead of vanishing", () => {
+test("a request the agent took back is said briefly, by the conversation (it outlives the card)", () => {
   for (const dictionary of [ko, en]) {
-    const html = renderCard(dictionary, [[], false, false, false, new Map(), new Set(), [{ approvalId: "approval_gone", kind: "tool", summary: "npm test" }], new Set()]);
+    const context: any = { exports: {}, require(name: string) {
+      if (name === "react") return { useEffect() {}, useRef: (value: unknown) => ({ current: value }), useState: (initial: unknown) => [initial, () => {}] };
+      if (name === "../i18n.tsx") return { useI18n: () => ({ t(key: keyof typeof ko) { return dictionary[key]; } }) };
+      if (name === "./contracts/approval-v1.ts") return contract;
+      if (name === "./approval-display.ts") return display;
+      return require(name);
+    } };
+    runInNewContext(compiled, context);
+    const html = renderToStaticMarkup(context.exports.ApprovalWithdrawnNote({ item: { approvalId: "approval_gone", kind: "tool", summary: "npm test" } }));
     assert.ok(html.includes(renderToStaticMarkup(dictionary["m5.approval.withdrawn"])));
     assert.ok(html.includes("npm test"));
-    assert.equal((html.match(/<button/g) ?? []).length, 0, "nothing to answer once the request is gone");
+    assert.ok(!html.includes("<button"), "nothing to answer once the request is gone");
   }
+  // The card hands notices to the conversation and keeps none itself; only
+  // answers the engine confirmed count as answered (review #8).
+  const source = readFileSync(new URL("../src/m5/approval-card.tsx", import.meta.url), "utf8");
+  assert.ok(!source.includes("setWithdrawn"), "the card no longer keeps the notice");
+  const decide = source.slice(source.indexOf("async function decide("), source.indexOf("async function inspect("));
+  assert.ok(decide.indexOf("decided.current.add(approvalId)") > decide.indexOf("await window.m5Approval.request(request)"), "recorded only after the engine answered");
+  assert.ok(decide.includes("deciding.current.delete(approvalId)"));
+  assert.deepEqual(display.withdrawnRequests([{ approvalId: "a" }, { approvalId: "b" }], [], new Set(["a"])).map(item => item.approvalId), ["b"]);
 });
 
 test("a request that cannot be read says so instead of loading forever", () => {
-  const html = renderCard(ko, [[{ approvalId: "approval_x", kind: "tool" }], false, false, false, new Map(), new Set(), [], new Set(["approval_x"])]);
+  const html = renderCard(ko, [[{ approvalId: "approval_x", kind: "tool" }], false, false, false, new Map(), new Set(), new Set(["approval_x"])]);
   assert.ok(html.includes(renderToStaticMarkup(ko["m5.approval.unreadable"])));
   assert.ok(!html.includes(ko["m5.approval.reading"]));
   assert.ok(!html.includes(renderToStaticMarkup(ko["m5.approval.acceptOnce"])), "nothing to accept without its content");

@@ -70,16 +70,51 @@ function splitRow(line: string): string[] {
 /** Past this size a document is shown as its original text, not drawn. */
 export const MARKDOWN_DRAW_MAX_CHARS = 120_000;
 export const MARKDOWN_DRAW_MAX_LINES = 4_000;
+/** Line breaks as the parser reads them: CRLF, CR or LF. */
+const LINE_BREAK = /\r\n?|\n/g;
 export function tooLargeToDraw(source: string): boolean {
   if (source.length > MARKDOWN_DRAW_MAX_CHARS) return true;
   let lines = 1;
-  for (let i = source.indexOf("\n"); i >= 0; i = source.indexOf("\n", i + 1)) if (++lines > MARKDOWN_DRAW_MAX_LINES) return true;
+  LINE_BREAK.lastIndex = 0;
+  while (LINE_BREAK.exec(source)) if (++lines > MARKDOWN_DRAW_MAX_LINES) return true;
+  return false;
+}
+
+/**
+ * Most elements one document may make (blocks, inline pieces, table cells);
+ * past it the rest is kept as plain text. Scanning for link brackets and
+ * destinations shares one budget for the whole document.
+ */
+export const MARKDOWN_MAX_NODES = 12_000;
+const SCAN_BUDGET = 60_000;
+interface ParseBudget { nodes: number; scan: number; truncated: boolean }
+let budget: ParseBudget | null = null;
+/** Spends one element; false once the document's allowance is used up. */
+function spend(count = 1): boolean {
+  if (!budget) return true;
+  budget.nodes -= count;
+  if (budget.nodes >= 0) return true;
+  budget.truncated = true;
   return false;
 }
 
 export function parseMarkdown(source: string, depth = 0): MarkdownBlock[] {
-  const lines = source.replace(/\r\n?/g, "\n").split("\n");
-  return parseLines(lines, depth);
+  return parseMarkdownWithLimits(source, depth).blocks;
+}
+
+/** Parses within the element and scanning budgets; says whether it stopped early. */
+export function parseMarkdownWithLimits(source: string, depth = 0): { blocks: MarkdownBlock[]; truncated: boolean } {
+  const outer = budget;
+  budget = { nodes: MARKDOWN_MAX_NODES, scan: SCAN_BUDGET, truncated: false };
+  try {
+    const blocks = parseLines(source.split(LINE_BREAK), depth);
+    return { blocks, truncated: budget.truncated };
+  } finally { budget = outer; }
+}
+
+/** What is left after the allowance runs out, as one plain paragraph. */
+function restAsText(lines: string[], from: number): MarkdownBlock {
+  return { kind: "paragraph", children: [{ kind: "text", text: lines.slice(from).join("\n") }] };
 }
 
 function parseLines(lines: string[], depth: number): MarkdownBlock[] {
@@ -88,6 +123,7 @@ function parseLines(lines: string[], depth: number): MarkdownBlock[] {
   while (i < lines.length) {
     const line = lines[i]!;
     if (blank(line)) { i++; continue; }
+    if (!spend()) { blocks.push(restAsText(lines, i)); break; }
     const fence = FENCE.exec(line);
     if (fence && !(fence[1]![0] === "`" && fence[2]!.includes("`"))) {
       const marker = fence[1]!;
@@ -145,8 +181,17 @@ function parseLines(lines: string[], depth: number): MarkdownBlock[] {
       const align = splitRow(lines[i + 1]!).map(cell => cell.startsWith(":") && cell.endsWith(":") ? "center" as const : cell.endsWith(":") ? "right" as const : cell.startsWith(":") ? "left" as const : null);
       i += 2;
       const rows: MarkdownInline[][][] = [];
-      while (i < lines.length && !blank(lines[i]!) && lines[i]!.includes("|")) rows.push(splitRow(lines[i++]!).map(cell => parseInline(cell, depth)));
-      blocks.push({ kind: "table", align, header: header.map(cell => parseInline(cell, depth)), rows });
+      const headerCells = spend(header.length) ? header.map(cell => parseInline(cell, depth)) : header.map(cell => [{ kind: "text" as const, text: cell }]);
+      let stopped = false;
+      while (i < lines.length && !blank(lines[i]!) && lines[i]!.includes("|")) {
+        const cells = splitRow(lines[i]!);
+        // Every cell counts: a wide or long table stops at the allowance.
+        if (!spend(cells.length)) { stopped = true; break; }
+        rows.push(cells.map(cell => parseInline(cell, depth)));
+        i++;
+      }
+      blocks.push({ kind: "table", align, header: headerCells, rows });
+      if (stopped) { blocks.push(restAsText(lines, i)); break; }
       continue;
     }
     const paragraph: string[] = [];
@@ -171,11 +216,13 @@ function closeBracket(text: string, open: number, limit: number): number {
   return -1;
 }
 
-/** `(target "title")` right after a link's text; returns target and end. */
-function linkDestination(text: string, open: number): { target: string; end: number } | null {
+/** `(target "title")` right after a link's text, looking at most `limit`
+ * characters; returns target and end. */
+function linkDestination(text: string, open: number, limit: number): { target: string; end: number } | null {
   if (text[open] !== "(") return null;
   let level = 0;
-  for (let i = open; i < text.length; i++) {
+  const stop = Math.min(text.length, open + limit);
+  for (let i = open; i < stop; i++) {
     const c = text[i];
     if (c === "\\") { i++; continue; }
     if (c === "\n") return null;
@@ -210,9 +257,13 @@ export function parseInline(source: string, depth = 0, links = true): MarkdownIn
   const nested = (text: string, inner = links) => depth < MAX_DEPTH ? parseInline(text, depth + 1, inner) : [{ kind: "text" as const, text }];
   /** From this index on, the mark (key) has no closing mark: do not look again. */
   const noClose = new Map<string, number>();
-  let bracketBudget = BRACKET_BUDGET;
+  // One scanning budget per document (or per call when used on its own).
+  const local = { scan: BRACKET_BUDGET };
+  const scan = budget ?? local;
   let i = 0;
   while (i < source.length) {
+    // The document's element allowance is used up: the rest stays plain text.
+    if (budget && out.length >= budget.nodes) { budget.truncated = true; buffer += source.slice(i); break; }
     const c = source[i]!;
     if (c === "\\" && i + 1 < source.length && ESCAPABLE.test(source[i + 1]!)) { buffer += source[i + 1]; i += 2; continue; }
     if (c === "\n") { flush(); out.push({ kind: "break" }); i++; continue; }
@@ -236,11 +287,14 @@ export function parseInline(source: string, depth = 0, links = true): MarkdownIn
       const auto = AUTOLINK.exec(source);
       if (auto) { flush(); out.push({ kind: "link", href: safeLinkTarget(auto[1]!), children: [{ kind: "text", text: auto[1]! }] }); i += auto[0].length; continue; }
     }
-    if ((c === "[" || (c === "!" && source[i + 1] === "[")) && depth < MAX_DEPTH && links && bracketBudget > 0) {
+    if ((c === "[" || (c === "!" && source[i + 1] === "[")) && depth < MAX_DEPTH && links && scan.scan > 0) {
       const open = c === "!" ? i + 1 : i;
-      const close = closeBracket(source, open, Math.min(bracketBudget, source.length - open));
-      bracketBudget -= close > 0 ? close - open : Math.min(bracketBudget, source.length - open);
-      const destination = close > 0 ? linkDestination(source, close + 1) : null;
+      const close = closeBracket(source, open, Math.min(scan.scan, source.length - open));
+      scan.scan -= close > 0 ? close - open : Math.min(scan.scan, source.length - open);
+      // The destination's scan comes out of the same budget.
+      const destinationLimit = Math.max(0, Math.min(scan.scan, source.length - close - 1));
+      const destination = close > 0 && destinationLimit > 0 ? linkDestination(source, close + 1, destinationLimit) : null;
+      if (close > 0) scan.scan -= destination ? destination.end - close - 1 : destinationLimit;
       if (destination) {
         flush();
         const label = source.slice(open + 1, close);
@@ -294,6 +348,7 @@ export function parseInline(source: string, depth = 0, links = true): MarkdownIn
     buffer += c; i++;
   }
   flush();
+  spend(out.length);
   return out;
 }
 

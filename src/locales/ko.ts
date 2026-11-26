@@ -1083,6 +1083,12 @@ export const ko = {
   "m5.approval.openFirst": "허용하려면 먼저 ‘전체 내용 보기’를 펼쳐 실제로 실행되거나 바뀌는 내용을 확인해 주세요.",
   "m5.markdown.tooLarge": "내용이 커서 서식 없이 원문 그대로 보여 줘요.",
   "m5.roles.filledNotSaved": "모델을 고르지 않은 역할에 추천 모델을 채워 두었어요. 저장하면 이 설정으로 기억해요.",
+  "m5.apply.changedWhileConfirming": "확인 창을 연 뒤 작업 공간이 바뀌었어요. 바뀐 내용을 보고 다시 반영해 주세요.",
+  "m5.task.result.readFailed": "이 작업이 내 폴더에 들어갔는지 확인하지 못했어요",
+  "m5.task.readFailed": "상태 확인 실패",
+  "m5.task.recheck": "작업 상태 다시 확인",
+  "m5.markdown.truncated": "내용이 많아 앞부분만 서식을 입혔어요. 나머지는 원문 그대로예요.",
+  "m5.message.noSummary": "요약할 문장이 없는 긴 보고예요. ‘자세히’에서 전체를 볼 수 있어요.",
 } as const;
 
 export type MessageKey = keyof typeof ko;

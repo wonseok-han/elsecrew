@@ -38,7 +38,9 @@ export class TaskDispositionStore {
   #queue: Promise<void> = Promise.resolve();
   #version = 0;
 
-  constructor(inspect: (chatId: string) => Promise<TaskDisposition | null>, storage: StorageLike | null = null) {
+  #timeoutMs: number;
+  constructor(inspect: (chatId: string) => Promise<TaskDisposition | null>, storage: StorageLike | null = null, timeoutMs = 20_000) {
+    this.#timeoutMs = timeoutMs;
     this.#inspect = inspect;
     this.#storage = storage;
     try {
@@ -65,8 +67,12 @@ export class TaskDispositionStore {
   /** What the open task's own panels just read. */
   record(task: Pick<DispositionTask, "chatId" | "updatedAt">, disposition: TaskDisposition | null): void {
     if (!disposition) return;
+    const wasFailed = this.#failed.delete(task.chatId);
     const current = this.#entries.get(task.chatId);
-    if (current && current.updatedAt === task.updatedAt && JSON.stringify(current.disposition) === JSON.stringify(disposition)) return;
+    if (current && current.updatedAt === task.updatedAt && JSON.stringify(current.disposition) === JSON.stringify(disposition)) {
+      if (wasFailed) { this.#version++; for (const listener of this.#listeners) listener(); }
+      return;
+    }
     this.#entries.delete(task.chatId);
     this.#entries.set(task.chatId, { updatedAt: task.updatedAt, disposition });
     while (this.#entries.size > LIMIT) this.#entries.delete(this.#entries.keys().next().value!);
@@ -78,6 +84,12 @@ export class TaskDispositionStore {
     this.#asked.delete(chatId);
     if (this.#entries.delete(chatId)) this.#changed();
   }
+
+  /** Tasks whose latest ask failed or got no answer in time, per version. */
+  #failed = new Map<string, string>();
+  /** The latest ask about this version of the task failed: its kept standing
+   * must not be shown as current (review #4). */
+  failed(task: Pick<DispositionTask, "chatId" | "updatedAt">): boolean { return this.#failed.get(task.chatId) === task.updatedAt; }
 
   /** Forget which tasks were asked: the next request asks them again. */
   revalidate(): void { this.#asked.clear(); this.#round++; }
@@ -91,13 +103,23 @@ export class TaskDispositionStore {
       this.#asked.set(task.chatId, task.updatedAt);
       this.#queue = this.#queue.then(async () => {
         const round = this.#round;
+        const current = () => round === this.#round && this.#asked.get(task.chatId) === task.updatedAt;
         try {
-          const disposition = await this.#inspect(task.chatId);
+          const disposition = await Promise.race([this.#inspect(task.chatId), new Promise<never>((_, reject) => setTimeout(() => reject(new Error("no answer")), this.#timeoutMs))]);
           // An answer from before a revalidation or for an older version is out of date.
-          if (disposition && round === this.#round && this.#asked.get(task.chatId) === task.updatedAt) this.record(task, disposition);
-        } catch { /* unknown stays "waiting for review" */ }
+          if (!current()) return;
+          if (disposition) this.record(task, disposition);
+          else this.#markFailed(task);
+        } catch { if (current()) this.#markFailed(task); }
       });
     }
+  }
+
+  #markFailed(task: DispositionTask): void {
+    if (this.#failed.get(task.chatId) === task.updatedAt) return;
+    this.#failed.set(task.chatId, task.updatedAt);
+    this.#version++;
+    for (const listener of this.#listeners) listener();
   }
 
   #changed(): void {

@@ -63,6 +63,8 @@ import { findRememberedProject, forgetLastProject, recallLastProject, rememberLa
 import type { ApplyStanding } from "./apply-latest.tsx";
 
 type MonacoApi = typeof Monaco;
+/** A merge or apply standing read with no answer by then counts as failed. */
+const STANDING_READ_TIMEOUT_MS = 20_000;
 
 let monacoLoader: Promise<MonacoApi> | undefined;
 
@@ -364,12 +366,21 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const activeChatId = chat.activeChat?.chatId ?? null;
   const mergeInfo = mergeRead && mergeRead.chatId === activeChatId ? mergeRead.state : null;
   const applyState = applyRead && applyRead.chatId === activeChatId ? applyRead : null;
-  const onMergeState = useCallback((state: ChatMergeState | null) => { if (activeChatId) setMergeRead({ chatId: activeChatId, state }); }, [activeChatId]);
-  const onApplyInspected = useCallback((state: ApplyStanding | null) => { if (activeChatId) setApplyRead({ chatId: activeChatId, state }); }, [activeChatId]);
+  // The panels' own reads feed the same standing; a failed read is a failure.
+  const onMergeState = useCallback((state: ChatMergeState | null) => { if (!activeChatId) return; if (state) { setMergeRead({ chatId: activeChatId, state }); setStandingFailed(null); } else setStandingFailed(activeChatId); }, [activeChatId]);
+  const onApplyInspected = useCallback((state: ApplyStanding | null) => { if (!activeChatId) return; if (state) { setApplyRead({ chatId: activeChatId, state }); setStandingFailed(null); } else setStandingFailed(activeChatId); }, [activeChatId]);
+  /** The open task whose standing could not be read (shown as such, with "look again"). */
+  const [standingFailed, setStandingFailed] = useState<string | null>(null);
+  /** Bumped by "look again". */
+  const [standingNonce, setStandingNonce] = useState(0);
+  const standingGeneration = useRef(0);
   const onApprovalsWaiting = useCallback((count: number) => { if (activeChatId) setApprovalsWaiting({ chatId: activeChatId, count }); }, [activeChatId]);
   const liveDisposition: TaskDisposition | null = mergeInfo?.kind === "gitWorktree" ? dispositionFromMerge(mergeInfo)
     : mergeInfo?.kind === "snapshot" && applyState ? dispositionFromApply(applyState.state) : null;
-  const activeDisposition = liveDisposition ?? (chat.activeChat ? dispositions.get(chat.activeChat) : null);
+  // A kept standing shows while the task is read again, but never after that
+  // read failed: then the bar says it could not check (review #4).
+  const activeReadFailed = standingFailed !== null && standingFailed === activeChatId;
+  const activeDisposition = liveDisposition ?? (chat.activeChat && !activeReadFailed ? dispositions.get(chat.activeChat) : null);
   useEffect(() => { if (chat.activeChat && liveDisposition) dispositions.record(chat.activeChat, liveDisposition); });
   const activePhase: TaskPhase | null = chat.activeChat ? taskPhase({ state: chat.activeChat.state, disposition: activeDisposition,
     approvalPending: (approvalsWaiting?.chatId === activeChatId ? approvalsWaiting.count : 0) > 0 }) : null;
@@ -379,12 +390,38 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const activeWorking = activePhase !== null && phaseIsWorking(activePhase);
   // Opening a task that is not working settles its old permission notices.
   useEffect(() => { if (chat.activeChat && activePhase && !activeWorking && activePhase !== "attention") notifications.resolveApprovalsFor(chat.activeChat.chatId); }, [chat.activeChat?.chatId, activePhase, activeWorking]);
-  useEffect(() => { if (activeWorking) { setMergeRead(null); setApplyRead(null); } }, [activeWorking, activeChatId]);
-  // Known: read for this task (or read before at this version), or unreadable.
-  // An unreadable standing counts as known (the panels then offer to look
-  // again) so the result bar never stays locked on a read that failed.
-  const dispositionKnown = standingRead({ disposition: activeDisposition, mergeRead: mergeRead?.chatId === activeChatId ? mergeRead : null, applyRead: applyState });
-  const resultView = activePhase ? resultBarView({ phase: activePhase, kind: activeKind, known: dispositionKnown, switching: chat.switching }) : null;
+  useEffect(() => { if (activeWorking) { setMergeRead(null); setApplyRead(null); setStandingFailed(null); } }, [activeWorking, activeChatId]);
+  // Reading the open task's standing runs on its own, apart from whether the
+  // result bar shows (review N2): whenever the task, its changes or "look
+  // again" change, and the team is not working. A read with no answer in
+  // time counts as failed.
+  useEffect(() => {
+    const target = chat.activeChat;
+    if (!target || activeWorking || chat.switching || !admissionReady || !window.m5Projects) return;
+    const epoch = ++standingGeneration.current;
+    const ask = <T,>(request: Promise<T>) => Promise.race([request, new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error("standing read timed out")), STANDING_READ_TIMEOUT_MS))]);
+    void (async () => {
+      try {
+        const mergeRequest = { action: "inspectChatMerge" as const, chatId: target.chatId, projectId: target.projectId, worktreeId: target.worktreeId, workspaceIdentity: target.workspaceIdentity };
+        const merge = validateProjectCatalogResult(await ask(window.m5Projects!.request(mergeRequest)), mergeRequest);
+        if (epoch !== standingGeneration.current) return;
+        if (merge.action !== "inspectChatMerge") throw new Error("unexpected merge answer");
+        if (merge.merge.kind === "snapshot") {
+          const applyRequest = { action: "inspectChatApply" as const, projectId: target.projectId, chatId: target.chatId };
+          const apply = validateProjectCatalogResult(await ask(window.m5Projects!.request(applyRequest)), applyRequest);
+          if (epoch !== standingGeneration.current) return;
+          if (apply.action !== "inspectChatApply") throw new Error("unexpected apply answer");
+          setApplyRead({ chatId: target.chatId, state: { applied: apply.applied, pending: apply.pending, total: apply.total } });
+        }
+        setMergeRead({ chatId: target.chatId, state: merge.merge });
+        setStandingFailed(null);
+      } catch { if (epoch === standingGeneration.current) setStandingFailed(target.chatId); }
+    })();
+  }, [chat.activeChat?.chatId, activeWorking, chat.switching, admissionReady, diffRevision, standingNonce]);
+  const dispositionKnown = standingRead({ disposition: activeDisposition, failed: activeReadFailed });
+  const resultView = activePhase ? resultBarView({ phase: activePhase, kind: activeKind, known: dispositionKnown, switching: chat.switching, failed: activeReadFailed && !activeDisposition }) : null;
+  /** "Check again": the open task and every finished task in the list. */
+  const recheckStandings = () => { setStandingNonce(value => value + 1); dispositions.revalidate(); dispositions.request(chat.chats.filter(item => item.chatId !== chat.activeChat?.chatId)); };
   // The built-in team names no model; a task starts only once every role has one.
   const unselectedRoles = chat.settings ? (() => { const team = roleSettingsAsV3(chat.settings); return team.roles.filter(role => !hasUsableModel(role.runtime, role.modelSelector)).map(role => roleLabel(role.roleId, team.roleDefinitions, t)); })() : [];
   useEffect(() => window.m5AppUpdate?.onRestartCheck(() => {
@@ -757,6 +794,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           {/* Until the task's own standing is read, a placeholder: never a value or button of the task shown before. */}
           <small>{resultView.loading ? <span className="m5-skeleton-line" aria-label={t("m5.task.loading")} />
             : resultView.detailKey === "m5.task.result.review" ? <>{snapshot.diffSummary ? <>{t("m5.result.files", { count: snapshot.diffSummary.entries.length })} <LineCounts entry={snapshot.diffSummary.entries.reduce((sum, entry) => ({ added: sum.added + (entry.added ?? 0), removed: sum.removed + (entry.removed ?? 0) }), { added: 0, removed: 0 })} /> · </> : null}{t(resultView.detailKey)}</>
+            : resultView.failed ? <>{t("m5.task.result.readFailed")} <button type="button" className="m5-link-button" disabled={!admissionReady} onClick={() => setStandingNonce(value => value + 1)}>{t("m5.merge.inspectAgain")}</button></>
             : resultView.detailKey ? t(resultView.detailKey, { base: mergeInfo?.kind === "gitWorktree" ? mergeInfo.baseRef ?? "main" : "main", count: activeDisposition?.pending ?? 0 }) : null}</small></span>
         <span className="m5-result-actions" inert={chat.switching} aria-hidden={chat.switching || undefined}>
           {/* Viewing this task's changes never waits for its standing; deciding does. */}
@@ -789,12 +827,16 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           const kind = selected ? activeKind : dispositions.get(item)?.kind ?? null;
           const state = `${taskPhaseTone(phase)} m5-task-phase-${phase}`;
           const changed = chat.refreshNeededChatIds.includes(item.chatId);
-          const status = changed ? t("m5.navigation.newState") : t(taskPhaseLabelKey(phase, kind));
+          // A finished task whose standing could not be read again says so
+          // instead of keeping an old "merged" or "applied" (review #4).
+          const readFailed = !selected && dispositions.failed(item);
+          const status = changed ? t("m5.navigation.newState") : readFailed ? t("m5.task.readFailed") : t(taskPhaseLabelKey(phase, kind));
           return <div className="m5-chat-list-row" key={item.chatId}><button type="button" disabled={!admissionReady || settingsOpen || chat.switching} aria-current={selected ? "true" : undefined} title={`${item.goal} · ${status}`} className={selected ? "m5-chat-chip selected" : "m5-chat-chip"} onClick={() => void switchChat(item.chatId)}>
-            <span className="m5-chat-goal">{item.goal}</span><span data-task-phase={phase} className={changed ? "m5-chat-update" : `m5-chat-status m5-chat-status-${state}`}>{status}</span>
+            <span className="m5-chat-goal">{item.goal}</span><span data-task-phase={readFailed ? "readFailed" : phase} className={changed ? "m5-chat-update" : readFailed ? "m5-chat-status m5-chat-status-neutral" : `m5-chat-status m5-chat-status-${state}`}>{status}</span>
           </button><button type="button" className="m5-chat-remove" title={t("m5.catalog.remove")} aria-label={t("m5.catalog.removeChat", { goal: item.goal })} disabled={!canRemove} onClick={() => { setRemovalError(false); setRemoval({ projectId: item.projectId, chatId: item.chatId, label: item.goal }); }}>×</button></div>;
         })}</div>
         {removalError && !removal && <p role="alert">{t("m5.catalog.removeError")}</p>}
+        {chat.chats.length > 0 && <button type="button" className="m5-link-button m5-task-recheck" disabled={!admissionReady || chat.switching} onClick={recheckStandings}>{t("m5.task.recheck")}</button>}
         {chat.nextChatCursor !== null && <button className="m5-secondary" type="button" disabled={!admissionReady || chat.loadingMoreChats || removing} onClick={() => void chatController.loadMoreChats()}>{chat.loadingMoreChats ? t("m5.navigation.loadingChats") : t("m5.navigation.moreChats")}</button>}
         <button ref={newChatButtonRef} type="button" className="m5-new-chat-button" disabled={!admissionReady || !projectDataReady || settingsOpen || chat.preparing || chat.switching} onClick={() => setNewChatOpen(true)}>{t("m5.navigation.newChat")}</button>
       </section>}>
@@ -884,7 +926,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
               {chat.activeChat && activePhase && !chat.switching && !phaseIsWorking(activePhase) && mergeInfo?.kind === "snapshot" && <ApplyLatest revision={`${diffRevision}`} projectId={chat.activeChat.projectId} chatId={chat.activeChat.chatId} changeCount={snapshot.diffSummary?.entries.length ?? 0} confirmRequest={applyOpenRequest} onInspected={onApplyInspected} onApplied={() => dispositions.forget(chat.activeChat!.chatId)} disabled={!admissionReady || chat.switching || chatController.isActionBlocked() || chat.activeChat.state === "running" || chat.agentRuns.some(run => ["preparing", "running", "cancelling"].includes(run.state))} />}
               {snapshot.diffSummary && changesDone && !chat.switching && <p className="m5-changes-done-label">{t("m5.changes.doneList")}</p>}
               {snapshot.diffSummary && <ChangeList key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}`} entries={snapshot.diffSummary.entries} selected={allChanges ? allChanges.focus?.path : snapshot.diffFile?.path} disabled={!admissionReady || snapshot.actionBlocked}
-                onRefresh={() => void controller.refreshChanges()} refreshing={snapshot.diffLoading} allOpen={Boolean(allChanges)} onViewAll={() => { if (allChanges) setAllChanges(null); else { setAllChanges({ focus: null }); controller.selectPanel("editor"); } }}
+                onRefresh={() => { recheckStandings(); void controller.refreshChanges(); }} refreshing={snapshot.diffLoading} allOpen={Boolean(allChanges)} onViewAll={() => { if (allChanges) setAllChanges(null); else { setAllChanges({ focus: null }); controller.selectPanel("editor"); } }}
                 onOpen={path => { if (allChanges) setAllChanges({ focus: { path, at: Date.now() } }); else void controller.openDiff(path); }} />}
             </>
           ) : <Empty text={t("m5.editor.chooseProject")} />}

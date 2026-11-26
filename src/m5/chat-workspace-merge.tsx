@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.tsx";
 import type { ChatRecordV1 } from "./contracts/run-recovery-v1.ts";
 import { validateProjectCatalogResult, type ChatMergeBlockReason, type ChatMergeOutcome, type ChatMergeState } from "./contracts/project-catalog-v1.ts";
+import { mergeConfirmationFor, mergeConfirmationStillValid, type MergeConfirmation } from "./merge-confirmation.ts";
 
 type Notice =
   | { kind: "merged" }
@@ -31,7 +32,10 @@ export function ChatWorkspaceMerge({ chat, disabled, fallback, merged = false, o
 }) {
   const { t } = useI18n();
   const [state, setState] = useState<ChatMergeState | null>(null);
-  const [confirming, setConfirming] = useState(false);
+  /** The head and base the person is confirming (N1): the merge is sent with these. */
+  const [confirmation, setConfirmation] = useState<MergeConfirmation | null>(null);
+  const confirming = confirmation !== null;
+  const setConfirming = (open: false) => { if (!open) setConfirmation(null); };
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   /** The state could not be read: say so and offer to look again. */
@@ -56,6 +60,14 @@ export function ChatWorkspaceMerge({ chat, disabled, fallback, merged = false, o
   useEffect(() => { void inspect(); return () => { generation.current++; }; }, [inspect, revision]);
   // Reported once known: null then means the state could not be read.
   useEffect(() => { if (state || unavailable) onState?.(state); }, [state, unavailable, onState]);
+  // A later read that moved the task or the base ends the open confirmation:
+  // the person confirms again what will actually be merged.
+  useEffect(() => {
+    if (confirmation && !busy && !mergeConfirmationStillValid(confirmation, state)) {
+      setConfirmation(null);
+      setNotice({ kind: "blocked", reason: "changedSinceReview" });
+    }
+  }, [state, confirmation, busy]);
 
   if (!state) {
     return unavailable
@@ -66,10 +78,12 @@ export function ChatWorkspaceMerge({ chat, disabled, fallback, merged = false, o
   if (state.kind === "snapshot") return <>{fallback}</>;
 
   const base = state.baseRef ?? "main";
-  async function merge(keepConflicts = false, current: ChatMergeState | null = state) {
-    if (!window.m5Projects || current?.kind !== "gitWorktree" || !current.baseTip || busy) return;
+  /** Sends the merge for exactly what was confirmed (`target`), never a later read. */
+  async function merge(target: MergeConfirmation | null, keepConflicts = false) {
+    if (!window.m5Projects || !target || busy) return;
+    if (!mergeConfirmationStillValid(target, state)) { setConfirmation(null); setNotice({ kind: "blocked", reason: "changedSinceReview" }); return; }
     setBusy(true); setNotice(null);
-    const request = { action: "mergeChatWorkspace" as const, ...address, expectedHead: current.head, expectedBase: current.baseTip, keepConflicts, confirmed: true as const };
+    const request = { action: "mergeChatWorkspace" as const, ...address, expectedHead: target.head, expectedBase: target.baseTip, keepConflicts, confirmed: true as const };
     try {
       const result = validateProjectCatalogResult(await window.m5Projects.request(request), request);
       if (result.action !== "mergeChatWorkspace") return;
@@ -92,9 +106,10 @@ export function ChatWorkspaceMerge({ chat, disabled, fallback, merged = false, o
   }
 
   async function askTeam() {
-    // Fresh head and base, then merge again keeping the conflict marks.
+    // Fresh head and base (the person asked the team to resolve this exact
+    // conflict), then merge again keeping the conflict marks.
     setNotice(null);
-    await merge(true, await inspect());
+    await merge(mergeConfirmationFor(await inspect()), true);
   }
 
   const blocked = state.blocked;
@@ -110,11 +125,11 @@ export function ChatWorkspaceMerge({ chat, disabled, fallback, merged = false, o
     {confirming
       ? <span className="m5-merge-confirm" role="group" aria-label={t("m5.merge.confirmTitle", { base })}>
           <small>{t(state.baseCheckedOut ? "m5.merge.confirmCheckedOut" : "m5.merge.confirmOther", { base })}</small>
-          <button type="button" disabled={disabled || busy} onClick={() => void merge()}>{t(busy ? "m5.merge.merging" : "m5.merge.confirm")}</button>
+          <button type="button" disabled={disabled || busy} onClick={() => void merge(confirmation)}>{t(busy ? "m5.merge.merging" : "m5.merge.confirm")}</button>
           <button type="button" className="m5-secondary" disabled={busy} onClick={() => setConfirming(false)}>{t("m5.merge.cancel")}</button>
         </span>
       : <button type="button" disabled={disabled || busy || blocked !== null} title={blocked ? t(`m5.merge.blocked.${blocked}`, { base }) : undefined}
-          onClick={() => { setNotice(null); void inspect().then(() => setConfirming(true)); }}>
+          onClick={() => { setNotice(null); void inspect().then(fresh => { const target = mergeConfirmationFor(fresh); if (target) setConfirmation(target); }); }}>
           {blocked === "nothingToMerge" && (merged || notice?.kind === "merged") ? t("m5.merge.done", { base }) : t("m5.merge.open", { base })}
         </button>}
     {notice && <span className="m5-merge-notice" role="status">

@@ -1085,4 +1085,10 @@ export const en: Record<MessageKey, string> = {
   "m5.approval.openFirst": "To allow, first open “Show the full request” and check exactly what will run or change.",
   "m5.markdown.tooLarge": "This is large, so it is shown as plain text.",
   "m5.roles.filledNotSaved": "Roles without a model show the recommended one. Save to keep it.",
+  "m5.apply.changedWhileConfirming": "The workspace changed after the confirmation opened. Check the changes and apply again.",
+  "m5.task.result.readFailed": "Could not check whether this task reached your folder",
+  "m5.task.readFailed": "Check failed",
+  "m5.task.recheck": "Check task status again",
+  "m5.markdown.truncated": "This is long, so only the first part is formatted. The rest is plain text.",
+  "m5.message.noSummary": "A long report with no sentences to summarise. Open “More” to see it all.",
 };

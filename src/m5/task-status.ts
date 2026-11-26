@@ -113,12 +113,17 @@ export function taskGroup(phase: TaskPhase): TaskGroup {
 export interface ResultBarView {
   phase: TaskPhase;
   loading: boolean;
-  detailKey: "m5.task.result.review" | "m5.task.result.merged" | "m5.task.result.applied" | "m5.task.result.changedSinceMerge" | "m5.task.result.changedSinceApply" | null;
+  detailKey: "m5.task.result.review" | "m5.task.result.merged" | "m5.task.result.applied" | "m5.task.result.changedSinceMerge" | "m5.task.result.changedSinceApply" | "m5.task.result.readFailed" | null;
+  /** The standing could not be read: say so and offer to look again. */
+  failed?: boolean;
 }
-export function resultBarView(input: { phase: TaskPhase; kind: TaskKind | null; known: boolean; switching?: boolean }): ResultBarView | null {
-  const { phase, kind, known, switching = false } = input;
+export function resultBarView(input: { phase: TaskPhase; kind: TaskKind | null; known: boolean; switching?: boolean; failed?: boolean }): ResultBarView | null {
+  const { phase, kind, known, switching = false, failed = false } = input;
   if (switching) return { phase, loading: true, detailKey: null };
   if (phaseIsWorking(phase) || phase === "stopped" || phase === "discarded") return null;
+  // A read that failed is never hidden, an answer's included: the person can
+  // look again (review N2).
+  if (failed) return { phase, loading: false, detailKey: "m5.task.result.readFailed", failed: true };
   if (!known) return { phase, loading: true, detailKey: null };
   // An answer with nothing to put into the folder offers nothing to do.
   if (phase === "answered") return null;
@@ -153,19 +158,11 @@ export function succeededRunNoticeKey(phase: TaskPhase | null) {
 }
 
 /**
- * Whether the open task's standing has been read for the result bar: known,
- * or a read that failed (the panels then offer to look again). A failed read
- * never leaves the bar locked on a placeholder.
+ * Whether the open task's standing is settled for the result bar: read, or
+ * a read that failed (then shown as such, with "look again"). Reading itself
+ * runs apart from the bar, so an answer whose bar is hidden is still read
+ * again when the task or its changes change (review N2).
  */
-export function standingRead(input: {
-  disposition: TaskDisposition | null;
-  /** This task's merge read; `state: null` means it could not be read. */
-  mergeRead: { state: ChatMergeState | null } | null;
-  /** This task's apply receipt read (copy tasks); `state: null` means it failed. */
-  applyRead: { state: unknown } | null;
-}): boolean {
-  const { disposition, mergeRead, applyRead } = input;
-  if (disposition) return true;
-  if (mergeRead && mergeRead.state === null) return true;
-  return mergeRead?.state?.kind === "snapshot" && applyRead !== null && applyRead.state === null;
+export function standingRead(input: { disposition: TaskDisposition | null; failed: boolean }): boolean {
+  return input.disposition !== null || input.failed;
 }

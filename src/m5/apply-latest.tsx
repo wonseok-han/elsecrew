@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.tsx";
 import { validateProjectCatalogResult, type ChatMergeState } from "./contracts/project-catalog-v1.ts";
 import { changesStatus, type TaskPhase } from "./task-status.ts";
+import { applyConfirmationStillValid } from "./merge-confirmation.ts";
 
 /** Where a task's changes stand against the user's folder (both kinds of task). */
 export type ChangesStanding = "notYet" | "done" | "changedSince";
@@ -43,7 +44,11 @@ export function ApplyLatest({ projectId, chatId, changeCount, disabled, confirmR
   revision?: string;
 }) {
   const { t } = useI18n();
-  const [confirming, setConfirming] = useState(false);
+  const [confirming, setConfirmingState] = useState(false);
+  /** What the open confirmation is about (the receipt read when it opened). */
+  const confirmFor = useRef<ApplyStanding | null>(null);
+  /** The workspace changed while the confirmation was open: confirm again. */
+  const [changedWhileConfirming, setChangedWhileConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ written: number; removed: number; skipped: number; failed: string | null } | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -51,6 +56,8 @@ export function ApplyLatest({ projectId, chatId, changeCount, disabled, confirmR
   /** The receipt could not be read: show the plain panel rather than wait. */
   const [unreadable, setUnreadable] = useState(false);
   const generation = useRef(0);
+  const stateRef = useRef<ApplyStanding | null>(null);
+  const setConfirming = (open: boolean) => { confirmFor.current = open ? stateRef.current : null; if (open) setChangedWhileConfirming(false); setConfirmingState(open); };
   const onInspectedRef = useRef(onInspected);
   onInspectedRef.current = onInspected;
   const inspect = useCallback(async () => {
@@ -65,7 +72,16 @@ export function ApplyLatest({ projectId, chatId, changeCount, disabled, confirmR
       }
     } catch { if (epoch === generation.current) { setState(null); setUnreadable(true); onInspectedRef.current?.(null); } }
   }, [projectId, chatId]);
-  useEffect(() => { setConfirming(false); setResult(null); setFailed(null); setState(null); setUnreadable(false); }, [projectId, chatId]);
+  useEffect(() => { setConfirming(false); setResult(null); setFailed(null); setState(null); setUnreadable(false); setChangedWhileConfirming(false); }, [projectId, chatId]);
+  stateRef.current = state;
+  // A new read that differs from what the confirmation was opened on ends it.
+  useEffect(() => {
+    if (confirming && !busy && confirmFor.current && !applyConfirmationStillValid(confirmFor.current, state)) {
+      setConfirming(false);
+      setChangedWhileConfirming(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, confirming, busy]);
   // The workspace changed (a new step, a save): look again.
   useEffect(() => { void inspect(); return () => { generation.current++; }; }, [inspect, changeCount, revision]);
   const standing = applyStanding(state);
@@ -113,6 +129,7 @@ export function ApplyLatest({ projectId, chatId, changeCount, disabled, confirmR
     </div>}
     {result && <p role={result.failed ? "alert" : "status"} className="m5-apply-latest-done">{t(result.failed ? "m5.apply.partial" : "m5.apply.done", { written: result.written, removed: result.removed, path: result.failed ?? "" })}{result.skipped ? ` ${t("m5.apply.skipped", { count: result.skipped })}` : ""}</p>}
     {unreadable && !failed && <p role="status" className="m5-apply-latest-unread">{t("m5.apply.unreadable")} <button type="button" className="m5-link-button" onClick={() => void inspect()}>{t("m5.merge.inspectAgain")}</button></p>}
+    {changedWhileConfirming && !confirming && <p role="status" className="m5-apply-latest-changed">{t("m5.apply.changedWhileConfirming")}</p>}
     {failed && <div role="alert" className="m5-apply-latest-failed"><p>{t("m5.apply.failed")}</p><details><summary>{t("m5.chat.details")}</summary><pre>{failed}</pre></details></div>}
   </section>;
 }

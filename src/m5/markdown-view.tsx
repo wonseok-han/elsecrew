@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 import { useI18n } from "../i18n.tsx";
-import { parseMarkdown, safeLinkTarget, tooLargeToDraw, type MarkdownBlock, type MarkdownInline } from "./markdown.ts";
+import { parseMarkdownWithLimits, safeLinkTarget, tooLargeToDraw, type MarkdownBlock, type MarkdownInline } from "./markdown.ts";
 
 /**
  * Draws parsed Markdown as React elements only (never as markup), so no text
@@ -11,7 +11,8 @@ export function MarkdownView({ source, renderCode }: { source: string; renderCod
   const { t } = useI18n();
   // A very large document is shown as it is: drawing it would hold the screen.
   if (tooLargeToDraw(source)) return <><p className="m5-md-plain-note">{t("m5.markdown.tooLarge")}</p><pre className="m5-md-plain">{source}</pre></>;
-  return <>{parseMarkdown(source).map((block, index) => <Block key={index} block={block} renderCode={renderCode} />)}</>;
+  const { blocks, truncated } = parseMarkdownWithLimits(source);
+  return <>{blocks.map((block, index) => <Block key={index} block={block} renderCode={renderCode} />)}{truncated && <p className="m5-md-plain-note">{t("m5.markdown.truncated")}</p>}</>;
 }
 
 function Block({ block, renderCode }: { block: MarkdownBlock; renderCode?: (text: string, language: string) => ReactNode }): ReactNode {

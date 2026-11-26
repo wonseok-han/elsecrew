@@ -5,7 +5,7 @@ import { runInNewContext } from "node:vm";
 import test from "node:test";
 import ts from "typescript";
 import { renderToStaticMarkup } from "react-dom/server";
-import { parseInline, parseMarkdown, safeLinkTarget } from "../src/m5/markdown.ts";
+import { MARKDOWN_MAX_NODES, parseInline, parseMarkdown, parseMarkdownWithLimits, safeLinkTarget, tooLargeToDraw } from "../src/m5/markdown.ts";
 import * as markdown from "../src/m5/markdown.ts";
 import { messageSummary } from "../src/m5/message-summary.ts";
 import { correctSettingsDraft, editSettingsDraft, loadSettingsDraft, settingsDraftDirty, settingsDraftSavable } from "../src/m5/settings-draft.ts";
@@ -328,4 +328,37 @@ test("a recommended model the screen filled in can be saved without counting as 
   assert.equal(settingsDraftSavable(correctSettingsDraft(untouched, team => team), same), false);
   const source = readFileSync(new URL("../src/m5/workbench.tsx", import.meta.url), "utf8");
   assert.ok(source.includes("disabled={editing || !valid || !savable}"));
+});
+
+test("element, line and scanning limits match what the parser makes (review #2 follow-up)", () => {
+  // The reviewer's number table: 57,883 chars, 102 lines, 28,280 cells before.
+  const row = "|" + "9|".repeat(280);
+  const table = [row, "|" + "-|".repeat(280), ...Array.from({ length: 100 }, () => row)].join("\n");
+  assert.ok(!tooLargeToDraw(table), "small enough by size");
+  const { blocks, truncated } = parseMarkdownWithLimits(table);
+  const cells = blocks.filter(block => block.kind === "table").reduce((sum, block) => sum + (block as { header: unknown[] }).header.length + (block as { rows: unknown[][] }).rows.reduce((n, cellsInRow) => n + cellsInRow.length, 0), 0);
+  assert.ok(cells <= MARKDOWN_MAX_NODES, `cells ${cells}`);
+  assert.equal(truncated, true);
+  assert.equal(blocks[blocks.length - 1]!.kind, "paragraph", "the rest stays as plain text");
+  const html = renderMarkdown(table);
+  assert.ok(html.includes("m5.markdown.truncated"));
+  // Inline pieces count too.
+  const inline = parseMarkdownWithLimits("*a* ".repeat(30_000));
+  assert.equal(inline.truncated, true);
+  // Lines broken by CR alone count as lines, as the parser reads them.
+  assert.ok(tooLargeToDraw(Array.from({ length: 4_001 }, () => "- x").join("\r")));
+  assert.ok(tooLargeToDraw(Array.from({ length: 4_001 }, () => "- x").join("\r\n")));
+  // A link destination that never closes is scanned within the shared budget.
+  const started = performance.now();
+  parseInline("[a](" + "x".repeat(200_000) + " [b](" + "y".repeat(200_000));
+  assert.ok(performance.now() - started < 1_000);
+});
+
+test("a long report whose start has no sentences stays folded behind 'more' (review #2 follow-up)", () => {
+  const codeFirst = "```js\n" + "const a = 1;\n".repeat(700) + "```\n\n끝에 설명 문장이 있어요.";
+  const summary = messageSummary(codeFirst);
+  assert.equal(summary.long, true);
+  assert.equal(summary.noProse, true);
+  assert.equal(summary.summary, "");
+  assert.ok(ko["m5.message.noSummary"]);
 });

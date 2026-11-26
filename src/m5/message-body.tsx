@@ -16,7 +16,7 @@ export function MessageBody({ text, fold = false }: { text: string; fold?: boole
   const full = <div className="m5-message-body m5-md"><MarkdownView source={text} renderCode={(code, language) => <CodeSnippet text={code} language={language} />} /></div>;
   if (!summary.long) return full;
   return <div className="m5-message-fold">
-    {!open && <p className="m5-message-summary">{summary.summary}</p>}
+    {!open && <p className="m5-message-summary">{summary.noProse ? t("m5.message.noSummary") : summary.summary}</p>}
     {open && full}
     <button type="button" className="m5-link-button m5-message-more" aria-expanded={open} onClick={() => setOpen(value => !value)}>{t(open ? "m5.message.less" : "m5.message.more")}</button>
   </div>;
