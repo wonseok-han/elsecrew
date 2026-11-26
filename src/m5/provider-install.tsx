@@ -8,6 +8,8 @@ const running = (status: InstallStatus | null) => status !== null &&
 
 /** One installation manager is shared by both providers. Never replay a start on transport failure. */
 export const INSTALL_STATUS_REFRESH = "m5-install-status-refresh";
+/** A login guide asks to look at installing one agent (detail: the provider). Only prepares: the consent dialog still decides. */
+export const INSTALL_PREPARE = "m5-install-prepare";
 
 export function ProviderInstall({ disabled, providers, onBlockChange, onCheck, onAttention, compact = false, integrated = false, slotsRevision = "" }: {
   disabled: boolean; providers: InstallProvider[]; onBlockChange: (blocked: boolean) => void;
@@ -59,6 +61,15 @@ export function ProviderInstall({ disabled, providers, onBlockChange, onCheck, o
   }, [request]);
   const active = running(status);
   const poll = active || uncertain;
+  const canPrepareNow = !disabled && !busy && !uncertain && status !== null && !active && !["unsupported", "recoveryRequired"].includes(status.state);
+  useEffect(() => {
+    const prepare = (event: Event) => {
+      const provider = (event as CustomEvent<unknown>).detail;
+      if ((provider === "codex" || provider === "claude") && providers.includes(provider) && canPrepareNow) void request({ action: "prepare", provider });
+    };
+    window.addEventListener(INSTALL_PREPARE, prepare);
+    return () => window.removeEventListener(INSTALL_PREPARE, prepare);
+  }, [canPrepareNow, providers, request]);
   useEffect(() => {
     if (!poll) return;
     const timer = window.setInterval(() => void request({ action: "status" }), 1500);
@@ -71,8 +82,7 @@ export function ProviderInstall({ disabled, providers, onBlockChange, onCheck, o
   useEffect(() => { onAttention?.(actionRequired); }, [actionRequired, onAttention]);
   if (!window.m5Install) return null;
   const showDetails = !compact || expanded || needsAttention;
-  const canPrepare = !disabled && !busy && !uncertain && status !== null && !active &&
-    !["unsupported", "recoveryRequired"].includes(status.state);
+  const canPrepare = canPrepareNow;
   const panel = <section data-active={active || undefined} className={`m5-provider-install${compact ? " m5-provider-install-compact" : ""}`} aria-label={t("m5.install.title")}>
     <header><div className="m5-install-heading"><strong>{t("m5.install.title")}</strong>
       <p role="status">{status?.provider && <strong>{status.provider === "codex" ? "Codex" : "Claude Code"} · </strong>}
@@ -96,8 +106,8 @@ export function ProviderInstall({ disabled, providers, onBlockChange, onCheck, o
       <p>{t("m5.install.scope")}</p>
       <details className="m5-install-paths"><summary>{t("m5.install.locations")}</summary><ul>{plan.writeDirectories.map(path => <li key={path}><code><bdi>{path}</bdi></code></li>)}</ul></details>
       <p>{t("m5.install.expiry")}</p>
-      <div className="m5-install-actions"><button type="button" autoFocus disabled={busy} onClick={() => void request({ action: "dismiss" })}>{t("m5.install.dismiss")}</button>
-        <button type="submit" disabled={disabled || busy}>{t("m5.install.start")}</button></div>
+      <div className="m5-dialog-actions"><button type="button" data-first-focus disabled={busy} onClick={() => void request({ action: "dismiss" })}>{t("m5.install.dismiss")}</button>
+        <button type="submit" className="m5-btn-primary" disabled={disabled || busy}>{t("m5.install.start")}</button></div>
     </form></InstallConfirmation>}
 
     {status?.state === "installed" && status.provider && !uncertain && <button type="button" disabled={disabled || busy}
@@ -128,9 +138,11 @@ function InstallConfirmation({title, busy, onDismiss, children}: {title: string;
   useEffect(() => {
     const element = dialog.current;
     element?.showModal();
+    // A confirmation starts on Cancel, not on the first thing in it (the folder list).
+    element?.querySelector<HTMLButtonElement>("[data-first-focus]")?.focus();
     return () => element?.close();
   }, []);
-  return <dialog ref={dialog} className="m5-install-confirmation" aria-labelledby="m5-install-confirm-title" onCancel={event => {event.preventDefault(); if (!busy) onDismiss();}}>
-    <h3 id="m5-install-confirm-title">{title}</h3>{children}
+  return <dialog ref={dialog} className="m5-install-confirmation m5-confirm-dialog" aria-labelledby="m5-install-confirm-title" onCancel={event => {event.preventDefault(); if (!busy) onDismiss();}}>
+    <h2 id="m5-install-confirm-title">{title}</h2>{children}
   </dialog>;
 }

@@ -1,7 +1,7 @@
 import { createClaudeUsageReader } from "./claude-usage.ts";
 import { CLAUDE_USAGE_CHANNEL, validateClaudeUsageResult } from "../src/m5/contracts/provider-usage-v1.ts";
 import { randomUUID } from "node:crypto";
-import { installAppUpdateMenu } from "./app-update-menu.ts";
+import { installAppUpdateMenu, type AppUpdateHandle } from "./app-update-menu.ts";
 import { installZoomGuardedMenu, zoomLevelAfter, type ZoomStep } from "./zoom-menu.ts";
 import { GitPreparationClient, isGitPreparation, WINDOWS_GIT_PREPARATION_ENABLED } from "./git-preparation.ts";
 import { GitSelectionStore } from "./git-selection.ts";
@@ -80,6 +80,9 @@ let sidecar: SidecarClientV1 | undefined;
 let gitPreparation: GitPreparationClient | undefined;
 const eventCredit = new EventCreditV1((error) => sidecar?.failConsumerTooSlow());
 let pendingUpdateInstall: (() => void) | undefined;
+/** The app update main owns (ADE U8): the page shows its state and may ask; main decides. */
+let appUpdate: AppUpdateHandle | undefined;
+const APP_UPDATE_REQUESTS = new Set(["check", "restart"]);
 let updateReadiness: { nonce: string; finish: (ready: boolean) => void } | undefined;
 async function rendererReadyForUpdate(): Promise<boolean> {
   if (!mainWindow || mainWindow.isDestroyed() || updateReadiness) return false;
@@ -570,6 +573,27 @@ function registerIpcHandlers(): void {
     if (saved) rememberedTheme = args[0];
     return { dark: nativeTheme.shouldUseDarkColors, saved };
   });
+  // The in-app update banner (ADE U8, Q7). The page reads main's state and may
+  // ask for a check or a restart. A restart is never the page's call: main asks
+  // in its own native box, then the existing safe-quit checks still decide.
+  ipcMain.handle("m5:app-update:state", async (event, ...args: unknown[]) => {
+    assertCurrentMainFrame(event);
+    if (args.length !== 0) throw new Error("app update state takes no input");
+    return appUpdate?.state() ?? "unavailable";
+  });
+  ipcMain.handle("m5:app-update:request", async (event, ...args: unknown[]) => {
+    assertCurrentMainFrame(event);
+    if (args.length !== 1 || typeof args[0] !== "string" || !APP_UPDATE_REQUESTS.has(args[0])) throw new Error("invalid app update request");
+    if (!appUpdate) throw new Error("app update is unavailable");
+    if (args[0] === "check") { appUpdate.check(); return appUpdate.state(); }
+    if (appUpdate.state() !== "ready") throw new Error("no downloaded update to install");
+    const ko = app.getLocale().toLowerCase().startsWith("ko");
+    const answer = await dialog.showMessageBox(mainWindow!, { type: "question", message: ko ? "업데이트를 적용하고 다시 시작할까요?" : "Install the update and restart?",
+      detail: ko ? "편집 중인 내용을 먼저 저장하세요. 진행 중인 작업이 안전하게 멈추는 것을 확인할 수 없으면 다시 시작하지 않아요." : "Save your edits first. The app does not restart unless running work can be confirmed to stop safely.",
+      buttons: ko ? ["취소", "다시 시작"] : ["Cancel", "Restart"], defaultId: 0, cancelId: 0 });
+    if (answer.response === 1 && appUpdate.state() === "ready") await appUpdate.restart();
+    return appUpdate.state();
+  });
   ipcMain.handle("m5:app-update:open", async (event, ...args: unknown[]) => {
     assertCurrentMainFrame(event);
     if (args.length !== 0) throw new Error("app update takes no input");
@@ -591,7 +615,24 @@ function registerIpcHandlers(): void {
   ipcMain.handle(INSTALL_CHANNEL, quietAfterQuit(async (event, input: unknown) => {
     assertCurrentMainFrame(event);
     if (!sidecar) throw new Error("sidecar was not started");
-    return validateInstallStatus(await sidecar.install(validateInstallRequest(input)));
+    const request = validateInstallRequest(input);
+    // Installing writes outside the app (PR #14 review B1). A page request is
+    // not the person's consent: main reads the plan that awaits consent and
+    // asks in its own native box; only "Install" there starts it. The page
+    // can neither name the folders nor answer this box.
+    if (request.action === "start") {
+      const current = validateInstallStatus(await sidecar.install({ action: "status" }));
+      const plan = current.state === "awaitingConsent" ? current.plan : null;
+      if (!plan || plan.planId !== request.planId || plan.provider !== request.provider) throw new Error("installation plan is not awaiting consent");
+      const ko = app.getLocale().toLowerCase().startsWith("ko");
+      const name = plan.provider === "codex" ? "Codex" : "Claude Code";
+      const answer = await dialog.showMessageBox(mainWindow!, { type: "question",
+        message: ko ? `${name}을(를) 설치·업데이트할까요?` : `Install or update ${name}?`,
+        detail: `${ko ? "공식 배포 경로로 설치하고, 아래 폴더의 기존 명령이 바뀔 수 있어요. 셸 설정 파일은 바꾸지 않아요." : "It installs from the official source; the existing commands in these folders may change. Shell settings files are not changed."}\n\n${plan.writeDirectories.join("\n")}`,
+        buttons: ko ? ["취소", "설치·업데이트"] : ["Cancel", "Install or update"], defaultId: 0, cancelId: 0 });
+      if (answer.response !== 1) return current;
+    }
+    return validateInstallStatus(await sidecar.install(request));
   }));
   const claudeUsage = createClaudeUsageReader(m5DataDirectory(), net.fetch as typeof fetch, async () => {
     if (!sidecar) return false;
@@ -932,7 +973,7 @@ app.whenReady().then(async () => {
   await protocol.handle(APP_SCHEME, serveAppAsset);
   registerIpcHandlers();
   installZoomGuardedMenu(zoomPage);
-  installAppUpdateMenu(async (install) => {
+  appUpdate = installAppUpdateMenu(async (install) => {
     if (!await rendererReadyForUpdate()) {
       const ko = app.getLocale().toLowerCase().startsWith("ko");
       await dialog.showMessageBox({ type: "info", message: ko ? "편집 중인 내용을 먼저 저장해 주세요." : "Please save your edits first.",
@@ -946,7 +987,8 @@ app.whenReady().then(async () => {
       pendingUpdateInstall = undefined;
       if (!safe && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("m5:app-update:resume");
     }
-  });
+  }, state => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("m5:app-update:changed", state); },
+  () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("m5:app-update:reveal"); });
   await createMainWindow();
   sidecar ??= startSidecar();
 

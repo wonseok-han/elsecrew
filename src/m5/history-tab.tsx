@@ -1,4 +1,5 @@
 import { useI18n } from "../i18n.tsx";
+import { EmptyState } from "./empty-state.tsx";
 import type { ChatUiController } from "./chat-state.ts";
 import { AgentRuns } from "./task-story.tsx";
 import type { TaskPhase } from "./task-status.ts";
@@ -17,12 +18,12 @@ export function HistoryTab({ controller, chat, admissionReady, fixtureAvailable,
   phase: TaskPhase | null;
 }) {
   const { t } = useI18n();
-  if (!chat.activeChat) return <p className="m5-empty">{t("m5.history.none")}</p>;
+  if (!chat.activeChat) return <EmptyState icon="clock" title={t("m5.history.noneTitle")} help={t("m5.history.none")} />;
   const fixtureActive = Boolean(chat.activeRunId);
   const actualActive = chat.agentRuns.some(run => ["preparing", "running", "cancelling"].includes(run.state));
   const blocked = controller.isActionBlocked();
   return <section className="m5-history-tab" aria-label={t("m5.layout.tab.history")}>
-    {chat.agentRuns.length === 0 ? <p className="m5-empty">{t("m5.history.empty")}</p>
+    {chat.agentRuns.length === 0 ? <EmptyState icon="clock" title={t("m5.history.empty")} help={t("m5.history.emptyHelp")} />
       : <AgentRuns runs={chat.agentRuns} definitions={chat.activeChat.roleDefinitions} posted={chat.messages} phase={phase} />}
     {fixtureAvailable && <details className="m5-history-dev">
       <summary>{t("m5.history.dev")}</summary>

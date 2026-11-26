@@ -20,7 +20,19 @@ window.m5Models = { request: async input => {
     {modelSelector:"new-default", reasoningEfforts:["medium","high"], isDefault:true},
   ] };
 } };
-window.m5AppUpdate = { open: async () => {}, onRestartCheck: (check, resume) => {
+// ADE U8: main's update state, played by the smoke; requests are recorded, never acted on here.
+window.m5SmokeUpdateRequests = [];
+{
+  let updateListener = null;
+  window.m5SmokeUpdateState = "unavailable";
+  window.m5SmokeSetUpdateState = state => { window.m5SmokeUpdateState = state; updateListener?.(state); };
+  window.m5SmokeUpdateApi = {
+    state: async () => window.m5SmokeUpdateState,
+    onState: listener => { updateListener = listener; return () => { if (updateListener === listener) updateListener = null; }; },
+    request: async action => { window.m5SmokeUpdateRequests.push(action); return window.m5SmokeUpdateState; },
+  };
+}
+window.m5AppUpdate = { ...window.m5SmokeUpdateApi, open: async () => {}, onRestartCheck: (check, resume) => {
   window.m5SmokeUpdateCheck = check; window.m5SmokeUpdateResume = resume;
   return () => { window.m5SmokeUpdateCheck = undefined; window.m5SmokeUpdateResume = undefined; };
 } };

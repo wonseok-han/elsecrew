@@ -187,7 +187,7 @@ app.whenReady().then(async () => {
     if (localStorage.getItem('elsecrew.lang') !== 'en') throw new Error('language choice was not saved');
     chooseLanguage('ko');
     await ${waitFor("document.querySelector('main').lang === 'ko' && document.querySelector('h1').textContent === '이어서 작업하기'", "Korean shell")};
-    await ${waitFor("document.querySelector('[aria-label=\"진행 및 복구 상태\"] code')?.textContent === 'lock:before_chat'", "pre-chat lock notice")};
+    await ${waitFor("(document.querySelector('[aria-label=\"진행 및 복구 상태\"] .m5-recover-details pre')?.textContent ?? '').split(String.fromCharCode(10)).includes('lock:before_chat')", "pre-chat lock notice")};
     const getStatus = window.m5.getSystemStatus;
     window.m5.getSystemStatus = async () => { throw new Error('synthetic status failure'); };
     document.querySelector('[aria-label="진행 및 복구 상태"] button').click();
@@ -212,7 +212,12 @@ app.whenReady().then(async () => {
     if (document.getElementById('codex-connection-details').hidden) throw new Error('status polling collapsed explicit settings');
     codexButton('연결 상태 다시 확인').click();
     await ${waitFor("window.m5SmokeLoginRequests.filter(r=>r.action==='recover').length === 1 && !document.querySelector('[aria-label=\"연결 상태 다시 확인\"]').disabled", "verified recovery fails closed")};
-    if (!codexButton('Codex 로그인').disabled || codexButton('연결 잠금 복구')) throw new Error('failed recovery bypass or exposed internal action');
+    if ((codexButton('Codex 로그인') && !codexButton('Codex 로그인').disabled) || codexButton('연결 잠금 복구')) throw new Error('failed recovery bypass or exposed internal action');
+    // ADE U5: the failure is an F11 guide — what happened, one thing to do now, help details folded.
+    const loginGuide = document.querySelector('[data-testid=login-guide-codex]');
+    if (!loginGuide?.textContent.includes('Codex 로그인 정리를 기다리고 있어요') || loginGuide.querySelectorAll('.m5-btn-primary').length !== 1 || loginGuide.querySelector('details')?.open) throw new Error('login failure must be a guide with one main action and folded help details');
+    if (loginGuide.querySelector('.m5-recover-what').textContent.includes('providerLoginRecoveryRequired')) throw new Error('the raw error key belongs only in the help details');
+    ${capture("28-agents-login-guide")}
     await new Promise(resolve => setTimeout(resolve, 650));
     if (window.m5SmokeLoginRequests.filter(r=>r.action==='recover').length !== 1) throw new Error('recovery automatically retried');
     codexButton('연결 상태 다시 확인').click();
@@ -302,18 +307,18 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-preferences-row').getClientRects().length > 0", "leave project management")};
     document.querySelectorAll('.m5-preferences-layout > nav button')[5].click();
     await ${waitFor("document.querySelector('[aria-label=\"실패한 준비 종료 확인\"]')?.getClientRects().length > 0", "project recovery inspection survives navigation")};
-    recoveryButton('이 준비 기록 종료').click();
-    await ${waitFor("document.querySelector('[aria-label=\"프로젝트 시작 실패 복구\"]').textContent.includes('결과를 확인하지 못했어요')", "lost preparation response")};
+    recoveryButton('멈춘 준비 정리하기').click();
+    await ${waitFor("document.querySelector('[aria-label=\"프로젝트 시작 실패 복구\"]').textContent.includes('정리됐는지 확인하지 못했어요')", "lost preparation response")};
     const pendingPreparation = document.querySelector('[aria-label="실패한 준비 종료 확인"]');
     const pendingId = pendingPreparation.querySelector('code').textContent;
     chooseLanguage('en');
-    await ${waitFor("document.querySelector('[aria-label=\\\"Project startup failure recovery\\\"]')?.textContent.includes('Could not verify the outcome.')", "English unknown preparation outcome")};
+    await ${waitFor("document.querySelector('[aria-label=\\\"Project startup failure recovery\\\"]')?.textContent.includes('Could not confirm it was cleared.')", "English unknown preparation outcome")};
     if (pendingPreparation !== document.querySelector('[aria-label="Confirm closing failed preparation"]') || pendingPreparation.querySelector('code').textContent !== pendingId) throw new Error('language switch reset preparation confirmation');
     if (document.querySelector('.m5-project-catalog').getAttribute('aria-label') !== 'Projects' || document.querySelector('.m5-project-catalog-list li').dataset.path !== '/work/earlier') throw new Error('language switch lost saved project');
     chooseLanguage('ko');
-    await ${waitFor("document.querySelector('[aria-label=\\\"프로젝트 시작 실패 복구\\\"]')?.textContent.includes('결과를 확인하지 못했어요')", "Korean preparation outcome restored")};
-    recoveryButton('이 준비 기록 종료').click();
-    await ${waitFor("document.querySelector('[aria-label=\"프로젝트 시작 실패 복구\"]').textContent.includes('실패한 준비 기록을 종료했어요')", "preparation retry acknowledgment")};
+    await ${waitFor("document.querySelector('[aria-label=\\\"프로젝트 시작 실패 복구\\\"]')?.textContent.includes('정리됐는지 확인하지 못했어요')", "Korean preparation outcome restored")};
+    recoveryButton('멈춘 준비 정리하기').click();
+    await ${waitFor("document.querySelector('[aria-label=\"프로젝트 시작 실패 복구\"]').textContent.includes('멈춘 준비를 정리했어요')", "preparation retry acknowledgment")};
     if (document.querySelector('[aria-label="실패한 준비 종료 확인"]')) throw new Error('completed preparation confirmation retained');
     globalThis.cleanupConsentReport = await (${probeCleanupConsent.toString()})();
     document.querySelector('.m5-app-settings > header button').click();
@@ -1053,14 +1058,59 @@ app.whenReady().then(async () => {
   }
   // This part starts on the home screen: the open project would come back by itself after the reload (last session).
   await window.webContents.executeJavaScript("localStorage.removeItem('elsecrew.m5.lastProject.v1')");
+  // ADE U6: notifications from two projects, one task with two open requests and three settled ones.
+  await window.webContents.executeJavaScript(`(() => {
+    const now = Date.now(), at = minutes => new Date(now - minutes * 60000).toISOString();
+    const line = (id, kind, projectId, chatId, goal, text, minutes, resolved) => ({ id, kind, projectId, chatId, goal, text, at: at(minutes), read: Boolean(resolved), ...(resolved ? { resolved: true, resolvedAt: at(1) } : {}) });
+    const goal = '메뉴 페이지에 오늘의 빵 세 가지를 추가해 줘';
+    localStorage.setItem('elsecrew.m5.notifications.v1', JSON.stringify([
+      line('approval:a', 'attention', 'smoke_project', 'smoke_chat', goal, '검증 담당이 명령 실행 허락을 기다려요', 3),
+      line('approval:b', 'attention', 'smoke_project', 'smoke_chat', goal, '개발 담당이 파일 쓰기 허락을 기다려요', 5),
+      line('approval:c', 'attention', 'smoke_project', 'smoke_chat', goal, '허락 요청', 30, true),
+      line('approval:d', 'attention', 'smoke_project', 'smoke_chat', goal, '허락 요청', 40, true),
+      line('approval:e', 'attention', 'smoke_project', 'smoke_chat', goal, '허락 요청', 50, true),
+      line('done:e1', 'done', 'earlier_project', 'earlier_chat', '할 일 목록 맨 아래에 오늘 날짜 넣기', '팀이 일을 마쳤어요', 12),
+    ]));
+  })()`);
   await window.loadURL("m5smoke://m5/index.html");
   await window.webContents.executeJavaScript(`(async () => {
-    await ${waitFor("[...document.querySelectorAll('[aria-label=\"Codex 연결\"] button')].some(button => button.textContent === '연결' && !button.disabled)", "connection preference fixture after reload")};
-    [...document.querySelectorAll('[aria-label="Codex 연결"] button')].find(button => button.textContent === '연결').click();
+    await ${waitFor("[...document.querySelectorAll('[aria-label=\"Codex 연결\"] button')].some(button => button.textContent === '연결하기' && !button.disabled)", "connection preference fixture after reload")};
+    [...document.querySelectorAll('[aria-label="Codex 연결"] button')].find(button => button.textContent === '연결하기').click();
     await ${waitFor("document.querySelector('[aria-label=\"Codex 연결\"]')?.textContent.includes('로그인이 연결됐어요')", "saved login after reconnect")};
     if (document.querySelector('.m5-provider-selection form')) throw new Error('saved agent choice was lost');
     if (!document.querySelector('[aria-label="Claude Code 연결"]')) throw new Error('added agent lost after reload');
     await ${waitFor("document.querySelector('.m5-home:not([hidden]) .m5-project-overflow')", "project removal on home")};
+    // ADE U6 (D10): the badge counts only what waits for the person; the panel opens on it, grouped by project and task.
+    const bell = document.querySelector('.m5-notification-bell');
+    if (bell.querySelector('.m5-notification-count:not(.m5-notification-alert)')?.textContent !== '2') throw new Error('bell badge must count only open requests');
+    bell.querySelector('summary').click();
+    await ${waitFor("document.querySelector('.m5-notification-tabs button[aria-pressed=true]')?.textContent.startsWith('확인 필요')", "panel opens on what needs you")};
+    if (bell.querySelectorAll('.m5-notification-item').length !== 2 || bell.querySelectorAll('.m5-notification-goal').length !== 1) throw new Error('attention tab: two open lines under one task goal');
+    [...bell.querySelectorAll('.m5-notification-tabs button')].find(button => button.textContent === '전체').click();
+    await ${waitFor("[...document.querySelectorAll('.m5-notification-project h4 > span')].map(h => h.textContent).join('|') === 'smoke|earlier'", "projects named in the panel")};
+    if (bell.querySelectorAll('.m5-notification-goal').length !== 2 || bell.querySelector('.m5-notification-settled')?.open !== false || !bell.querySelector('.m5-notification-settled summary').textContent.includes('3')) throw new Error('all tab: one goal per task, settled lines folded');
+    if (bell.textContent.split('메뉴 페이지에 오늘의 빵').length !== 2) throw new Error('a task goal is said once');
+    ${capture("30-notifications")}
+    bell.open = false;
+    // ADE U8 (Q7): main's update state shows as a banner; the page only asks (main confirms a restart itself).
+    window.m5SmokeSetUpdateState('ready');
+    await ${waitFor("document.querySelector('[data-testid=update-banner]')", "update banner")};
+    const restart = [...document.querySelectorAll('[data-testid=update-banner] button')].find(button => button.textContent === '다시 시작해 바꾸기');
+    if (!restart || restart.disabled || [...document.querySelectorAll('.m5-btn-primary:not(:disabled)')].filter(button => button.checkVisibility()).length > 1) throw new Error('a ready update offers its restart without a second main action on the screen');
+    ${capture("32-update-banner")}
+    restart.click();
+    await ${waitFor("window.m5SmokeUpdateRequests.join() === 'restart'", "restart asked of main")};
+    window.m5SmokeSetUpdateState('unavailable');
+    await ${waitFor("!document.querySelector('[data-testid=update-banner]')", "banner follows main's state")};
+    // PR #16 review I2: a closed failure banner shows again when a later check fails again.
+    window.m5SmokeSetUpdateState('error');
+    await ${waitFor("document.querySelector('[data-testid=update-banner]')", "update failure banner")};
+    document.querySelector('.m5-update-banner-close').click();
+    await ${waitFor("!document.querySelector('[data-testid=update-banner]')", "failure banner closed")};
+    window.m5SmokeSetUpdateState('checking');
+    window.m5SmokeSetUpdateState('error');
+    await ${waitFor("[...document.querySelectorAll('[data-testid=update-banner] button')].some(button => button.textContent === '다시 확인')", "a new failure shows again with its retry")};
+    window.m5SmokeSetUpdateState('unavailable');
     const earlierRow = () => [...document.querySelectorAll('.m5-home li[data-path]')].find(item => item.dataset.path === '/work/earlier');
     const catalogRequest = window.m5Projects.request;
     let removed = false;
@@ -1112,6 +1162,18 @@ app.whenReady().then(async () => {
     window.m5SmokeCatalogEmpty = false; window.m5SmokeOpenCancel = false; window.m5SmokeNoChats = true;
     [...document.querySelectorAll('[data-testid=first-run] button')].find(button => button.textContent === '프로젝트 선택').click();
     await ${waitFor("document.querySelector('.m5-new-task') && !document.querySelector('.m5-new-task').disabled", "project with no task yet")};
+    // ADE U7 (rule 7): an empty project — one frame for "nothing yet", one main action, examples as rows.
+    document.querySelector('[data-testid=right-tab-changes]')?.click();
+    await ${waitFor("document.querySelector('.m5-first-chat.m5-empty-state') && document.querySelector('.m5-task-list-empty')", "empty project")};
+    if (document.querySelectorAll('.m5-first-chat .m5-btn-primary').length !== 1 || !document.querySelector('.m5-first-chat .m5-empty-mark')) throw new Error('an empty state has its mark and one main action');
+    ${capture("31-empty-project")}
+    // PR #16 review M2: the kept rules still style the live screen (computed, not just named in code).
+    const tokenColor = name => { const probe = document.createElement('i'); probe.style.color = 'var(' + name + ')'; document.body.append(probe); const value = getComputedStyle(probe).color; probe.remove(); return value; };
+    const firstChat = getComputedStyle(document.querySelector('.m5-first-chat'));
+    if (firstChat.display !== 'flex' || firstChat.flexDirection !== 'column') throw new Error('the empty project frame lost its layout');
+    if (getComputedStyle(document.querySelector('.m5-first-chat-write')).backgroundColor !== tokenColor('--action-bg')) throw new Error('the empty project main action lost its color');
+    if (getComputedStyle(document.querySelector('.m5-goal-examples button')).backgroundColor !== tokenColor('--bg-raised')) throw new Error('example rows lost their face');
+    if (getComputedStyle(document.querySelector('.m5-task-list-empty')).textAlign !== 'center') throw new Error('the empty task list note lost its layout');
     document.querySelector('.m5-new-task').click();
     await ${waitFor("document.querySelector('.m5-new-chat-dialog')?.open && document.querySelector('.m5-first-chat-confirm')", "first-task window")};
     const firstGoal = document.querySelector('.m5-new-chat-form input');
