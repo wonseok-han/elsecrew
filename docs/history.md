@@ -16,7 +16,7 @@ PR #5 보고에 남긴 `tests/m5-renderer-mount-smoke.mts` 실패를 고쳤다. 
   - 메시지는 말풍선·이야기 카드(`.m5-story-flow …`)로, 단계 사이 안내는 단계 막대 '지금' 칸으로, 실행 세부는 '기록' 탭으로, 프로젝트 이름은 프로젝트 선택 버튼으로 읽는다.
   - 재진입 때 안내는 '이전 첫 작업 이어가기' 대신 바로 '진행 확인'이다(자동 재개).
 - **결과**: `node --test tests/m5-renderer-mount-smoke.mts` 2/2 통과, `pnpm m5:test:editor` 68 통과, `tests/m5-project-permissions-ui.mts` 통과, `npm test` 812 통과.
-- **CI 연결 판단**: 이 스모크는 이미 하네스 g4-project-editor와 g6 누적 게이트(`m5:test:editor`)에 있지만 CI는 baseline만 돌려 깨진 채 지나갔다. CI `test (macos-latest)`에 `node node_modules/electron/install.js && pnpm m5:test:editor` 단계를 붙였다(pnpm이 electron postinstall을 막으므로 바이너리를 직접 받음). Windows는 창 없는 Electron 시험이 흔들릴 위험이 있어 붙이지 않았다.
+- **CI 연결 판단**: 이 스모크는 이미 하네스 g4-project-editor와 g6 누적 게이트(`m5:test:editor`)에 있지만 CI는 baseline만 돌려 깨진 채 지나갔다. CI `test (macos-latest)`에 `node node_modules/electron/install.js && pnpm m5:test:editor` 단계를 붙였다(pnpm이 electron postinstall을 막으므로 바이너리를 직접 받음). Windows는 창 없는 Electron 시험이 흔들릴 위험이 있어 붙이지 않았다. 첫 CI에서 러너의 시스템 언어(영어) 때문에 한국어 기대값과 어긋나 실패했고, 러너가 `app.commandLine.appendSwitch("lang", "ko")`로 한국어를 고정한다(`ko-KR`은 Chromium이 받지 않아 영어로 떨어짐 — 로컬에서 `en-US`로 바꿔 CI와 같은 지점 실패를 재현해 확인).
 
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #5 독립 검토(차단 0, 중요 5, 경미 4) 반영
 검토서: `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr5.md`(대상 e3d0adff). 판단은 새 순수 함수 `src/m5/task-view-model.ts`에 두고, 지적마다 리뷰 재현을 `tests/m5-pr5-review.test.mts`로 막았다.

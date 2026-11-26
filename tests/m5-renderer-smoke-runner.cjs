@@ -36,6 +36,9 @@ function waitFor(script, label) {
   })`;
 }
 
+// The smoke reads Korean screens first; CI runners default to English.
+// Chromium takes "ko" here ("ko-KR" falls back to English).
+app.commandLine.appendSwitch("lang", "ko");
 app.whenReady().then(async () => {
   if (!rendererDirectory || rendererDirectory === resolve("")) throw new Error("M5_RENDERER_DIR is required");
   await session.fromPartition("m5-renderer-smoke").protocol.handle("m5smoke", (request) => {
