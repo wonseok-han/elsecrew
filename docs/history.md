@@ -2,6 +2,25 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #19 검토(차단 1·중요 2·경미 1) 반영과 Codex '명령 실행 허용' 일치 (`orca/ade-d3-bigwrite`)
+검토 `~/Documents/elsecrew-ade-stability-2026-11-26/REVIEW-pr19.md`(대상 f65683fd). 조정자 지시: 큰 입력은 전체를 본 뒤에만 허용, 모든 경로에서 예산 회수 증명, 명령 허용을 끄면 Codex도 매번 묻게.
+
+| 지적 | 처리 | 시험 |
+| --- | --- | --- |
+| B1 일부·빈 미리보기로 전체 허용 | 잘라 보여 주던 미리보기를 없앴다. 96KiB 넘는 입력은 정확한 원문(허용 응답이 되돌려 보내는 JSON 글)을 64KiB 쪽(UTF-8 경계)으로 나눠 보낸다. 카드는 '전체 내용 보기'를 펼치면 모든 쪽을 차례로 불러와 이어 붙이고, 크기·SHA-256이 엔진 값과 같을 때만 원문 전체를 보여 주며 허용을 켠다. 불러오지 못했거나 값이 다르면 허용할 수 없다. 엔진도 모든 쪽을 순서대로 내준 뒤에만 `acceptOnce`를 받는다. | owner 경로 `claude_large_tool_input_is_read_whole_before_allowing_and_its_budget_always_returns`(순서 밖 쪽·마지막 쪽 전 허용 거부, 이어 붙인 글 크기·SHA-256 = 엔진 값, 가짜 Claude가 받은 응답 SHA-256 일치), sidecar `a_large_tool_input_is_read_in_pages_that_join_to_the_exact_input`, core `a_large_write_is_kept_exactly_and_echoed_whole`(응답에 쪽 글이 그대로 포함), 화면 `a large Claude tool input arrives in pages…`, `the card's full content is the pages joined, checked…`, `canAcceptApproval` fullyRead |
+| I1 송신 버퍼·기한 | 큰 입력 예산이 요청 → 허용 응답 → 전송 계층으로 옮겨가, 다 쓰이거나 실패하거나 연결이 버려질 때까지 유지된다(대기+송신 합계 16MiB). 공급자가 30초 동안 읽지 않으면 그 연결만 실패한다(`SEND_STALL_MAX`). | `an_allow_reply_keeps_its_budget_until_written_and_a_stalled_write_fails`(다 씀·멈춤·버림 모두 반환) |
+| I2 종료 경로 예산 | 실행이 끝나면(종료 기록 성공 여부와 무관하게) 답할 수 없는 승인 대기열을 바로 비운다. 엔진 재시작은 새 프로세스라 예산이 0에서 시작한다. | owner 경로 4사례: 허용·전송 성공, 거절, 실행 종료 시 미응답, 전송 실패 — 모두 끝나면 예산 0 |
+| 경미 SHA-256 대상 | 카드 문구에 "이 JSON 글 그대로 기준"을 명시. | — |
+
+- **Codex 명령 허용(사용자 결정, 조정자 전달)**: 끄면 Codex 실행의 스레드를 `untrusted`로 시작해 안전한 읽기 외 명령은 매번 묻는다(카드). 켜면 지금처럼 `on-request`다. 설정 화면에 두 공급자 공통 의미를 적었다.
+  - **설치된 Codex 0.171 확인**: 프로세스 설정 `-c approval_policy="untrusted"`는 app-server가 "no longer supported"로 시작을 거부한다. `thread/start`의 `approvalPolicy:"untrusted"`는 받아 그대로 보고한다. 그래서 실행 인자·설정 검사는 `on-request`로 두고 스레드만 정책을 갖게 했다. `unless-trusted`·`on-failure`는 거부된다.
+  - `untrusted`의 명령 요청에는 "이 명령을 앞으로 항상 허용" 규칙 제안(`proposedExecpolicyAmendment`)이 붙는다. 파서가 이를 미지원 요청으로 보고 즉시 거절하던 것을, 작은 문자열 목록이면 읽고 적용하지 않도록 바꿨다(앱 응답은 `accept`/`decline`뿐).
+  - 정책은 실행 시작 때 프로젝트 설정으로 정한다(`codex_approval_policy`). `ExpectedProfile.approval`로 실행 인자·스레드 시작·보고값 검사·실행 직전 관찰값에 함께 흐른다. 다른 정책으로 만든 관찰값으로는 실행하지 않는다.
+  - 시험: core `the_requested_approval_policy_must_be_the_one_reported`, `thread_start_asks_for_the_runs_approval_policy`, `a_proposed_trust_rule_is_read_but_never_adopted`; sidecar `codex_launch_and_observation_follow_the_approval_policy`, `a_codex_command_asks_the_person_when_commands_are_off`.
+  - **실제 Codex 확인(기본 프로필, 제 앱 PID만)**: 명령 허용을 끄고 검증 역할에 `touch codex-probe.txt`를 시켰다. 1차는 0.171의 프로세스 설정 거부로 실행 준비가 실패했다(위 원인). 2차는 규칙 제안 때문에 앱이 자동 거절했다. 수정 뒤 3차에서 카드가 떴고, 40초 남아 있다가 '이번만 허용' 뒤 실행됐다(파일 생성, 종료 코드 0). 권한은 다시 켜고 다시 열어 확인했다. 정상 종료(engine exit 0). 증거 `~/Documents/elsecrew-ade-d3-bigwrite-2026-11-26/codex-*`.
+- **검증**: core 264, sidecar 관련 묶음, `npm test` 996/996, `pnpm build`. 전체 Rust·CI는 아래에 덧붙인다.
+- **함정**: Codex 0.171에서 `approval_policy="untrusted"`는 프로세스 설정으로는 거부, 스레드 단위로는 허용. 정책을 바꿀 때 설치 버전으로 두 경로를 모두 확인한다.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — D3 실제 확인과 큰 Write 권한 요청 (`orca/ade-d3-bigwrite`, 기준 feature/ade f2d50132)
 조정자 지시: 1차에서 남은 두 가지(D3 권한 카드가 2~4초 만에 사라짐, 128KiB 넘는 Write 권한 요청이 세션을 끊음).
 
@@ -221,7 +240,8 @@
   - 큰 도구 결과(이미지)가 Claude 출력 한 줄 128KiB를 넘으면 실행이 멈췄다(D2). 이제 세션 모드에서 8MiB까지 읽고 줄여 관측한다. **승인에 쓰는 값은 원문만**: Claude 권한 요청 줄은 줄이지 않고(허용 응답이 입력을 되돌려 보냄), Codex는 메서드별로 명시한 폐기 필드만 줄인다(`item/started`의 `command`·`cwd`가 승인 보완·완료 대조에 쓰임). 큰 줄은 프로세스 전체 2자리로 동시 처리 메모리를 묶는다(`provider_login_io.rs` `LARGE_LINE_SLOTS`). 자리 보유는 총 30초·무진행 10초, 대기는 90초가 상한이며 넘으면 그 연결만 실패한다(`LargeLineLimits`).
   - 권한 카드가 2~4초 만에 사라지던 D3는 PR #15 뒤 실제 Claude로 재현되지 않는다(2026-11-26, 카드 3장 모두 응답까지 유지). Claude CLI SDK 훅 기본 대기는 10분이다.
   - 큰 Write 권한 요청(128KiB 초과)은 통째로 받아 원문으로 승인·되돌려 보낸다. 요청당 4MiB, 대기 합계 16MiB를 넘으면 그 요청만 안내와 함께 거절한다(`claude_approval`).
-  - 프로젝트 '명령 실행 허용'을 꺼도 Codex(`on-request`)는 격리 안 명령을 묻지 않고 실행한다. Claude는 모든 Bash를 묻는다(미결정 차이).
+  - 프로젝트 '명령 실행 허용'을 끄면 Claude는 모든 Bash를, Codex는 스레드를 `untrusted`로 시작해 안전한 읽기 외 명령을 묻는다(2026-11-27 결정). Codex 0.171은 `untrusted`를 프로세스 설정으로는 거부하고 `thread/start`로만 받는다. 규칙 제안(`proposedExecpolicyAmendment`)은 읽기만 하고 적용하지 않는다.
+  - 큰 도구 입력의 승인 카드는 64KiB 쪽을 모두 불러와 크기·SHA-256이 맞을 때만 허용을 켠다. 엔진도 모든 쪽을 내준 뒤에만 허용한다. 큰 입력 예산은 허용 응답이 다 쓰일 때까지 유지된다.
   - 동시 스트림 16개를 넘으면 엔진이 재시작됐다(D1). 누수는 PR #15, 한도 초과를 그 요청만의 실패로 바꾼 것은 ade-stability.
 
 - **색은 토큰 블록 두 곳에만(2026-11-26, 화면 통일 U0·U1)**: `styles.css`의 다크 `:root`와 라이트 `:root[data-theme="light"]` 밖에는 hex·`rgb()`를 쓰지 않는다. 화면 코드에도 색 리터럴을 쓰지 않는다(Monaco는 `theme.ts`가 토큰에서 읽음). `tests/m5-style-tokens.test.mts`가 대비(다크·라이트 각 95쌍)·블록 밖 색 0·정의되지 않은 토큰 0을 막는다. 라이트 값은 1단 `--p-*`만 바꾼다. 새 화면은 공용 컴포넌트 클래스(`.m5-btn-*`·`.m5-badge`·`.m5-banner`·`.m5-card`·`.m5-group`·`.m5-empty-state`·`.m5-steps`·`.m5-recover`)를 쓴다.
