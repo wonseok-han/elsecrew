@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 
-import { closedView, coveredAtPoints, emptyView, isPreviewablePage, overlaps, previewBounds, sameLayout, samplePoints } from "../src/m5/preview-tab-model.ts";
+import { closedView, coveredAtPoints, coveredByRect, emptyView, hasPreviewPage, intersection, isPreviewablePage, overlaps, PREVIEW_WAIT_ATTRIBUTE, previewBounds, sameLayout, samplePoints } from "../src/m5/preview-tab-model.ts";
 
 const viewport = { width: 1280, height: 800 };
 
@@ -41,11 +41,17 @@ test("the frame is the app's and sits outside the stage in the tab's markup (T8)
 test("anything of the app on top of the stage covers it (T16)", () => {
   const stage = { left: 100, top: 100, width: 400, height: 300 };
   const points = samplePoints(stage);
-  assert.equal(points.length, 25);
+  assert.equal(points.length, 49);
   for (const point of points) assert.ok(point.x > stage.left && point.x < stage.left + stage.width && point.y > stage.top && point.y < stage.top + stage.height);
+  // Down to 2px from every edge (it was 8px: review I1).
+  assert.equal(Math.min(...points.map(point => point.x)), stage.left + 2);
+  assert.equal(Math.max(...points.map(point => point.y)), stage.top + stage.height - 2);
   const STAGE = Symbol("stage");
-  const isStage = (element: unknown) => element === STAGE;
+  const HOLDER = Symbol("what holds the stage");
+  const isStage = (element: unknown) => element === STAGE || element === HOLDER;
   assert.equal(coveredAtPoints(points, () => STAGE, isStage), false);
+  // A rounded corner finds what holds the stage: not a cover.
+  assert.equal(coveredAtPoints(points, (x, y) => x < 103 && y < 103 ? HOLDER : STAGE, isStage), false);
   // A notification panel over the stage's top-right corner.
   const panel = { left: 380, top: 90, width: 200, height: 120 };
   const top = (x: number, y: number) => x >= panel.left && x <= panel.left + panel.width && y >= panel.top && y <= panel.top + panel.height ? "panel" : STAGE;
@@ -56,16 +62,75 @@ test("anything of the app on top of the stage covers it (T16)", () => {
   assert.equal(coveredAtPoints(points, () => null, isStage), false);
 });
 
+test("a cover over only the stage's edge or between the points is found by its rectangle (PR #9 review I1)", () => {
+  const stage = { left: 100, top: 100, width: 400, height: 300 };
+  const points = samplePoints(stage);
+  // A notification card reaching 1.5px into the stage's right edge: no grid point sees it.
+  const card = { left: 498.5, top: 120, width: 320, height: 80 };
+  const ownsCard = (element: unknown) => element === "card";
+  const topWithCard = (x: number, y: number) => x >= card.left && x <= card.left + card.width && y >= card.top && y <= card.top + card.height ? "card" : "stage";
+  assert.equal(coveredAtPoints(points, topWithCard, element => element === "stage"), false, "the grid misses it");
+  assert.equal(coveredByRect(stage, card, topWithCard, ownsCard), true, "its rectangle does not");
+  assert.deepEqual(intersection(stage, card), { left: 498.5, top: 120, width: 1.5, height: 80 });
+  // A thin popover between two columns of points.
+  const sliver = { left: 160, top: 150, width: 4, height: 40 };
+  const topWithSliver = (x: number, y: number) => x >= sliver.left && x <= sliver.left + sliver.width && y >= sliver.top && y <= sliver.top + sliver.height ? "sliver" : "stage";
+  assert.equal(coveredByRect(stage, sliver, topWithSliver, element => element === "sliver"), true);
+  // Beside the stage, or under it (the stage is on top there): not a cover.
+  assert.equal(coveredByRect(stage, { left: 500, top: 120, width: 300, height: 80 }, topWithCard, ownsCard), false);
+  assert.equal(coveredByRect(stage, card, () => "stage", ownsCard), false);
+  assert.equal(intersection(stage, { left: 0, top: 0, width: 100, height: 100 }), null, "touching corners share nothing");
+});
+
+test("the view is hidden first, then the cover is shown (PR #9 review I1)", () => {
+  const source = readFileSync("src/m5/preview-tab.tsx", "utf8");
+  // New or changed app elements over the stage are held invisible before the page paints…
+  assert.match(source, /new MutationObserver\(records => \{/);
+  assert.match(source, /node\.setAttribute\(PREVIEW_WAIT_ATTRIBUTE, ""\)/);
+  assert.match(source, /causes\.current\.holding = true;/);
+  // …and let go only once main accepted a hidden layout.
+  assert.match(source, /if \(!waiting\.size \|\| sending\.current \|\| !lastLayout\.current\?\.obscured\) return;/);
+  // Main never answering closes the preview instead of hiding the app's own screen for good.
+  assert.match(source, /HOLD_LIMIT_MS/);
+  // Only an accepted layout is remembered (review B1): a failed one is sent again.
+  assert.match(source, /lastLayout\.current = next;\n\s+if \(next\.obscured && !wasObscured/);
+  assert.match(source, /retry = window\.setTimeout\(sync, 250\)/);
+  // Resizing or zooming hides at once; every measurement carries the page's devicePixelRatio.
+  assert.match(source, /causes\.current\.resizing = true;\n\s+sync\(\);/);
+  assert.equal((source.match(/pixelRatio: window\.devicePixelRatio/g) ?? []).length, 2);
+  const css = readFileSync("src/m5/styles.css", "utf8");
+  assert.ok(css.includes(`[${PREVIEW_WAIT_ATTRIBUTE}] { opacity: 0 !important; }`));
+});
+
 test("closed and empty states say what happened; files offer only pages", () => {
   assert.equal(closedView("crashed"), "stalled");
   assert.equal(closedView("workspaceUnavailable"), "workspaceGone");
   assert.equal(closedView("limit"), "tooMuch");
-  for (const reason of ["requested", "idle", "replaced", "quitting", "windowClosed", "reloaded"] as const) assert.equal(closedView(reason), null, reason);
+  // Quitting may be called off (an update that failed to prepare, review I4): the tab waits and reopens.
+  assert.equal(closedView("quitting"), "suspended");
+  for (const reason of ["requested", "idle", "replaced", "windowClosed", "reloaded"] as const) assert.equal(closedView(reason), null, reason);
   assert.equal(emptyView("noEntry"), "noPage");
   assert.equal(emptyView("notFound"), "notOpenable");
   assert.equal(emptyView("hidden"), "notOpenable");
   for (const page of ["index.html", "docs/About.HTM", "a/b/c.html"]) assert.equal(isPreviewablePage(page), true, page);
   for (const other of [null, undefined, "", "app.js", "README.md", ".hidden/index.html", "a/.git/x.html", "index.html.bak"]) assert.equal(isPreviewablePage(other), false, String(other));
+  // A task whose changes include a page (not one it deleted) opens on the preview (review minor).
+  assert.equal(hasPreviewPage([{ kind: "modified", path: "src/app.js" }, { kind: "added", path: "index.html" }]), true);
+  assert.equal(hasPreviewPage([{ kind: "deleted", path: "index.html" }, { kind: "modified", path: "README.md" }]), false);
+  assert.equal(hasPreviewPage(null), false);
+});
+
+test("the tab copes with a page that failed to load and with a quit that was called off (review minor, I4)", () => {
+  const source = readFileSync("src/m5/preview-tab.tsx", "utf8");
+  assert.match(source, /event\.kind === "loadFailed"\) \{ setStill\(null\); setPhase\(\{ kind: "failed" \}\); \}/);
+  // While suspended it asks main every second and opens again once allowed.
+  assert.match(source, /const suspended = phase\.kind === "closed" && phase\.view === "suspended";/);
+  assert.match(source, /if \(!live \|\| !status\.enabled\) return;[\s\S]{0,120}setOpenRequest\(value => value \+ 1\);/);
+  assert.match(source, /data-testid="preview-suspended"/);
+  // The workbench passes whether the task has a page to the default tab rule.
+  const workbench = readFileSync("src/m5/workbench.tsx", "utf8");
+  assert.equal(workbench.includes("defaultRightTab(activePhase, false)"), false);
+  assert.match(workbench, /hasPreviewPage\(snapshot\.diffSummary\?\.entries\)/);
 });
 
 test("a layout is sent again only when something changed", () => {

@@ -14,10 +14,10 @@
  *   anything the page finds on top of the stage at a grid of points — the
  *   view is hidden at once and a still image takes its place.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.tsx";
 import type { M5PreviewBridgeV1, PreviewCloseReasonV1, PreviewEmptyReasonV1, PreviewViewportV1 } from "./contracts/preview-v1.ts";
-import { closedView, coveredAtPoints, emptyView, previewBounds, sameLayout, samplePoints, type LayoutState } from "./preview-tab-model.ts";
+import { closedView, coveredAtPoints, coveredByRect, emptyView, overlaps, PREVIEW_WAIT_ATTRIBUTE, previewBounds, sameLayout, samplePoints, type LayoutState, type Rect } from "./preview-tab-model.ts";
 
 type Phase =
   | { kind: "idle" }
@@ -25,10 +25,18 @@ type Phase =
   | { kind: "opening" }
   | { kind: "open"; previewId: string; entry: string; loaded: boolean }
   | { kind: "empty"; reason: PreviewEmptyReasonV1 }
-  | { kind: "closed"; view: "stalled" | "workspaceGone" | "tooMuch" }
+  | { kind: "closed"; view: "stalled" | "workspaceGone" | "tooMuch" | "suspended" }
   | { kind: "failed" };
 
 export interface PreviewEntryRequest { path: string; nonce: number }
+
+/** How long app elements may wait for main to hide the view before the
+ * preview is closed instead (an answer that never comes). */
+const HOLD_LIMIT_MS = 1500;
+/** A window being resized or zoomed: the view stays hidden until it settles. */
+const SETTLE_MS = 150;
+/** Elements watched by their rectangle (notification panels, toasts, popovers). */
+const MAX_WATCHED = 300;
 
 export function PreviewTab({ projectId, chatId, active, covered, resultKey, entryRequest, onChanges }: {
   projectId: string | null;
@@ -46,6 +54,7 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
   const { t } = useI18n();
   const bridge: M5PreviewBridgeV1 | undefined = window.m5Preview;
   const stage = useRef<HTMLDivElement>(null);
+  const section = useRef<HTMLElement>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [viewport, setViewport] = useState<PreviewViewportV1>("wide");
   const [still, setStill] = useState<string | null>(null);
@@ -61,11 +70,22 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
   const previewId = phase.kind === "open" ? phase.previewId : null;
   const previewRef = useRef<string | null>(null);
   previewRef.current = previewId;
+  /** The last layout main ACCEPTED (PR #9 review B1): a failed one is sent again. */
   const lastLayout = useRef<LayoutState | null>(null);
+  /** A layout on its way to main: until it answers, the view may be shown. */
+  const sending = useRef(false);
   const hidden = useRef(false);
   const entry = useRef<string | null>(null);
   const shownResultKey = useRef(resultKey);
   const [overlay, setOverlay] = useState(false);
+  /** Everything that decides "hidden", read at once by the layout loop
+   * (never a render later): a hide must not wait. */
+  const causes = useRef({ covered, active, overlay: false, resizing: false, holding: false });
+  causes.current.covered = covered;
+  causes.current.active = active;
+  const viewportNow = useRef(viewport);
+  viewportNow.current = viewport;
+  const syncNow = useRef<() => void>(() => undefined);
 
   // Is the preview available at all (`ELSECREW_PREVIEW`)?
   useEffect(() => {
@@ -92,6 +112,9 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
   }, [projectId, chatId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Open when the tab is shown and nothing is open yet (or a page was named).
+  // Main keeps a new view hidden until the first layout below says where it
+  // goes and that nothing covers it (review I1); an answer for another task
+  // or an older open is closed without ever being shown.
   const wanted = active && enabled === true && Boolean(projectId && chatId);
   const handledRequest = useRef(0);
   useEffect(() => {
@@ -105,8 +128,9 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
     setPhase({ kind: "opening" });
     setStill(null);
     lastLayout.current = null;
+    sending.current = false;
     hidden.current = false;
-    bridge.open({ projectId, chatId, entry: entry.current, bounds, viewport }).then(result => {
+    bridge.open({ projectId, chatId, entry: entry.current, bounds, viewport, pixelRatio: window.devicePixelRatio }).then(result => {
       if (generation !== openGeneration.current) {
         if (result.outcome === "opened") void bridge.close({ previewId: result.previewId }).catch(() => undefined);
         return;
@@ -116,7 +140,7 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
     }, () => { if (generation === openGeneration.current) setPhase({ kind: "failed" }); });
   }, [wanted, projectId, chatId, openRequest]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Closing on the way out: another task, or the tab unmounted.
+  // Closing on the way out: another task, a failure, or the tab unmounted.
   useEffect(() => {
     if (!previewId || !bridge) return;
     return () => { void bridge.close({ previewId }).catch(() => undefined); };
@@ -129,6 +153,9 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
       if (event.previewId !== previewRef.current) return;
       if (event.kind === "loaded") setPhase(current => current.kind === "open" ? { ...current, loaded: true } : current);
       else if (event.kind === "blockedNavigation") setNotice(true);
+      // The entry page did not load: say so and offer to open it again
+      // (the preview itself is closed by leaving the "open" phase).
+      else if (event.kind === "loadFailed") { setStill(null); setPhase({ kind: "failed" }); }
       // "unresponsive" is followed by "closed" (main closes a hung page).
       else if (event.kind === "closed") onClosed(event.reason);
     });
@@ -138,6 +165,25 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
     setStill(null);
     setPhase(view ? { kind: "closed", view } : { kind: "idle" });
   };
+
+  // The app began to quit and may yet stay (an update whose preparation
+  // failed, review I4): main refuses opens until it resumes, then the tab
+  // opens the preview again by itself.
+  const suspended = phase.kind === "closed" && phase.view === "suspended";
+  useEffect(() => {
+    if (!suspended || !bridge) return;
+    let live = true;
+    const timer = window.setInterval(() => {
+      bridge.status().then(status => {
+        if (!live || !status.enabled) return;
+        live = false;
+        window.clearInterval(timer);
+        setPhase({ kind: "idle" });
+        setOpenRequest(value => value + 1);
+      }, () => undefined);
+    }, 1000);
+    return () => { live = false; window.clearInterval(timer); };
+  }, [suspended, bridge]);
 
   useEffect(() => {
     if (!notice) return;
@@ -152,71 +198,212 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
     if (phase.kind === "open") setNewResult(true);
   }, [resultKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Anything of the app drawn over the stage (T16), asked of the page itself.
-  useEffect(() => {
-    if (!previewId) return;
-    let frame = 0;
-    const check = () => {
-      frame = 0;
-      const element = stage.current;
-      if (!element) return;
-      const rect = element.getBoundingClientRect();
-      const on = rect.width > 0 && rect.height > 0 && coveredAtPoints(samplePoints(rect), (x, y) => document.elementFromPoint(x, y), node => node instanceof Node && element.contains(node));
-      setOverlay(on);
-      // A cover may leave by a transition, with no change in the page to
-      // notice: while covered, look again shortly.
-      window.clearTimeout(recheck);
-      if (on) recheck = window.setTimeout(schedule, 250);
-    };
-    let recheck = 0;
-    const schedule = () => { if (!frame) frame = requestAnimationFrame(check); };
-    const observer = new MutationObserver(schedule);
-    observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["open", "hidden", "class", "style", "aria-expanded"] });
-    window.addEventListener("resize", schedule);
-    document.addEventListener("scroll", schedule, true);
-    document.addEventListener("toggle", schedule, true);
-    document.addEventListener("transitionend", schedule, true);
-    document.addEventListener("animationend", schedule, true);
-    schedule();
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", schedule);
-      for (const name of ["scroll", "toggle", "transitionend", "animationend"]) document.removeEventListener(name, schedule, true);
-      if (frame) cancelAnimationFrame(frame);
-      window.clearTimeout(recheck);
-    };
-  }, [previewId]);
-
-  // Keep the view on the stage: its place, its width, hidden when covered.
-  const obscured = covered || overlay || !active;
+  // The view on the stage: where it goes, and hidden whenever anything of
+  // the app covers the stage (T8, T16).
   useEffect(() => {
     if (!previewId || !bridge || !stage.current) return;
-    let frame = 0;
+    let live = true;
+    let syncFrame = 0;
+    let checkFrame = 0;
+    let recheck = 0;
+    let retry = 0;
+    let settle = 0;
+    let holdTimer = 0;
+    /** App elements that appeared or changed and may lie over the stage. */
+    const watched = new Set<Element>();
+    /** App elements held invisible until main confirms the view hidden. */
+    const waiting = new Set<Element>();
+    /** Where the stage was last seen: when it vanishes (another tab), what
+     * takes its place is still held until the view is hidden. */
+    let lastRect: Rect | null = null;
+    const stageRect = (): Rect | null => {
+      const element = stage.current;
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) { lastRect = { left: rect.left, top: rect.top, width: rect.width, height: rect.height }; return rect; }
+      return null;
+    };
+    /** The stage, what is in it and what holds it: none of these covers it. */
+    const ownsStage = (node: unknown) => {
+      const element = stage.current;
+      return node instanceof Node && element !== null && (element.contains(node) || node.contains(element));
+    };
+    const topAt = (x: number, y: number) => document.elementFromPoint(x, y);
+    const obscuredNow = () => {
+      const now = causes.current;
+      return now.covered || now.overlay || !now.active || now.resizing || now.holding;
+    };
+
+    // Sends what the view should be, one request at a time. Only an accepted
+    // layout is remembered, so a refused or failed one is sent again
+    // (review B1). The answer to each request runs this again at once: a
+    // hide that came up meanwhile never waits for a frame.
     const sync = () => {
-      frame = 0;
+      syncFrame = 0;
+      if (!live) return;
       const element = stage.current;
       if (!element) return;
-      const bounds = previewBounds(element.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight }) ?? lastLayout.current?.bounds ?? null;
+      const measured = previewBounds(element.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight });
+      const bounds = measured ?? lastLayout.current?.bounds ?? null;
+      // Not placed yet and nowhere to place it: main keeps it hidden.
       if (!bounds) return;
-      const next: LayoutState = { bounds, viewport, obscured: obscured || !previewBounds(element.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight }) };
-      if (sameLayout(lastLayout.current, next)) return;
-      const wasObscured = lastLayout.current?.obscured ?? false;
-      lastLayout.current = next;
-      void bridge.layout({ previewId, ...next }).then(result => {
-        if (previewRef.current !== previewId) return;
+      const next: LayoutState = { bounds, viewport: viewportNow.current, obscured: obscuredNow() || !measured };
+      if (sameLayout(lastLayout.current, next)) { release(); return; }
+      if (sending.current) return;
+      sending.current = true;
+      const wasObscured = lastLayout.current?.obscured ?? true;
+      bridge.layout({ previewId, ...next, pixelRatio: window.devicePixelRatio }).then(result => {
+        sending.current = false;
+        if (!live || previewRef.current !== previewId) return;
         if (result.state === "closed") return;
+        lastLayout.current = next;
         if (next.obscured && !wasObscured && result.snapshot) setStill(result.snapshot);
         if (!next.obscured) setStill(null);
-      }, () => undefined);
+        sync();
+      }, () => {
+        sending.current = false;
+        if (!live) return;
+        window.clearTimeout(retry);
+        retry = window.setTimeout(sync, 250);
+      });
     };
-    const schedule = () => { if (!frame) frame = requestAnimationFrame(sync); };
-    const resize = new ResizeObserver(schedule);
+    const scheduleSync = () => { if (!syncFrame) syncFrame = requestAnimationFrame(sync); };
+    syncNow.current = sync;
+
+    // Held elements are let go only once main has confirmed the view hidden.
+    const release = () => {
+      if (!waiting.size || sending.current || !lastLayout.current?.obscured) return;
+      unhold();
+      check();
+    };
+    const unhold = () => {
+      for (const element of waiting) element.removeAttribute(PREVIEW_WAIT_ATTRIBUTE);
+      waiting.clear();
+      window.clearTimeout(holdTimer);
+      holdTimer = 0;
+      causes.current.holding = false;
+    };
+
+    // What is on top of the stage, asked of the page: a grid of points, and
+    // the rectangle of every app element seen appearing or changing.
+    const check = () => {
+      checkFrame = 0;
+      if (!live) return;
+      const rect = stageRect();
+      let on = false;
+      let moving = false;
+      if (rect) {
+        on = coveredAtPoints(samplePoints(rect), topAt, ownsStage);
+        for (const element of watched) {
+          if (!element.isConnected) { watched.delete(element); continue; }
+          if (!on && coveredByRect(rect, element.getBoundingClientRect(), topAt, node => node instanceof Node && element.contains(node))) on = true;
+          if (!moving && typeof element.getAnimations === "function" && element.getAnimations({ subtree: true }).length > 0) moving = true;
+        }
+      }
+      causes.current.overlay = on;
+      setOverlay(on);
+      sync();
+      window.clearTimeout(recheck);
+      // Something on its way (a transition, an animation): look every frame.
+      // A cover may also leave by a transition with no change in the page to
+      // notice: while covered, look again shortly.
+      if (moving) scheduleCheck();
+      else if (on) recheck = window.setTimeout(scheduleCheck, 250);
+    };
+    const scheduleCheck = () => { if (!checkFrame) checkFrame = requestAnimationFrame(check); };
+
+    // Runs before the page paints (review I1). A new or changed app element
+    // over the stage is held invisible, main hides the view, and only then
+    // is it shown — the view never draws over it, not even for a frame.
+    const holds = (element: Element, rect: Rect) => {
+      if (element instanceof HTMLDialogElement && element.matches(":modal")) return true;
+      if (overlaps(element.getBoundingClientRect(), rect)) return true;
+      // A wrapper of no size may still hold what is drawn (a fixed panel).
+      const inner = element.querySelectorAll("*");
+      for (let index = 0; index < inner.length && index < 50; index++) if (overlaps(inner[index]!.getBoundingClientRect(), rect)) return true;
+      return false;
+    };
+    /** Drawn out of the flow, so it may move over the stage later (a panel sliding in). */
+    const floats = (element: Element) => /^(?:fixed|absolute|sticky)$/.test(getComputedStyle(element).position);
+    const observer = new MutationObserver(records => {
+      if (!live) return;
+      const rect = stageRect() ?? lastRect;
+      const own = section.current;
+      const mayBeShown = sending.current || (lastLayout.current !== null && !lastLayout.current.obscured);
+      const seen = new Set<Element>();
+      let held = false;
+      for (const record of records) {
+        const targets = record.type === "childList" ? [...record.addedNodes] : [record.target];
+        for (const node of targets) {
+          if (!(node instanceof Element) || seen.has(node)) continue;
+          seen.add(node);
+          // The tab's own parts, and what holds the stage, never cover it.
+          if (own?.contains(node) || node.contains(stage.current)) continue;
+          const over = rect !== null && holds(node, rect);
+          if (watched.size < MAX_WATCHED && (over || floats(node))) watched.add(node);
+          if (!mayBeShown || !over) continue;
+          node.setAttribute(PREVIEW_WAIT_ATTRIBUTE, "");
+          waiting.add(node);
+          held = true;
+        }
+      }
+      if (held) {
+        causes.current.holding = true;
+        if (!holdTimer) holdTimer = window.setTimeout(() => {
+          // Main never confirmed: close the preview rather than keep the app's own screen hidden.
+          void bridge.close({ previewId }).catch(() => undefined);
+          unhold();
+        }, HOLD_LIMIT_MS);
+        sync();
+      }
+      scheduleCheck();
+    });
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["open", "hidden", "class", "style", "aria-expanded", "inert"] });
+
+    // Resized or zoomed (a zoom changes devicePixelRatio): hidden at once,
+    // placed again when it settles (review B1).
+    const onResize = () => {
+      causes.current.resizing = true;
+      sync();
+      window.clearTimeout(settle);
+      settle = window.setTimeout(() => { causes.current.resizing = false; scheduleCheck(); }, SETTLE_MS);
+    };
+    let ratio: MediaQueryList | null = null;
+    const onRatio = () => { onResize(); watchRatio(); };
+    const watchRatio = () => {
+      ratio?.removeEventListener("change", onRatio);
+      ratio = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+      ratio.addEventListener("change", onRatio);
+    };
+    watchRatio();
+    const onScroll = () => { scheduleSync(); scheduleCheck(); };
+    const resize = new ResizeObserver(() => sync());
     resize.observe(stage.current);
-    window.addEventListener("resize", schedule);
-    document.addEventListener("scroll", schedule, true);
-    sync();
-    return () => { resize.disconnect(); window.removeEventListener("resize", schedule); document.removeEventListener("scroll", schedule, true); if (frame) cancelAnimationFrame(frame); };
-  }, [previewId, bridge, viewport, obscured]);
+    window.addEventListener("resize", onResize);
+    document.addEventListener("scroll", onScroll, true);
+    for (const name of ["toggle", "transitionend", "animationend", "transitionstart"]) document.addEventListener(name, scheduleCheck, true);
+    check();
+    return () => {
+      live = false;
+      observer.disconnect();
+      resize.disconnect();
+      ratio?.removeEventListener("change", onRatio);
+      window.removeEventListener("resize", onResize);
+      document.removeEventListener("scroll", onScroll, true);
+      for (const name of ["toggle", "transitionend", "animationend", "transitionstart"]) document.removeEventListener(name, scheduleCheck, true);
+      if (syncFrame) cancelAnimationFrame(syncFrame);
+      if (checkFrame) cancelAnimationFrame(checkFrame);
+      for (const timer of [recheck, retry, settle]) window.clearTimeout(timer);
+      unhold();
+      causes.current.overlay = false;
+      causes.current.resizing = false;
+      syncNow.current = () => undefined;
+      setOverlay(false);
+    };
+  }, [previewId, bridge]);
+
+  // An explicit cover, another tab or width: told to main before the page paints.
+  useLayoutEffect(() => { syncNow.current(); }, [covered, active, viewport]);
 
   // Another tab: hidden now and closed after a while by main.
   useEffect(() => {
@@ -235,8 +422,11 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
     setOpenRequest(value => value + 1);
   };
 
+  // What the tab shows as hidden (the layout loop above reads the same causes).
+  const obscured = covered || overlay || !active;
+
   const openPhase = phase.kind === "open" || phase.kind === "opening";
-  return <section className="m5-preview" data-testid="preview-tab" data-phase={phase.kind} data-obscured={openPhase && obscured ? "true" : "false"} data-overlay={overlay ? "true" : "false"} data-active={active ? "true" : "false"} data-covered={covered ? "true" : "false"} aria-label={t("m5.preview.title")}>
+  return <section ref={section} className="m5-preview" data-testid="preview-tab" data-phase={phase.kind} data-obscured={openPhase && obscured ? "true" : "false"} data-overlay={overlay ? "true" : "false"} data-active={active ? "true" : "false"} data-covered={covered ? "true" : "false"} aria-label={t("m5.preview.title")}>
     <header className="m5-preview-frame" data-testid="preview-frame">
       <div className="m5-preview-badges">
         <strong>{t("m5.preview.frameTitle")}</strong>
@@ -273,6 +463,11 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
       {phase.kind === "closed" && phase.view === "stalled" && <div className="m5-preview-state" role="alert" data-testid="preview-stalled">
         <strong>{t("m5.preview.stalled")}</strong>
         <p>{t("m5.preview.stalledHelp")}</p>
+        <button type="button" className="m5-secondary" onClick={reopen}>{t("m5.preview.reopen")}</button>
+      </div>}
+      {phase.kind === "closed" && phase.view === "suspended" && <div className="m5-preview-state" data-testid="preview-suspended">
+        <strong>{t("m5.preview.suspended")}</strong>
+        <p>{t("m5.preview.suspendedHelp")}</p>
         <button type="button" className="m5-secondary" onClick={reopen}>{t("m5.preview.reopen")}</button>
       </div>}
       {phase.kind === "closed" && phase.view === "workspaceGone" && <div className="m5-preview-state" data-testid="preview-gone"><strong>{t("m5.preview.workspaceGone")}</strong></div>}

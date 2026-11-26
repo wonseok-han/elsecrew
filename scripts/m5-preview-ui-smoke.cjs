@@ -1,7 +1,7 @@
 // Result preview tab in the real app (ADE 1차-나 P3): a synthetic project,
 // isolated app data, snapshot workspaces, no provider, no debugging port.
 //
-//   electron scripts/m5-preview-ui-smoke.cjs        (needs .vite/ built: see
+//   ELSECREW_GIT_WORKTREES=0 electron scripts/m5-preview-ui-smoke.cjs   (needs .vite/ built: see
 //   scripts/m5-preview-isolation-probe.mjs --build, and the debug sidecar)
 //
 // Opens a task's todo page in the preview tab with real clicks and key
@@ -12,7 +12,15 @@
 // task without a page and the stalled screen for a page that hangs.
 // Writes captures (the app page with the view composed at its place) and
 // `result.json` to PREVIEW_UI_OUT (default .artifacts/m5-preview-ui).
+//
+// macOS only (PR #9 review I5): the preview is off by default on Windows and
+// Linux, and this check uses /usr/bin/git. Elsewhere it exits 2 (not run).
+// `pnpm m5:test:preview-ui` starts it through scripts/m5-preview-ui-run.mjs.
 'use strict';
+if (process.platform !== 'darwin') {
+  console.log(JSON.stringify({ status: 'NOT_RUN', reason: 'macOS only: the result preview is off by default on this platform and its real-app check has not been made for it' }));
+  process.exit(2);
+}
 const { app, BrowserWindow, dialog } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -105,6 +113,8 @@ async function run(window) {
   })()`);
   const todo = await make('할 일 앱 만들기');
   const plain = await make('README 고치기');
+  const other = await make('소개 페이지 만들기');
+  fs.writeFileSync(path.join(other.worktreePath, 'index.html'), '<!doctype html><meta charset="utf-8"><h1>다른 작업의 페이지</h1>');
   for (const [name, text] of Object.entries({ 'index.html': FILES['index.html'], 'todo.css': FILES['todo.css'], 'todo.js': FILES['todo.js'], 'about.html': '<!doctype html><meta charset="utf-8"><h1>소개 페이지</h1>', 'hang.html': FILES['hang.html'] })) {
     fs.writeFileSync(path.join(todo.worktreePath, name), text);
   }
@@ -159,21 +169,74 @@ async function run(window) {
   await waitFor(() => manager.currentLayout?.bounds.width > 390, 5_000, 'wide again');
   step('wideNarrow');
 
+  // PR #9 review I1: what the page held invisible (data-preview-wait) and
+  // when, next to when main hid the view (manager.visibility).
+  await page(`(() => { window.__holds = []; new MutationObserver(records => { for (const r of records) window.__holds.push({ at: Date.now(), held: r.target.hasAttribute('data-preview-wait'), what: String(r.target.className || r.target.tagName).slice(0, 60) }); }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['data-preview-wait'] }); })()`);
+  const ordering = async (since) => {
+    const holds = (await page('window.__holds')).filter(entry => entry.at >= since);
+    const hides = manager.visibility.filter(entry => entry.at >= since);
+    const heldAt = holds.find(entry => entry.held)?.at;
+    const releasedAt = holds.find(entry => !entry.held)?.at;
+    const hiddenAt = hides.find(entry => !entry.visible)?.at;
+    // Held before it could be painted, and let go only after main hid the view.
+    return { held: heldAt !== undefined, hiddenFirst: hiddenAt !== undefined && releasedAt !== undefined && hiddenAt <= releasedAt, heldAt, hiddenAt, releasedAt };
+  };
+
   // T16: every cover hides the view at once; a still image takes its place.
+  // The cover itself is held invisible until main has hidden the view (I1).
   const covered = async (label, open, close) => {
     await sleep(700); // a still image is taken while shown
+    const since = Date.now();
     await open();
     const hidden = await waitFor(() => manager.currentLayout?.state === 'hidden', 3_000, `${label} hides`).then(() => true, () => false);
     const still = await waitFor(() => page(`Boolean(document.querySelector('[data-testid=preview-stage] img.m5-preview-still'))`), 3_000, `${label} still`).then(() => true, () => false);
+    await sleep(300);
+    const order = await ordering(since);
     await capture(window, view, manager, `cover-${label}`);
     await close();
     const back = await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, `${label} shows again`).then(() => true, () => false);
     check(`T16 ${label}: hidden while open, a still image in its place, shown again after`, hidden && still && back, { hidden, still, back });
+    check(`I1 ${label}: the cover was held invisible until main hid the view`, order.held && order.hiddenFirst, order);
   };
   // The notification panel as it is with a long list: down over the stage.
   await covered('notifications', () => page(`(() => { document.querySelector('.m5-notification-panel').style.minHeight = '520px'; document.querySelector('.m5-notification-bell').open = true; })()`),
     () => page(`(() => { document.querySelector('.m5-notification-bell').open = false; document.querySelector('.m5-notification-panel').style.minHeight = ''; })()`));
   await covered('new-task-dialog', () => page(`document.querySelector('.m5-new-chat-button').click()`), () => page(`document.querySelector('.m5-new-chat-dialog header button').click()`));
+  // The notification panel at its real size where it opens: hidden exactly
+  // when it reaches the stage (I1: no 520px stretch).
+  {
+    await sleep(700);
+    const since = Date.now();
+    const reach = await page(`(() => { document.querySelector('.m5-notification-bell').open = true; const p = document.querySelector('.m5-notification-panel').getBoundingClientRect(); const s = document.querySelector('[data-testid=preview-stage]').getBoundingClientRect(); return { panel: [p.left, p.top, p.width, p.height], stage: [s.left, s.top, s.width, s.height], overlaps: p.left < s.right && s.left < p.right && p.top < s.bottom && s.top < p.bottom }; })()`);
+    await sleep(800);
+    const state = manager.currentLayout?.state;
+    await capture(window, view, manager, 'cover-notifications-real-size');
+    await page(`document.querySelector('.m5-notification-bell').open = false`);
+    const back = await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, 'real-size panel closed').then(() => true, () => false);
+    check('I1 notification panel at its real size: hidden exactly when it reaches the stage', (state === 'hidden') === reach.overlaps && back, { ...reach, state, order: await ordering(since) });
+  }
+  // Only a 1.5px sliver of the panel over the stage's left edge, missed by
+  // every grid point: found by its rectangle, held, then hidden (I1).
+  {
+    await sleep(700);
+    const since = Date.now();
+    const sliver = await page(`(() => {
+      document.querySelector('.m5-notification-bell').open = true;
+      const panel = document.querySelector('.m5-notification-panel');
+      const p = panel.getBoundingClientRect(); const s = document.querySelector('[data-testid=preview-stage]').getBoundingClientRect();
+      panel.style.transform = 'translate(' + (s.left + 1.5 - p.right) + 'px, ' + (s.top + 40 - p.top) + 'px)';
+      const q = panel.getBoundingClientRect();
+      return { overlapX: q.right - s.left, top: q.top - s.top };
+    })()`);
+    const hidden = await waitFor(() => manager.currentLayout?.state === 'hidden', 3_000, 'sliver hides').then(() => true, () => false);
+    await sleep(1000);
+    const stays = manager.currentLayout?.state === 'hidden';
+    const order = await ordering(since);
+    await capture(window, view, manager, 'cover-notification-edge');
+    await page(`(() => { document.querySelector('.m5-notification-bell').open = false; document.querySelector('.m5-notification-panel').style.transform = ''; })()`);
+    const back = await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, 'sliver gone').then(() => true, () => false);
+    check('I1 a notification panel over only the stage edge (1.5px) hides the view, held first', hidden && stays && back && order.held && order.hiddenFirst, { sliver, hidden, stays, back, order });
+  }
   // A menu away from the stage covers nothing: the view stays.
   await page(`document.querySelector('.m5-task-menu').open = true`);
   await sleep(600);
@@ -192,6 +255,115 @@ async function run(window) {
   window.setSize(1680, 945);
   await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, 'wide window').catch(() => undefined);
   step('covers');
+
+  // B1: zoomed in and out (the View menu's zoom), the view stays inside the
+  // stage and off the frame; a dialog still hides it, also when the zoom
+  // changes while the dialog is open.
+  const measure = () => page(`(() => { const r = e => { const b = document.querySelector(e).getBoundingClientRect(); return { left: b.left, top: b.top, width: b.width, height: b.height }; }; return { stage: r('[data-testid=preview-stage]'), frame: r('[data-testid=preview-frame]'), ratio: devicePixelRatio }; })()`);
+  for (const zoom of [1.25, 1.5, 0.8, 0.67]) {
+    window.webContents.setZoomFactor(zoom);
+    await sleep(400);
+    const shown = await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, `zoom ${zoom} shown`).then(() => true, () => false);
+    await sleep(400);
+    const css = await measure();
+    const b = manager.currentLayout?.bounds;
+    const stageWin = { left: css.stage.left * zoom, top: css.stage.top * zoom, right: (css.stage.left + css.stage.width) * zoom, bottom: (css.stage.top + css.stage.height) * zoom };
+    const frameWin = { left: css.frame.left * zoom, top: css.frame.top * zoom, right: (css.frame.left + css.frame.width) * zoom, bottom: (css.frame.top + css.frame.height) * zoom };
+    const inside = Boolean(b) && b.x >= stageWin.left - 0.01 && b.y >= stageWin.top - 0.01 && b.x + b.width <= stageWin.right + 0.01 && b.y + b.height <= stageWin.bottom + 0.01;
+    const offFrame = Boolean(b) && !(b.x < frameWin.right && frameWin.left < b.x + b.width && b.y < frameWin.bottom && frameWin.top < b.y + b.height);
+    const label = `zoom-${Math.round(zoom * 100)}`;
+    await capture(window, view, manager, `preview-${label}`);
+    await page(`document.querySelector('.m5-new-chat-button').click()`);
+    const dialogHidden = await waitFor(() => manager.currentLayout?.state === 'hidden', 3_000, `${label} dialog hides`).then(() => true, () => false);
+    await capture(window, view, manager, `cover-dialog-${label}`);
+    await page(`document.querySelector('.m5-new-chat-dialog header button').click()`);
+    const back = await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, `${label} back`).then(() => true, () => false);
+    check(`B1 at ${Math.round(zoom * 100)}%: the view is inside the stage and off the frame; a dialog hides it`, shown && inside && offFrame && dialogHidden && back, { zoom, ratio: css.ratio, stageWin, frameWin, bounds: b, shown, dialogHidden, back });
+  }
+  // Zoomed out while a dialog is open: the view stays hidden (main used to
+  // refuse the measurement and keep the view as it was).
+  window.webContents.setZoomFactor(1);
+  await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, 'zoom 100 shown');
+  await page(`document.querySelector('.m5-new-chat-button').click()`);
+  await waitFor(() => manager.currentLayout?.state === 'hidden', 3_000, 'dialog at 100%');
+  window.webContents.setZoomFactor(0.5);
+  await sleep(1200);
+  const hiddenWhileZoomed = manager.currentLayout?.state === 'hidden' && !manager.visibility.slice(-3).some(entry => entry.visible && entry.at > Date.now() - 1100);
+  window.webContents.setZoomFactor(1);
+  await sleep(400);
+  await page(`document.querySelector('.m5-new-chat-dialog header button').click()`);
+  const backAt100 = await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, 'back at 100%').then(() => true, () => false);
+  check('B1 zooming out with a dialog open keeps the view hidden; it returns in place after', hiddenWhileZoomed && backAt100);
+  step('zoom');
+
+  // I1: an open still on its way never shows the view over a dialog opened
+  // meanwhile, nor after another task was chosen meanwhile.
+  {
+    const original = manager.request.bind(manager);
+    let release = null;
+    manager.request = async (request) => { if (request.action === 'open' && release) await release.promise; return original(request); };
+    const gate = () => { let open; const promise = new Promise(resolve => { open = resolve; }); release = { promise, open }; };
+    const toPreview = async goal => { await openTask(goal); await sleep(300); await page(`document.querySelector('[data-testid=right-tab-preview]').click()`); };
+    // A dialog during the open.
+    await toPreview('README 고치기');
+    await waitFor(() => page(`Boolean(document.querySelector('[data-testid=preview-empty]'))`), 20_000, 'empty again');
+    gate();
+    let since = Date.now();
+    await toPreview('할 일 앱 만들기');
+    await waitFor(() => page(`document.querySelector('[data-testid=preview-tab]')?.dataset.phase === 'opening'`), 10_000, 'opening');
+    await page(`document.querySelector('.m5-new-chat-button').click()`);
+    await sleep(300);
+    const gated = release; release = null; gated.open();
+    await waitFor(() => page(`document.querySelector('[data-testid=preview-tab]')?.dataset.phase === 'open'`), 15_000, 'opened under dialog');
+    await sleep(1500);
+    const shownUnderDialog = manager.visibility.filter(entry => entry.at >= since && entry.visible);
+    await capture(window, null, manager, 'delayed-open-under-dialog');
+    await page(`document.querySelector('.m5-new-chat-dialog header button').click()`);
+    const afterDialog = await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, 'shown after dialog').then(() => true, () => false);
+    check('I1 an open on its way while a dialog opens stays hidden until the dialog closes', shownUnderDialog.length === 0 && afterDialog, { shownUnderDialog });
+    // Another task chosen during the open, then back: the first answer is never shown.
+    gate();
+    since = Date.now();
+    const before = manager.currentLayout ? 1 : 0;
+    await toPreview('소개 페이지 만들기');
+    await waitFor(() => page(`document.querySelector('[data-testid=preview-tab]')?.dataset.phase === 'opening'`), 10_000, 'other task opening');
+    await toPreview('할 일 앱 만들기');
+    const second = release; release = null; second.open();
+    await waitFor(() => page(`document.querySelector('[data-testid=preview-tab]')?.dataset.phase === 'open'`), 15_000, 'open after switch');
+    await waitFor(() => manager.currentLayout?.state === 'shown', 10_000, 'shown after switch');
+    const final = await waitFor(() => manager.currentWebContents, 5_000, 'final view');
+    await waitFor(() => !final.isLoading(), 10_000, 'final load');
+    const finalText = await final.executeJavaScript('document.title + "|" + (document.querySelector("h1")?.textContent ?? "")');
+    const shownIds = [...new Set(manager.visibility.filter(entry => entry.at >= since && entry.visible).map(entry => entry.previewId))];
+    check('I1 an open for a task left meanwhile is never shown; the current task\'s page is', shownIds.length === 1 && !/다른 작업의 페이지/.test(finalText), { before, shownIds, finalText });
+    manager.request = original;
+  }
+  step('delayedOpen');
+
+  // I4: quit preparation closes the preview; when it is called off the tab
+  // opens it again by itself.
+  manager.suspend();
+  const suspendedShown = await waitFor(() => page(`Boolean(document.querySelector('[data-testid=preview-suspended]'))`), 5_000, 'suspended').then(() => true, () => false);
+  await capture(window, null, manager, 'preview-suspended');
+  const noViewWhileSuspended = !manager.currentLayout;
+  manager.resume();
+  const reopened = await waitFor(() => manager.currentLayout?.state === 'shown', 10_000, 'reopened after resume').then(() => true, () => false);
+  check('I4 a called-off quit brings the preview back by itself', suspendedShown && noViewWhileSuspended && reopened, { suspendedShown, noViewWhileSuspended, reopened });
+  step('resume');
+
+  // The app's ⌘2 typed while the preview has focus reaches the app (minor).
+  {
+    const current = await waitFor(() => manager.currentWebContents, 5_000, 'view for keys');
+    await waitFor(() => !current.isLoading(), 10_000, 'view loaded for keys');
+    current.focus();
+    await sleep(200);
+    const modifier = process.platform === 'darwin' ? 'meta' : 'control';
+    current.sendInputEvent({ type: 'keyDown', keyCode: '2', modifiers: [modifier] });
+    current.sendInputEvent({ type: 'keyUp', keyCode: '2', modifiers: [modifier] });
+    const reached = await waitFor(() => page(`(() => { const a = document.activeElement; return Boolean(a) && (a.id === 'm5-followup-text' || a.classList.contains('m5-timeline-list')); })()`), 3_000, 'shortcut reached the app').then(() => true, () => false);
+    check('a window shortcut typed in the preview reaches the app', reached);
+  }
+  step('shortcut');
 
   // The files tab opens a named page in the preview.
   await page(`document.querySelector('[data-testid=right-tab-files]').click()`);

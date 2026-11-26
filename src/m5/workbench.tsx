@@ -31,7 +31,7 @@ import { TaskLayout } from "./task-layout.tsx";
 import { approvalCovered, changesLine, MENU_SELECTOR, resultBoxMode, revealResults, teamWorking } from "./task-view-model.ts";
 import { ChangesStandingLine, ChangesStatusLine, ResultBox } from "./result-box.tsx";
 import { PreviewTab, type PreviewEntryRequest } from "./preview-tab.tsx";
-import { isPreviewablePage } from "./preview-tab-model.ts";
+import { hasPreviewPage, isPreviewablePage } from "./preview-tab-model.ts";
 import { HistoryTab } from "./history-tab.tsx";
 import { TaskList, type TaskListItem } from "./task-list.tsx";
 import { ReviewSheet } from "./review-sheet.tsx";
@@ -728,14 +728,25 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const previewResultKey = `${chat.activeChat?.chatId ?? ""}:${chat.agentRuns.filter(run => !["preparing", "running", "cancelling"].includes(run.state)).length}`;
   const previewCovered = previewObscured({ sheetOpen, drawerUsed: bandUsesDrawer(layoutBandNow), drawerOpen, dialogOpen: newChatOpen || Boolean(removal) || preferencesOpen || settingsOpen, popoverOpen: false, rightTab });
 
-  // A task opens on the results tab its state is about (PLAN 1.5); once per task.
+  // A task opens on the results tab its state is about (PLAN 1.5); once per
+  // task. A task whose changes include a page opens on the preview; the
+  // changes may arrive after the task opened, so a tab picked here (and not
+  // since changed) moves to the preview then.
+  const previewPageNow = Boolean(chat.activeChat && snapshot.workspace?.chatId === chat.activeChat.chatId && hasPreviewPage(snapshot.diffSummary?.entries));
   const defaultTabFor = useRef<string | null>(null);
+  const pickedTab = useRef<RightTab | null>(null);
   useEffect(() => {
     const id = chat.activeChat?.chatId ?? null;
-    if (!id || chat.switching || !activePhase || defaultTabFor.current === id) return;
+    if (!id || chat.switching || !activePhase) return;
+    if (defaultTabFor.current === id) {
+      const better = defaultRightTab(activePhase, previewPageNow);
+      if (better === "preview" && pickedTab.current !== null && pickedTab.current !== better && rightTab === pickedTab.current) { pickedTab.current = better; setRightTab(better); }
+      return;
+    }
     defaultTabFor.current = id;
-    setRightTab(defaultRightTab(activePhase, false));
-  }, [chat.activeChat?.chatId, chat.switching, activePhase]);
+    pickedTab.current = defaultRightTab(activePhase, previewPageNow);
+    setRightTab(pickedTab.current);
+  }, [chat.activeChat?.chatId, chat.switching, activePhase, previewPageNow]); // eslint-disable-line react-hooks/exhaustive-deps
   // When the team finishes, the results show what it made (PLAN 1.5: review → changes).
   const wasWorking = useRef<{ chatId: string; working: boolean } | null>(null);
   useEffect(() => {
@@ -743,8 +754,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     if (!id || chat.switching || !activePhase) return;
     const before = wasWorking.current;
     wasWorking.current = { chatId: id, working: activeWorking };
-    if (before?.chatId === id && before.working && !activeWorking) setRightTab(defaultRightTab(activePhase, false));
-  }, [chat.activeChat?.chatId, chat.switching, activePhase, activeWorking]);
+    if (before?.chatId === id && before.working && !activeWorking) { pickedTab.current = defaultRightTab(activePhase, previewPageNow); setRightTab(pickedTab.current); }
+  }, [chat.activeChat?.chatId, chat.switching, activePhase, activeWorking]); // eslint-disable-line react-hooks/exhaustive-deps
   const dirtyTabs = snapshot.tabs.filter(tab => tab.saveState !== "clean").length;
   // "View all changes" opens the sheet; another task or project closes it.
   useEffect(() => { if (allChanges) setSheetOpen(true); }, [allChanges]);

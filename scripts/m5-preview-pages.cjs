@@ -18,8 +18,8 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const within = (promise, ms = 4000) => Promise.race([promise, sleep(ms).then(() => { throw new Error("timeout"); })]);
 const describe = error => String(error && (error.name && error.name !== "Error" ? error.name + ": " : "") + (error && error.message || error));
 const out = {};
-async function attempt(name, fn) {
-  try { out[name] = { ok: true, value: await within(Promise.resolve().then(fn)) }; }
+async function attempt(name, fn, ms) {
+  try { out[name] = { ok: true, value: await within(Promise.resolve().then(fn), ms) }; }
   catch (error) { out[name] = { ok: false, error: describe(error) }; }
 }
 function element(tag, attributes, ms = 1500) {
@@ -83,8 +83,9 @@ async function network() {
     form.submit(); await sleep(1000); return "submitted";
   });
   // T2: WebRTC, one transport at a time (STUN v4/v6, TURN udp v4/v6, TURN
-  // tcp, TURN tls, an outside STUN name), each against its own collector.
-  await attempt("webrtcTransports", () => probeTransports(WEBRTC));
+  // tcp v4/v6, TURN tls v4/v6, an outside STUN name), each against its own
+  // collector. Each may take up to 8.3 s, so the whole run gets its own deadline.
+  await attempt("webrtcTransports", () => probeTransports(WEBRTC), Object.keys(WEBRTC).length * 8_500 + 2_000);
 }
 async function rest() {
   // T6: no app bridge, no Node.

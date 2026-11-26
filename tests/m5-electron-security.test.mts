@@ -232,6 +232,7 @@ class FakeWindow {
     on: (event: string, listener: (...args: unknown[]) => void) => this.webContents.listeners.set(event, listener),
     send: () => undefined,
     setWindowOpenHandler: (handler: () => { action: string }) => { this.openHandler = handler; },
+    getZoomFactor: () => 1,
   };
 
   constructor(options: unknown) {
@@ -249,6 +250,10 @@ class FakeWindow {
 
   getContentSize() {
     return [1280, 800];
+  }
+
+  getBounds() {
+    return { x: 0, y: 0, width: 1280, height: 800 };
   }
 
   async loadURL(url: string) {
@@ -286,6 +291,7 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
       quit: () => undefined,
     },
     BrowserWindow: Object.assign(FakeWindow, { getAllWindows: () => FakeWindow.windows }),
+    screen: { getDisplayMatching: () => ({ scaleFactor: 1 }) },
     dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }), showMessageBox: async (_window: unknown, options: { detail?: string }) => { sidecarCalls.push(`confirm:${options.detail ?? ""}`); return { response: externalLinkAnswer.value }; } },
     shell: { openExternal: async () => { sidecarCalls.push("openExternal"); } },
     safeStorage: { isEncryptionAvailable: () => false, encryptString: () => { throw new Error("unexpected encryption"); }, decryptString: () => { throw new Error("unexpected decryption"); } },
@@ -431,7 +437,8 @@ function moduleFor(
   if (specifier.endsWith("preview-v1.ts")) return previewContract;
   if (specifier === "./preview-policy.ts") return previewPolicy;
   if (specifier === "./preview-manager.ts") return previewManagerModule;
-  if (specifier === "./preview-flag.ts") return { previewFlags: (packaged: boolean) => previewFlag.previewFlagsFromEnvironment(fakes.env, packaged) };
+  // The platform is the harness's (macOS unless a test names another), not the machine's.
+  if (specifier === "./preview-flag.ts") return { previewFlags: (packaged: boolean) => previewFlag.previewFlagsFromEnvironment(fakes.env, packaged, fakes.env.TEST_PLATFORM ?? "darwin") };
   if (specifier.endsWith("git-selection-v1.ts")) return gitSelectionContract;
   if (specifier === "./git-selection.ts") return {
     GitSelectionStore: class {
@@ -580,8 +587,14 @@ test("update readiness rejects unsolicited, stale and foreign replies", async ()
   await assert.rejects(handler(harness.currentEvent(), undefined, true));
 });
 
-test("result preview IPC is on by default, off with ELSECREW_PREVIEW=0, answers only the main frame, and never takes a workspace, token or URL", async () => {
-  const open = { action: "open", projectId: "project_1", chatId: "chat_1", entry: null, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide" };
+test("result preview IPC is on by default on macOS, off with ELSECREW_PREVIEW=0 and elsewhere, answers only the main frame, and never takes a workspace, token or URL", async () => {
+  const open = { action: "open", projectId: "project_1", chatId: "chat_1", entry: null, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", pixelRatio: 1 };
+  // Windows is not checked yet (PR #9 review I2·I5): off unless asked for.
+  const windows = await loadMain(undefined, false, { TEST_PLATFORM: "win32" });
+  assert.deepEqual(windows.switches, []);
+  assert.equal(JSON.stringify(await windows.handlers.get(previewContract.PREVIEW_CHANNEL_V1)!(windows.currentEvent(), { action: "status" })), JSON.stringify({ action: "status", enabled: false }));
+  const windowsOn = await loadMain(undefined, false, { TEST_PLATFORM: "win32", ELSECREW_PREVIEW: "1" });
+  assert.deepEqual(windowsOn.switches, ["blink-settings=dnsPrefetchingEnabled=false"]);
   const off = await loadMain(undefined, false, { ELSECREW_PREVIEW: "0" });
   assert.deepEqual(off.privilegedSchemes.map(entry => entry.scheme), ["app"], "no preview scheme when turned off");
   assert.deepEqual(off.switches, [], "no Chromium switch when turned off");
@@ -622,9 +635,11 @@ test("result preview IPC is on by default, off with ELSECREW_PREVIEW=0, answers 
     { ...open, entry: "/etc/index.html" }, { ...open, bounds: { x: 0, y: 0, width: Number.NaN, height: 10 } }, { ...open, viewport: "tall" },
   ]) await assert.rejects(handler(on.currentEvent(), bad));
   await assert.rejects(handler(on.currentEvent(), open, "extra"));
-  // Bounds outside the window are refused in main too.
-  await assert.rejects(handler(on.currentEvent(), { ...open, bounds: { x: 1200, y: 0, width: 500, height: 600 } }), /outside the window/);
-  await assert.rejects(handler(on.currentEvent(), { ...open, bounds: { x: 0, y: 0, width: 100, height: 600 } }), /too small/);
+  // A stage not on screen at the window's zoom is refused in main too, and
+  // so is a measurement taken at another zoom (PR #9 review B1).
+  await assert.rejects(handler(on.currentEvent(), { ...open, bounds: { x: 1200, y: 0, width: 500, height: 600 } }), /not on screen/);
+  await assert.rejects(handler(on.currentEvent(), { ...open, bounds: { x: 0, y: 0, width: 100, height: 600 } }), /too small|not on screen/);
+  await assert.rejects(handler(on.currentEvent(), { ...open, pixelRatio: 2 }), /not on screen/);
   assert.deepEqual(on.sidecarCalls, []);
   // A task with no page yet: nothing is created.
   assert.equal(JSON.stringify(await handler(on.currentEvent(), open)), JSON.stringify({ action: "open", outcome: "empty", reason: "noEntry" }));

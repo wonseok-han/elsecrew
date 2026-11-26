@@ -12,7 +12,7 @@ import { MODEL_CHOICES_CHANNEL, validateModelChoicesRequest } from "../src/m5/co
 import { DEVICE_REPORT_CHANNEL } from "../src/m5/contracts/device-report-v1.ts";
 import { SESSION_DIAGNOSTICS_CHANNEL, classifySessionDiagnostics } from "../src/m5/contracts/session-diagnostics-v1.ts";
 import { readDeviceReport } from "./device-report.ts";
-import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, safeStorage, session, shell, WebContentsView } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, safeStorage, screen, session, shell, WebContentsView } from "electron";
 import { PREVIEW_CHANNEL_V1, PREVIEW_EVENT_CHANNEL_V1, validatePreviewIpcRequestV1 } from "../src/m5/contracts/preview-v1.ts";
 import { previewFlags } from "./preview-flag.ts";
 import { PreviewManagerV1 } from "./preview-manager.ts";
@@ -95,9 +95,10 @@ async function rendererReadyForUpdate(): Promise<boolean> {
     catch { finish(false); }
   });
 }
-/** Result preview (ADE 1차-나 F12): on by default; `ELSECREW_PREVIEW=0`
- * turns it off (electron/preview-flag.ts). */
-const PREVIEW_FLAGS = previewFlags(app.isPackaged);
+/** Result preview (ADE 1차-나 F12): on by default on macOS, where its
+ * isolation and screen checks run; `ELSECREW_PREVIEW=0|1` decides elsewhere
+ * (electron/preview-flag.ts). */
+const PREVIEW_FLAGS = previewFlags(app.isPackaged, process.platform);
 const PREVIEW_ENABLED = PREVIEW_FLAGS.enabled;
 // T3 (plan 2.4): `<link rel=dns-prefetch>` resolves host names outside the
 // proxy, webRequest and CSP (seen in the isolation probe's net log). Blink's
@@ -115,6 +116,10 @@ const previewManager = new PreviewManagerV1({
   fromPartition: (partition) => session.fromPartition(partition),
   createView: (webPreferences) => new WebContentsView({ webPreferences }),
   window: () => mainWindow,
+  // The page's zoom (View menu) and its display's scale turn the page's CSS
+  // pixels into window coordinates (PR #9 review B1).
+  zoomFactor: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents.getZoomFactor() : 1),
+  displayScale: () => (mainWindow && !mainWindow.isDestroyed() ? screen.getDisplayMatching(mainWindow.getBounds()).scaleFactor : 1),
   sidecar: () => sidecar,
   send: (event) => {
     const window = mainWindow;

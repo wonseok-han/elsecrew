@@ -215,17 +215,20 @@ export const PREVIEW_EVENT_CHANNEL_V1 = "m5:preview:v1:event";
 export const PREVIEW_MIN_SIZE_V1 = 120;
 export const PREVIEW_NARROW_WIDTH_V1 = 390;
 
-/** In the main window's content coordinates (CSS pixels of the app page). */
+/** In CSS pixels of the app page (`getBoundingClientRect`). Main turns them
+ * into window coordinates with the page's zoom factor; `pixelRatio` is the
+ * page's `devicePixelRatio` when it measured, so main can tell a measurement
+ * taken before a zoom change (PR #9 review B1). */
 export interface PreviewBoundsV1 { x: number; y: number; width: number; height: number }
 export type PreviewViewportV1 = "wide" | "narrow";
 
 export type PreviewIpcRequestV1 =
   | { action: "status" }
-  | { action: "open"; projectId: string; chatId: string; entry: string | null; bounds: PreviewBoundsV1; viewport: PreviewViewportV1 }
+  | { action: "open"; projectId: string; chatId: string; entry: string | null; bounds: PreviewBoundsV1; viewport: PreviewViewportV1; pixelRatio: number }
   /** `obscured`: something of the app's own covers the area (dialog, sheet,
    * drawer, popover, toast). The view hides and the answer carries a still
    * image to show in its place. */
-  | { action: "layout"; previewId: string; bounds: PreviewBoundsV1; viewport: PreviewViewportV1; obscured: boolean }
+  | { action: "layout"; previewId: string; bounds: PreviewBoundsV1; viewport: PreviewViewportV1; obscured: boolean; pixelRatio: number }
   | { action: "reload"; previewId: string }
   /** Another tab: hidden now, closed after 30 seconds unless shown again. */
   | { action: "hide"; previewId: string }
@@ -261,6 +264,10 @@ function viewport(value: unknown): PreviewViewportV1 {
   if (value !== "wide" && value !== "narrow") fail("viewport is invalid");
   return value as PreviewViewportV1;
 }
+function pixelRatio(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0.25 || value > 16) fail("pixelRatio is invalid");
+  return value as number;
+}
 function bounds(value: unknown): PreviewBoundsV1 {
   const object = requireObject(value, "preview bounds");
   exactKeys(object, ["x", "y", "width", "height"]);
@@ -278,15 +285,15 @@ export function validatePreviewIpcRequestV1(value: unknown): PreviewIpcRequestV1
       exactKeys(object, ["action"]);
       return { action: "status" };
     case "open":
-      exactKeys(object, ["action", "projectId", "chatId", "entry", "bounds", "viewport"]);
+      exactKeys(object, ["action", "projectId", "chatId", "entry", "bounds", "viewport", "pixelRatio"]);
       return {
         action: "open", projectId: id(object.projectId, "projectId"), chatId: id(object.chatId, "chatId"),
-        entry: entryPath(object.entry, "entry"), bounds: bounds(object.bounds), viewport: viewport(object.viewport),
+        entry: entryPath(object.entry, "entry"), bounds: bounds(object.bounds), viewport: viewport(object.viewport), pixelRatio: pixelRatio(object.pixelRatio),
       };
     case "layout":
-      exactKeys(object, ["action", "previewId", "bounds", "viewport", "obscured"]);
+      exactKeys(object, ["action", "previewId", "bounds", "viewport", "obscured", "pixelRatio"]);
       if (typeof object.obscured !== "boolean") fail("obscured must be a boolean");
-      return { action: "layout", previewId: previewId(object.previewId), bounds: bounds(object.bounds), viewport: viewport(object.viewport), obscured: object.obscured as boolean };
+      return { action: "layout", previewId: previewId(object.previewId), bounds: bounds(object.bounds), viewport: viewport(object.viewport), obscured: object.obscured as boolean, pixelRatio: pixelRatio(object.pixelRatio) };
     case "reload": case "hide": case "close":
       exactKeys(object, ["action", "previewId"]);
       return { action: object.action, previewId: previewId(object.previewId) };
@@ -353,8 +360,8 @@ export function validatePreviewEventV1(value: unknown): PreviewEventV1 {
  * main refuses everything but `status`. */
 export interface M5PreviewBridgeV1 {
   status(): Promise<{ enabled: boolean }>;
-  open(input: { projectId: string; chatId: string; entry: string | null; bounds: PreviewBoundsV1; viewport: PreviewViewportV1 }): Promise<Extract<PreviewIpcResultV1, { action: "open" }>>;
-  layout(input: { previewId: string; bounds: PreviewBoundsV1; viewport: PreviewViewportV1; obscured: boolean }): Promise<Extract<PreviewIpcResultV1, { action: "layout" }>>;
+  open(input: { projectId: string; chatId: string; entry: string | null; bounds: PreviewBoundsV1; viewport: PreviewViewportV1; pixelRatio: number }): Promise<Extract<PreviewIpcResultV1, { action: "open" }>>;
+  layout(input: { previewId: string; bounds: PreviewBoundsV1; viewport: PreviewViewportV1; obscured: boolean; pixelRatio: number }): Promise<Extract<PreviewIpcResultV1, { action: "layout" }>>;
   reload(input: { previewId: string }): Promise<{ previewId: string; state: PreviewStateV1 }>;
   hide(input: { previewId: string }): Promise<{ previewId: string; state: PreviewStateV1 }>;
   close(input: { previewId: string }): Promise<{ previewId: string; state: PreviewStateV1 }>;

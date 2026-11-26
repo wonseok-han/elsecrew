@@ -40,7 +40,12 @@ const option = (name, fallback) => { const index = args.indexOf(name); return in
 const outDirectory = resolve(option("--out", join(repoRoot, ".artifacts", "m5-preview-isolation")));
 const modes = { both: ["git", "snapshot"], git: ["git"], snapshot: ["snapshot"] }[option("--workspace", "both")];
 if (!modes) throw new Error("--workspace must be git, snapshot or both");
-if (process.platform !== "darwin") throw new Error("the preview isolation probe runs on macOS");
+// macOS only (PR #9 review I5): elsewhere the preview is off by default and
+// this probe has not been made for it; exit 2 is "not run", never a pass.
+if (process.platform !== "darwin") {
+  console.log(JSON.stringify({ status: "NOT_RUN", reason: `macOS only: the result preview is off by default on ${process.platform} and its isolation probe has not been made for it` }));
+  process.exit(2);
+}
 
 if (args.includes("--build")) await buildApp();
 for (const required of [".vite/build/main.cjs", ".vite/build/preload.cjs", ".vite/renderer/main_window/index.html", "target/debug/elsecrew-sidecar"]) {
@@ -53,12 +58,18 @@ const dirty = execFileSync("/usr/bin/git", ["status", "--porcelain", "--untracke
 const routableIpv6 = Object.values(networkInterfaces()).flat().some(entry => entry && entry.family === "IPv6" && !entry.internal && !/^fe80:/i.test(entry.address));
 const results = [];
 for (const mode of modes) results.push(await runMode(mode));
+// PASS means every OBSERVED check passed; what could not be observed is
+// counted and named apart, never folded into the pass (PR #9 review I2).
 const status = results.every(result => result.status === "PASS") ? "PASS" : "FAIL";
+const summary = results.map(({ mode, status: modeStatus, failed, observed, notObservable }) => ({
+  mode, status: modeStatus, observed: `${observed.passed}/${observed.total}`, notObservable: notObservable.length, failed,
+  notObservableChecks: notObservable.map(entry => entry.check),
+}));
 writeFileSync(join(outDirectory, "evidence.json"), JSON.stringify({
-  schemaVersion: 2, probe: "m5-preview-isolation", status, head, dirtySources: dirty, measuredAt: new Date().toISOString(),
-  modes: results.map(result => ({ mode: result.mode, status: result.status, failed: result.failed, evidence: result.evidence })),
+  schemaVersion: 3, probe: "m5-preview-isolation", status, verdictFrom: "observed checks only", head, dirtySources: dirty, measuredAt: new Date().toISOString(),
+  modes: results.map(result => ({ mode: result.mode, status: result.status, observed: result.observed, notObservable: result.notObservable, failed: result.failed, evidence: result.evidence })),
 }, null, 2));
-console.log(JSON.stringify({ status, head, dirtySources: dirty, modes: results.map(({ mode, status: modeStatus, failed }) => ({ mode, status: modeStatus, failed })) }, null, 2));
+console.log(JSON.stringify({ status, verdictFrom: "observed checks only", head, dirtySources: dirty, modes: summary }, null, 2));
 process.exit(status === "PASS" ? 0 : 1);
 
 async function runMode(mode) {
@@ -99,6 +110,8 @@ async function runMode(mode) {
     { name: "turnUdp6", kind: "udp6", url: port => `turn:[::1]:${port}?transport=udp`, relay: true },
     { name: "turnTcp4", kind: "tcp4", url: port => `turn:127.0.0.1:${port}?transport=tcp`, relay: true },
     { name: "turnsTcp4", kind: "tcp4", url: port => `turns:127.0.0.1:${port}?transport=tcp`, relay: true },
+    { name: "turnTcp6", kind: "tcp6", url: port => `turn:[::1]:${port}?transport=tcp`, relay: true },
+    { name: "turnsTcp6", kind: "tcp6", url: port => `turns:[::1]:${port}?transport=tcp`, relay: true },
   ];
   const openCollector = async (kind) => {
     const record = { count: 0 };
@@ -182,19 +195,49 @@ async function runMode(mode) {
   const ATTEMPTED = ["beacon", "cssImport", "audio", "hints", "iframeExternal", "worker", "formPost", "webrtcTransports"];
   const layers = [["CSP + webRequest + proxy", leak], ["webRequest + proxy (CSP bypassed)", app.layerWebRequest], ["proxy alone (CSP bypassed, no webRequest)", app.layerProxy]];
   const permissions = app.permissions ?? {};
-  // An explicit refusal (review I5): the call had a user activation and focus
-  // right before it, and either main's permission handler refused it (its
-  // count rose during the call) or the response's Permissions-Policy did.
+  // An explicit refusal, per permission (PR #6 review I5, PR #9 review I3):
+  // the call had a user activation and focus right before it, and either
+  // main's handler refused THIS permission for THIS preview during the call
+  // (`DENIAL`: kind and permission name, never a count), or the response's
+  // Permissions-Policy refused the feature. A call that only ran out of time
+  // with neither is "not observable", never a pass.
+  const DENIAL = {
+    camera: /^request:media:(?:.*\+)?video/, microphone: /^request:media:(?:.*\+)?audio/, notification: /^request:notifications$/,
+    midi: /^request:midi(?:Sysex)?$/, fullscreen: /^request:fullscreen$/, clipboardRead: /^(?:request|check):clipboard-read$/,
+    geolocation: /^(?:request|check):geolocation$/, displayMedia: /^display:display-capture$/,
+    hid: /^(?:device|select):hid$/, usb: /^(?:device|select):usb$/, serial: /^(?:device|select):serial$/,
+    permissionGeolocation: /^check:geolocation$/, permissionCamera: /^check:(?:media|camera)/,
+  };
   const called = (name) => permissions[name]?.before?.active === true && permissions[name]?.before?.focused === true;
-  const boundaryRefusal = (name) => called(name) && refused(permissions, name)
-    && (permissions[name].deniedDelta >= 1 || permissions[name].before.policyAllows === false || /permissions policy/i.test(permissions[name].error));
+  const handlerRefused = (name) => (permissions[name]?.denials ?? []).some(denial => DENIAL[name]?.test(denial));
+  const policyRefused = (name) => permissions[name]?.before?.policyAllows === false || /permissions policy/i.test(permissions[name]?.error ?? "");
+  const timedOut = (name) => /timeout|pending/i.test(permissions[name]?.error ?? "");
+  const boundaryRefusal = (name) => {
+    if (!called(name) || !refused(permissions, name)) return false;
+    if (handlerRefused(name) || policyRefused(name)) return true;
+    return timedOut(name) ? notObservable("the call ran out of time and main recorded no refusal of this permission for this preview") : false;
+  };
   const deniedAnswer = (name) => called(name) && permissions[name].ok === true && permissions[name].value === "denied"
-    && (permissions[name].deniedDelta >= 1 || permissions[name].before.policyAllows === false);
+    && (handlerRefused(name) || policyRefused(name));
   // One transport: no candidate, and the agent either finished gathering or
   // the server reported an error. Silence until the deadline is "unobserved".
   const transportBlocked = (result) => Boolean(result) && result.candidates.length === 0 && (result.gathering === "complete" || result.errors.length > 0);
   const transportNames = [...TRANSPORTS.map(transport => transport.name), "stunOutside"];
+  // A transport is observable when the same attempt from an unrestricted
+  // page reached its control collector (PR #9 review I2). Without that, an
+  // empty result from the preview proves nothing and is counted apart.
+  const reached = (name) => (webrtcCounts[name]?.control ?? 0) >= 1;
+  const ipv6Limit = routableIpv6
+    ? "the unrestricted control page did not reach this IPv6 collector"
+    : "no routable IPv6 on this machine: the unrestricted control page could not reach [::1] either";
+  const observableTransport = (name) => name === "stunOutside" || reached(name);
+  const transportVerdict = (name, observed) => {
+    if (!observed) return false;
+    if (observableTransport(name)) return true;
+    return notObservable(ipv6Limit);
+  };
   const unobserved = layers.flatMap(([label, bag]) => transportNames
+    .filter(name => observableTransport(name))
     .filter(name => { const result = bag?.webrtcTransports?.value?.[name]; return result && result.gathering === "timeout" && result.errors.length === 0; })
     .map(name => `${label}: ${name}`));
   const PERMISSIONS = ["camera", "microphone", "displayMedia", "geolocation", "clipboardRead", "hid", "usb", "serial", "midi", "fullscreen"];
@@ -218,17 +261,18 @@ async function runMode(mode) {
     // IPv6 needs a routable IPv6 address on this machine; without one the
     // control cannot reach [::1] either and the IPv6 transports are recorded
     // as not observable here (never silently passed as observed).
-    "control: each WebRTC transport reached its own collector from an unrestricted page": TRANSPORTS.every(transport =>
-      webrtcCounts[transport.name].control >= 1 || (transport.kind.endsWith("6") && !routableIpv6)),
+    // IPv4 always has its control. IPv6 needs a routable IPv6 address on this
+    // machine; without one its transports are "not observable" here (never a pass).
+    "control: each IPv4 WebRTC transport reached its own collector from an unrestricted page": TRANSPORTS.filter(transport => transport.kind.endsWith("4")).every(transport => reached(transport.name)),
     "control: the net log shows the control page's WebRTC TCP connections": net.controlConnects.length >= 2,
     ...Object.fromEntries(TRANSPORTS.map(transport => [
-      `T2 ${transport.name}: nothing reached its collector from the preview`, webrtcCounts[transport.name].page === 0,
+      `T2 ${transport.name}: nothing reached its collector from the preview`, transportVerdict(transport.name, webrtcCounts[transport.name].page === 0),
     ])),
-    ...Object.fromEntries(layers.map(([label, bag]) => [
-      `T2 every transport (${transportNames.join(", ")}) ended with no candidate — ${label}`,
-      bag?.webrtcTransports?.ok === true && transportNames.every(name => transportBlocked(bag.webrtcTransports.value?.[name])),
-    ])),
-    "T2 no transport left unobserved (gathering neither ended nor errored by the deadline)": unobserved.length === 0,
+    ...Object.fromEntries(layers.flatMap(([label, bag]) => transportNames.map(name => [
+      `T2 ${name} ended with no candidate — ${label}`,
+      transportVerdict(name, bag?.webrtcTransports?.ok === true && transportBlocked(bag.webrtcTransports.value?.[name])),
+    ]))),
+    "T2 no observable transport left unobserved (gathering neither ended nor errored by the deadline)": unobserved.length === 0,
     "T1 webRequest alone cancelled the page's requests (main counter)": (app.layerWebRequestBlocked ?? 0) >= NETWORK.length,
     "T1 no outside answer reached the preview": app.diagnostics?.unexpectedResponses === 0,
     "T1 net log: no connection attempt to anything but the dead proxy": net.connects.length === 0,
@@ -273,20 +317,43 @@ async function runMode(mode) {
     [`the task workspaces are ${mode === "git" ? "real Git worktrees in the probe's task folder" : "snapshot copies in the isolated app data"}`]: placeOk && !leakedToHome,
     "the probe finished and the app quit cleanly": app.steps?.includes("done") && app.errors?.length === 0 && exitCode === 0,
   };
-  const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name);
+  // The verdict is made from what was observed only; what could not be
+  // observed is listed with its reason (PR #9 review I2).
+  const notObservedChecks = Object.entries(checks).filter(([, value]) => isNotObservable(value)).map(([name, value]) => ({ check: name, reason: value.notObservable }));
+  const observedChecks = Object.entries(checks).filter(([, value]) => !isNotObservable(value));
+  const failed = observedChecks.filter(([, ok]) => ok !== true).map(([name]) => name);
   const modeStatus = failed.length === 0 ? "PASS" : "FAIL";
+  const observed = { passed: observedChecks.length - failed.length, total: observedChecks.length };
   for (const image of ["todo-wide-view.png", "todo-narrow-view.png"]) if (existsSync(join(root, image))) copyFileSync(join(root, image), join(outDirectory, `${mode}-${image}`));
   const evidence = join(outDirectory, `evidence-${mode}.json`);
   writeFileSync(evidence, JSON.stringify({
-    schemaVersion: 2, probe: "m5-preview-isolation", mode, status: modeStatus, failed, measuredAt: new Date().toISOString(),
+    schemaVersion: 3, probe: "m5-preview-isolation", mode, status: modeStatus, failed, measuredAt: new Date().toISOString(),
     durationMs: Date.now() - startedAt, head, dirtySources: dirty,
     electron: JSON.parse(readFileSync(join(repoRoot, "node_modules", "electron", "package.json"), "utf8")).version,
     scope: `macOS development build, synthetic project, ${mode} task workspaces, no provider; the page used no outside network`,
+    verdictFrom: "observed checks only", observed, notObservable: notObservedChecks, limits: limits(notObservedChecks),
     checks, collectors: { fromPage, afterControl: collectors, webrtc: webrtcCounts }, unobserved, routableIpv6,
     netLog: net, app: { ...app, leak }, exitCode, root,
   }, null, 2));
   if (modeStatus !== "PASS") console.error(output.split("\n").filter(line => /error|Error|panic/.test(line)).slice(-20).join("\n"));
-  return { mode, status: modeStatus, failed, evidence };
+  return { mode, status: modeStatus, failed, observed, notObservable: notObservedChecks, evidence };
+}
+
+/** A check that could not be observed on this machine: neither a pass nor a fail. */
+function notObservable(reason) { return { notObservable: reason }; }
+function isNotObservable(value) { return typeof value === "object" && value !== null && typeof value.notObservable === "string"; }
+
+/** What this run does not show, in words for the report. */
+function limits(notObservedChecks) {
+  const lines = [
+    "macOS development build only: Windows and Linux were not run (the preview is off by default there), and the packaged app's isolation was not run (the default check covers its status and app-wide switch only).",
+  ];
+  const reasons = [...new Set(notObservedChecks.map(entry => entry.reason))];
+  for (const reason of reasons) {
+    const names = notObservedChecks.filter(entry => entry.reason === reason).map(entry => entry.check);
+    lines.push(`not observable (${names.length}): ${reason} — ${names.join("; ")}`);
+  }
+  return lines;
 }
 
 /** Chromium's net log, all sessions. A lookup counts when it reaches the

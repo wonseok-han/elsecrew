@@ -1,24 +1,42 @@
 #!/usr/bin/env node
-// Is the result preview on by default, and off with ELSECREW_PREVIEW=0, the
-// same in a development build and a packaged app? Starts the app twice with
+// Is the result preview on by default where it should be (macOS), off by
+// default elsewhere, off with ELSECREW_PREVIEW=0 and on with =1 — the same in
+// a development build and a packaged app? Starts the app three times with
 // isolated app data and a free debugging port on 127.0.0.1, reads
 // `m5Preview.status()` from the app page and the browser's own command line
 // (the app-wide `--blink-settings=dnsPrefetchingEnabled=false`), then closes it.
 //
 //   node scripts/m5-preview-default-check.mjs dev
-//   node scripts/m5-preview-default-check.mjs packaged [path/to/Elsecrew.app]
+//   node scripts/m5-preview-default-check.mjs packaged [path/to/the app's executable or Elsecrew.app]
+//
+// macOS and Windows (PR #9 review I5). The Windows packaged path is
+// out/Elsecrew-win32-<arch>/Elsecrew.exe and has not been run yet; other
+// platforms exit 2 (not run).
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { mkdtempSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const kind = process.argv[2];
 if (kind !== "dev" && kind !== "packaged") throw new Error("usage: m5-preview-default-check.mjs dev|packaged [app]");
-const appPath = process.argv[3] ?? join(repoRoot, "out", `Elsecrew-darwin-${process.arch}`, "Elsecrew.app");
-const executable = kind === "dev" ? join(repoRoot, "node_modules", ".bin", "electron") : join(appPath, "Contents", "MacOS", "Elsecrew");
+if (process.platform !== "darwin" && process.platform !== "win32") {
+  console.log(JSON.stringify({ kind, status: "NOT_RUN", reason: `the default check covers macOS and Windows only, not ${process.platform}` }));
+  process.exit(2);
+}
+// Where the preview is on by default (electron/preview-flag.ts PREVIEW_DEFAULT_PLATFORMS).
+const onByDefault = process.platform === "darwin";
+const packagedPath = () => {
+  const given = process.argv[3];
+  if (process.platform === "win32") return given ?? join(repoRoot, "out", `Elsecrew-win32-${process.arch}`, "Elsecrew.exe");
+  const bundle = given ?? join(repoRoot, "out", `Elsecrew-darwin-${process.arch}`, "Elsecrew.app");
+  return bundle.endsWith(".app") ? join(bundle, "Contents", "MacOS", "Elsecrew") : bundle;
+};
+// The Electron binary itself (`require("electron")` is its path), on every platform.
+const executable = kind === "dev" ? createRequire(import.meta.url)("electron") : packagedPath();
 if (!existsSync(executable)) throw new Error(`missing ${executable}`);
 
 const freePort = () => new Promise(done => { const server = createServer(); server.listen(0, "127.0.0.1", () => { const { port } = server.address(); server.close(() => done(port)); }); });
@@ -86,7 +104,9 @@ async function run(setting) {
   }
 }
 
-const results = [await run(null), await run("0")];
-const ok = results[0].enabled === true && results[0].dnsPrefetchOff === true && results[1].enabled === false && results[1].dnsPrefetchOff === false;
-console.log(JSON.stringify({ kind, executable, status: ok ? "PASS" : "FAIL", results }, null, 2));
+const expected = { "(none)": onByDefault, "0": false, "1": true };
+const results = [await run(null), await run("0"), await run("1")];
+for (const result of results) result.expected = expected[result.setting];
+const ok = results.every(result => result.enabled === result.expected && result.dnsPrefetchOff === result.expected);
+console.log(JSON.stringify({ kind, platform: process.platform, executable, status: ok ? "PASS" : "FAIL", results }, null, 2));
 process.exit(ok ? 0 : 1);

@@ -1211,6 +1211,8 @@ export const en: Record<MessageKey, string> = {
   "m5.preview.reopen": "Open again",
   "m5.preview.stalled": "The preview stopped responding",
   "m5.preview.stalledHelp": "The page the team made is not responding. You can keep using the app.",
+  "m5.preview.suspended": "The preview is closed while the app gets ready to quit",
+  "m5.preview.suspendedHelp": "If the app stays open, the preview opens again by itself.",
   "m5.preview.workspaceGone": "The result folder was cleaned up, so the preview can't open",
   "m5.preview.tooMuch": "The preview loaded too many files and was closed",
   "m5.preview.storageNote": "Anything saved inside the preview is cleared when you switch tasks or quit.",

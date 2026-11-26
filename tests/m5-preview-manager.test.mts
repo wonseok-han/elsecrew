@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { PreviewManagerV1, type PreviewManagerOptionsV1 } from "../electron/preview-manager.ts";
+import { isAppShortcut, PreviewManagerV1, type PreviewManagerOptionsV1 } from "../electron/preview-manager.ts";
 import type { PreviewEventV1, PreviewReadAssetRequestV1, PreviewResolveRequestV1 } from "../src/m5/contracts/preview-v1.ts";
 
 type Listener = (...args: any[]) => unknown;
@@ -87,11 +87,13 @@ function harness(overrides: Partial<PreviewManagerOptionsV1> = {}, files: Record
   const reads: PreviewReadAssetRequestV1[] = [];
   const resolves: PreviewResolveRequestV1[] = [];
   const children: FakeView[] = [];
+  const zoom = { factor: 1, scale: 1 };
   const window = {
     destroyed: false,
     size: [1280, 800],
     isDestroyed() { return this.destroyed; },
     getContentSize() { return this.size; },
+    webContents: { focused: 0, sent: [] as unknown[], focus() { this.focused++; }, sendInputEvent(event: unknown) { this.sent.push(event); } },
     contentView: {
       addChildView: (view: FakeView) => { children.push(view); log.push("attach"); },
       removeChildView: (view: FakeView) => { children.splice(children.indexOf(view), 1); },
@@ -123,13 +125,15 @@ function harness(overrides: Partial<PreviewManagerOptionsV1> = {}, files: Record
     sidecar: () => sidecar,
     send: (event) => { events.push(event); },
     log: () => undefined,
+    zoomFactor: () => zoom.factor,
+    displayScale: () => zoom.scale,
     ...overrides,
   });
   return {
-    manager, log, sessions, views, events, reads, resolves, children, window, sidecar,
+    manager, log, sessions, views, events, reads, resolves, children, window, sidecar, zoom,
     gate(promise: Promise<void>) { resolveGate = promise; },
     gateReads(promise: Promise<void>) { readGate = promise; },
-    open: (entry: string | null = null) => manager.request({ action: "open", projectId: "project_1", chatId: "chat_1", entry, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide" }),
+    open: (entry: string | null = null) => manager.request({ action: "open", projectId: "project_1", chatId: "chat_1", entry, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", pixelRatio: 1 }),
   };
 }
 
@@ -351,18 +355,22 @@ test("hidden tabs close after the idle wait; layout shows, obscures with a still
   const { view, result } = await opened(h);
   const previewId = result.action === "open" && result.outcome === "opened" ? result.previewId : "";
   view.webContents.listeners.get("did-finish-load")!();
+  assert.notEqual(view.visible, true, "hidden until the page's first layout (review I1)");
+  const shown = await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "narrow", obscured: false, pixelRatio: 1 });
   assert.equal(view.visible, true);
-  const shown = await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "narrow", obscured: false });
   assert.equal(shown.action === "layout" && shown.state, "shown");
   assert.deepEqual(view.bounds, { x: 755, y: 60, width: 390, height: 600 });
   // The still image is taken ahead of time while shown.
   await new Promise(resolve => setTimeout(resolve, 30));
-  const covered = await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "narrow", obscured: true });
+  const covered = await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "narrow", obscured: true, pixelRatio: 1 });
   assert.equal(covered.action === "layout" && covered.snapshot, `data:image/jpeg;base64,${Buffer.from("jpeg").toString("base64")}`);
   assert.equal(view.visible, false);
-  await assert.rejects(h.manager.request({ action: "layout", previewId, bounds: { x: 1200, y: 0, width: 500, height: 600 }, viewport: "wide", obscured: false }));
+  // A stage that does not fit hides the view; it is never an error (review B1).
+  const outside = await h.manager.request({ action: "layout", previewId, bounds: { x: 1200, y: 0, width: 500, height: 600 }, viewport: "wide", obscured: false, pixelRatio: 1 });
+  assert.equal(outside.action, "layout");
+  assert.equal(view.visible, false);
   h.manager.setWindowHidden(true);
-  await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", obscured: false });
+  await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", obscured: false, pixelRatio: 1 });
   assert.equal(view.visible, false, "a minimized window keeps it hidden");
   h.manager.setWindowHidden(false);
   assert.equal(view.visible, true);
@@ -392,12 +400,12 @@ test("covering hides at once even while a capture hangs; a late capture is throw
   view.webContents.captureGate = new Promise<void>(resolve => { release = resolve; });
   view.webContents.listeners.get("did-finish-load")!();
   const bounds = { x: 700, y: 60, width: 500, height: 600 };
-  await h.manager.request({ action: "layout", previewId, bounds, viewport: "wide", obscured: false });
+  await h.manager.request({ action: "layout", previewId, bounds, viewport: "wide", obscured: false, pixelRatio: 1 });
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.ok(view.webContents.captures >= 1, "a capture is in flight");
   // The cover answers without waiting for that capture, and the view is hidden already.
   const covered = await Promise.race([
-    h.manager.request({ action: "layout", previewId, bounds, viewport: "wide", obscured: true }),
+    h.manager.request({ action: "layout", previewId, bounds, viewport: "wide", obscured: true, pixelRatio: 1 }),
     new Promise(resolve => setTimeout(() => resolve("waited"), 50)),
   ]);
   assert.notEqual(covered, "waited");
@@ -501,7 +509,7 @@ test("quit preparation suspends and closes; a called-off one resumes; a replaced
   await assert.rejects(h.open(), /quits/);
 });
 
-test("bounds are checked again after the sidecar and session answer (review minor)", async () => {
+test("bounds are measured again after the sidecar and session answer; the view waits for the page's layout (review minor, I1)", async () => {
   const h = harness();
   let release!: () => void;
   h.gate(new Promise<void>(resolve => { release = resolve; }));
@@ -509,7 +517,124 @@ test("bounds are checked again after the sidecar and session answer (review mino
   await Promise.resolve();
   h.window.size = [900, 800];
   release();
-  await assert.rejects(pending, /outside the window/);
-  assert.equal(h.views.length, 0);
-  assert.equal(h.sessions[0]?.calls.includes("clearStorageData"), true);
+  const result = await pending;
+  assert.ok(result.action === "open" && result.outcome === "opened");
+  const view = h.views[0]!;
+  assert.notEqual(view.visible, true);
+  view.webContents.listeners.get("did-finish-load")!();
+  await h.manager.request({ action: "layout", previewId: result.previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", obscured: false, pixelRatio: 1 });
+  // Cut to the smaller window, never past it.
+  assert.deepEqual(view.bounds, { x: 700, y: 60, width: 200, height: 600 });
+  assert.equal(view.visible, true);
+});
+
+test("zoom: the page's CSS pixels become window pixels, rounded inwards; a stale measurement hides (PR #9 review B1)", async () => {
+  const h = harness();
+  h.zoom.factor = 1.25;
+  h.zoom.scale = 2;
+  const result = await h.manager.request({ action: "open", projectId: "project_1", chatId: "chat_1", entry: null, bounds: { x: 700.4, y: 60, width: 400, height: 500 }, viewport: "wide", pixelRatio: 2.5 });
+  assert.ok(result.action === "open" && result.outcome === "opened");
+  const previewId = result.previewId;
+  const view = h.views[0]!;
+  view.webContents.listeners.get("did-finish-load")!();
+  const layout = (css: { x: number; y: number; width: number; height: number }, pixelRatio: number, obscured = false) =>
+    h.manager.request({ action: "layout", previewId, bounds: css, viewport: "wide", obscured, pixelRatio });
+  await layout({ x: 700.4, y: 60, width: 400, height: 500 }, 2.5);
+  // 700.4 × 1.25 = 875.5 → 876; (700.4 + 400) × 1.25 = 1375.5 → cut at the window's 1280.
+  assert.deepEqual(view.bounds, { x: 876, y: 75, width: 404, height: 625 });
+  assert.equal(view.visible, true);
+  // Zoomed in to 150 % while the page still reports 125 %: hidden, not misplaced.
+  h.zoom.factor = 1.5;
+  await layout({ x: 700.4, y: 60, width: 400, height: 500 }, 2.5);
+  assert.equal(view.visible, false);
+  // The page's fresh measurement at 150 %.
+  await layout({ x: 500, y: 40, width: 300, height: 400 }, 3);
+  assert.deepEqual(view.bounds, { x: 750, y: 60, width: 450, height: 600 });
+  assert.equal(view.visible, true);
+  // Zoomed out to 80 %: a stage past the window's width is cut to it.
+  h.zoom.factor = 0.8;
+  await layout({ x: 1300, y: 60, width: 400, height: 500 }, 1.6);
+  assert.deepEqual(view.bounds, { x: 1040, y: 48, width: 240, height: 400 });
+  // Covered with a measurement that fits nothing (and a stale ratio): hidden anyway.
+  await layout({ x: 5000, y: 5000, width: 400, height: 500 }, 9, true);
+  assert.equal(view.visible, false);
+  // Uncovered but still unplaceable: stays hidden.
+  await layout({ x: 5000, y: 5000, width: 400, height: 500 }, 1.6);
+  assert.equal(view.visible, false);
+});
+
+test("hiding always wins: a cover hides the view before its measurement is even looked at (PR #9 review B1)", async () => {
+  const h = harness();
+  const { view, result } = await opened(h);
+  const previewId = result.action === "open" && result.outcome === "opened" ? result.previewId : "";
+  view.webContents.listeners.get("did-finish-load")!();
+  await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", obscured: false, pixelRatio: 1 });
+  assert.equal(view.visible, true);
+  const order: string[] = [];
+  const setVisible = view.setVisible.bind(view);
+  const setBounds = view.setBounds.bind(view);
+  view.setVisible = (visible: boolean) => { order.push(`visible:${visible}`); setVisible(visible); };
+  view.setBounds = (bounds: unknown) => { order.push("bounds"); setBounds(bounds); };
+  h.zoom.factor = 0.5;
+  const covered = await h.manager.request({ action: "layout", previewId, bounds: { x: 2000, y: 60, width: 500, height: 600 }, viewport: "wide", obscured: true, pixelRatio: 1 });
+  assert.equal(covered.action, "layout");
+  assert.equal(order[0], "visible:false", "hidden first");
+  assert.equal(view.visible, false);
+});
+
+test("a new view stays hidden until the page's first layout, also when a cover came up while it opened (PR #9 review I1)", async () => {
+  const h = harness();
+  const { view, result } = await opened(h);
+  const previewId = result.action === "open" && result.outcome === "opened" ? result.previewId : "";
+  assert.notEqual(view.visible, true);
+  view.webContents.listeners.get("did-finish-load")!();
+  assert.notEqual(view.visible, true, "loading done is not a reason to show");
+  // The page's first layout says a dialog opened meanwhile.
+  await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", obscured: true, pixelRatio: 1 });
+  assert.equal(view.visible, false);
+  await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", obscured: false, pixelRatio: 1 });
+  assert.equal(view.visible, true);
+  // A window un-minimized before any layout of a newer preview does not show it either.
+  const next = await opened(h);
+  h.manager.setWindowHidden(true);
+  h.manager.setWindowHidden(false);
+  assert.notEqual(next.view.visible, true);
+});
+
+test("each refusal is recorded with its preview, kind and permission (PR #9 review I3)", async () => {
+  const h = harness();
+  const { session, result } = await opened(h);
+  const previewId = result.action === "open" && result.outcome === "opened" ? result.previewId : "";
+  session.permissionRequest!({}, "media", () => undefined, { mediaTypes: ["video"] });
+  session.permissionRequest!({}, "fullscreen", () => undefined, {});
+  session.permissionCheck!({}, "geolocation");
+  session.devicePermission!({ deviceType: "usb" });
+  session.displayMedia!({}, () => undefined);
+  session.listeners.get("select-hid-device")!({ preventDefault() {} }, {}, () => undefined);
+  assert.deepEqual(h.manager.denials.map(denial => [denial.previewId === previewId, denial.kind, denial.permission]), [
+    [true, "request", "media:video"],
+    [true, "request", "fullscreen"],
+    [true, "check", "geolocation"],
+    [true, "device", "usb"],
+    [true, "display", "display-capture"],
+    [true, "select", "hid"],
+  ]);
+});
+
+test("the app's window shortcuts typed in the preview reach the app; nothing else does (PR #9 review minor)", async () => {
+  const key = (input: Partial<{ type: string; key: string; meta: boolean; control: boolean; alt: boolean; shift: boolean }>) => ({ type: "keyDown", key: "1", meta: false, control: false, alt: false, shift: false, ...input });
+  for (const value of ["1", "2", "3", "\\", "n", "N"]) assert.equal(isAppShortcut(key({ key: value, meta: true }), "darwin"), true, value);
+  assert.equal(isAppShortcut(key({ control: true }), "win32"), true);
+  assert.equal(isAppShortcut(key({ control: true }), "darwin"), false, "⌘ on macOS");
+  assert.equal(isAppShortcut(key({ meta: true }), "win32"), false, "Ctrl elsewhere");
+  for (const other of [key({ meta: true, shift: true }), key({ meta: true, alt: true }), key({ meta: true, type: "keyUp" }), key({ meta: true, key: "c" }), key({ key: "1" })]) assert.equal(isAppShortcut(other, "darwin"), false, JSON.stringify(other));
+  const h = harness();
+  const { view } = await opened(h);
+  const send = (input: ReturnType<typeof key>) => { let prevented = false; view.webContents.listeners.get("before-input-event")!({ preventDefault: () => { prevented = true; } }, input); return prevented; };
+  const shortcut = process.platform === "darwin" ? key({ key: "2", meta: true }) : key({ key: "2", control: true });
+  assert.equal(send(shortcut), true);
+  assert.equal(h.window.webContents.focused, 1);
+  assert.deepEqual(h.window.webContents.sent, [{ type: "keyDown", keyCode: "2", modifiers: [process.platform === "darwin" ? "meta" : "control"] }]);
+  assert.equal(send(key({ key: "a" })), false);
+  assert.equal(h.window.webContents.sent.length, 1);
 });

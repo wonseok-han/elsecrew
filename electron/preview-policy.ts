@@ -160,31 +160,33 @@ export function genericUserAgent(userAgent: string): string {
   return userAgent.replace(/\s(?:Electron|elsecrew|Elsecrew)\/\S+/g, "").replace(/\s{2,}/g, " ").trim();
 }
 
-/** The renderer's placeholder rectangle, checked in main: finite, inside the
- * window's content, at least 120×120. Rounded to whole pixels. */
-export function validatePreviewBounds(bounds: PreviewBoundsV1, content: { width: number; height: number }): PreviewBoundsV1 {
-  const rounded = {
-    x: Math.round(bounds.x), y: Math.round(bounds.y),
-    width: Math.round(bounds.width), height: Math.round(bounds.height),
-  };
-  if (Object.values(rounded).some(value => !Number.isSafeInteger(value))) throw new Error("preview bounds are not finite");
-  if (rounded.x < 0 || rounded.y < 0 || rounded.width < PREVIEW_MIN_SIZE_V1 || rounded.height < PREVIEW_MIN_SIZE_V1) {
-    throw new Error("preview bounds are outside the window or too small");
-  }
-  // One pixel of rounding at the far edges is the page's subpixel layout.
-  if (rounded.x + rounded.width > content.width + 1 || rounded.y + rounded.height > content.height + 1) {
-    throw new Error("preview bounds are outside the window");
-  }
-  const clamped = {
-    ...rounded,
-    width: Math.min(rounded.width, content.width - rounded.x),
-    height: Math.min(rounded.height, content.height - rounded.y),
-  };
-  // The rectangle actually applied keeps the minimum too (review minor 2).
-  if (clamped.width < PREVIEW_MIN_SIZE_V1 || clamped.height < PREVIEW_MIN_SIZE_V1) {
-    throw new Error("preview bounds are outside the window or too small");
-  }
-  return clamped;
+/**
+ * The stage the page measured (CSS pixels) as window coordinates (PR #9
+ * review B1). The app page may be zoomed (View menu): one CSS pixel is
+ * `zoom` window pixels. The rectangle is rounded inwards, so it never leaves
+ * the stage — the area the app trusts — and cut to the window's content.
+ * Too small, empty or not finite: `null`, and the view stays hidden.
+ */
+export function windowBounds(css: PreviewBoundsV1, zoom: number, content: { width: number; height: number }): PreviewBoundsV1 | null {
+  if (!Number.isFinite(zoom) || zoom <= 0 || ![css.x, css.y, css.width, css.height].every(Number.isFinite)) return null;
+  const left = Math.max(0, Math.ceil(css.x * zoom));
+  const top = Math.max(0, Math.ceil(css.y * zoom));
+  const right = Math.min(content.width, Math.floor((css.x + css.width) * zoom));
+  const bottom = Math.min(content.height, Math.floor((css.y + css.height) * zoom));
+  const width = right - left;
+  const height = bottom - top;
+  if (![left, top, width, height].every(Number.isSafeInteger) || width < PREVIEW_MIN_SIZE_V1 || height < PREVIEW_MIN_SIZE_V1) return null;
+  return { x: left, y: top, width, height };
+}
+
+/**
+ * Whether the page measured at the zoom main sees now: its devicePixelRatio
+ * is the zoom times the display's scale. A measurement from before a zoom
+ * change (or on another display) is not used; the view stays hidden until a
+ * fresh one arrives.
+ */
+export function pixelRatioMatches(pixelRatio: number, zoom: number, displayScale: number): boolean {
+  return Number.isFinite(pixelRatio) && Math.abs(pixelRatio - zoom * displayScale) <= 0.02;
 }
 
 /** Where the view goes inside the placeholder: all of it, or a phone-wide

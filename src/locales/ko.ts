@@ -1209,6 +1209,8 @@ export const ko = {
   "m5.preview.reopen": "다시 열기",
   "m5.preview.stalled": "미리보기가 멈췄어요",
   "m5.preview.stalledHelp": "팀이 만든 화면이 응답하지 않아요. 앱은 계속 쓸 수 있어요.",
+  "m5.preview.suspended": "앱을 끝낼 준비를 하는 동안 미리보기를 닫았어요",
+  "m5.preview.suspendedHelp": "앱이 계속 켜져 있으면 미리보기가 저절로 다시 열려요.",
   "m5.preview.workspaceGone": "결과 폴더가 정리돼 미리보기를 열 수 없어요",
   "m5.preview.tooMuch": "파일을 너무 많이 불러와 미리보기를 닫았어요",
   "m5.preview.storageNote": "미리보기 안에서 저장한 내용은 작업을 바꾸거나 앱을 끄면 지워져요.",

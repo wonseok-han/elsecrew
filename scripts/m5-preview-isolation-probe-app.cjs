@@ -150,7 +150,13 @@ async function run(window) {
   }
   const hashBefore = treeHash(chats.a.worktreePath);
   const bounds = await page(`(() => ({ x: Math.round(innerWidth * 0.45), y: 60, width: Math.round(innerWidth * 0.5), height: innerHeight - 100 }))()`);
-  const open = (chat, entry, viewport = 'wide') => page(`window.m5Preview.open(${JSON.stringify({ projectId, chatId: chat.chatId, entry, bounds, viewport })})`);
+  const pixelRatio = await page('window.devicePixelRatio');
+  const open = async (chat, entry, viewport = 'wide') => {
+    const opened = await page(`window.m5Preview.open(${JSON.stringify({ projectId, chatId: chat.chatId, entry, bounds, viewport, pixelRatio })})`);
+    // Main keeps a new view hidden until the page places it (PR #9 review I1).
+    if (opened && opened.outcome === 'opened') await page(`window.m5Preview.layout(${JSON.stringify({ previewId: opened.previewId, bounds, viewport, obscured: false, pixelRatio })})`);
+    return opened;
+  };
   const loaded = async () => {
     const contents = await waitFor(() => manager.currentWebContents, 10_000, 'preview view');
     await waitFor(() => !contents.isLoading() && contents.getURL().startsWith('elsecrew-preview://'), 15_000, 'preview load');
@@ -183,6 +189,7 @@ async function run(window) {
 
   // T1·T2·T4–T7·T9·T10·T13 in chat A's leak page.
   const openedA = await open(chats.a, 'leak.html');
+  const previewA = openedA.previewId;
   const contents = await loaded();
   const tokenA = tokenOf(contents);
   result.tokensDiffer = tokenA !== tokenB;
@@ -198,11 +205,17 @@ async function run(window) {
   await sleep(200);
   result.permissions = {};
   for (const name of await contents.executeJavaScript('window.PERMISSION_NAMES')) {
-    // Main's own count of refusals around this one call: the explicit denial.
-    const denied = manager.diagnostics.deniedPermissions;
+    // Main's own refusals during this one call, each with its kind and
+    // permission (PR #9 review I3): the probe matches them to the call.
+    const last = manager.denials.at(-1);
     const answer = await contents.executeJavaScript(`window.runPermission(${JSON.stringify(name)})`, true);
     await sleep(100);
-    result.permissions[name] = { ...answer, deniedDelta: manager.diagnostics.deniedPermissions - denied };
+    const fresh = manager.denials.slice(last === undefined ? 0 : manager.denials.lastIndexOf(last) + 1);
+    result.permissions[name] = {
+      ...answer,
+      denials: fresh.filter(denial => denial.previewId === previewA).map(denial => `${denial.kind}:${denial.permission}`),
+      otherDenials: fresh.filter(denial => denial.previewId !== previewA).length,
+    };
   }
   result.newWebContents = webContents.getAllWebContents().length - contentsBefore;
   result.pageNavigationsBlocked = manager.diagnostics.blockedNavigations - navigationsBefore;
@@ -262,15 +275,15 @@ async function run(window) {
   result.todoEntry = openedTodo.entry;
   await todo.executeJavaScript(`(() => { const input = document.getElementById('text'); input.value = '미리보기 확인'; document.querySelector('button').click(); input.value = '좁은 화면'; document.querySelector('button').click(); document.querySelector('li').click(); return document.getElementById('count').textContent; })()`).then(text => { result.todoCount = text; });
   result.todoStorage = await todo.executeJavaScript('localStorage.getItem("todos")');
-  await page(`window.m5Preview.layout(${JSON.stringify({ previewId: openedTodo.previewId, bounds, viewport: 'wide', obscured: false })})`);
+  await page(`window.m5Preview.layout(${JSON.stringify({ previewId: openedTodo.previewId, bounds, viewport: 'wide', obscured: false, pixelRatio })})`);
   await sleep(400);
   // A window capture holds only the app page; the view is captured on its own.
   await saveCapture(todo, 'todo-wide-view.png');
-  await page(`window.m5Preview.layout(${JSON.stringify({ previewId: openedTodo.previewId, bounds, viewport: 'narrow', obscured: false })})`);
+  await page(`window.m5Preview.layout(${JSON.stringify({ previewId: openedTodo.previewId, bounds, viewport: 'narrow', obscured: false, pixelRatio })})`);
   await sleep(400);
   await saveCapture(todo, 'todo-narrow-view.png');
   result.todoNarrowWidth = await todo.executeJavaScript('innerWidth');
-  const obscured = await page(`window.m5Preview.layout(${JSON.stringify({ previewId: openedTodo.previewId, bounds, viewport: 'narrow', obscured: true })})`);
+  const obscured = await page(`window.m5Preview.layout(${JSON.stringify({ previewId: openedTodo.previewId, bounds, viewport: 'narrow', obscured: true, pixelRatio })})`);
   result.obscured = { state: obscured.state, snapshot: typeof obscured.snapshot === 'string' && obscured.snapshot.startsWith('data:image/jpeg;base64,') };
   step('todo');
 
