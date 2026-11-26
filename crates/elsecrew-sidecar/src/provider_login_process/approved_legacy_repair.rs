@@ -69,6 +69,7 @@ fn repair(commit: bool) -> Result<(), SidecarError> {
         directory,
         file,
         recorded,
+        sessions: BTreeSet::new(),
         failed: false,
     };
     reservation.verify()?;

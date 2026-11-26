@@ -350,10 +350,15 @@ impl Sidecar {
         for name in ["claude-login.pending", "codex-login.pending"] {
             // A run's own hold (ADE multi-project P5) is always bound to its run.
             let prefix = name.trim_end_matches("-login.pending");
-            let run_holds = self.storage.path().parent()
-                .and_then(|parent| crate::provider_profile::open_absolute_directory(parent).ok())
-                .and_then(|directory| crate::provider_login_process::run_hold_names(&directory, prefix).ok())
+            let directory = self.storage.path().parent()
+                .and_then(|parent| crate::provider_profile::open_absolute_directory(parent).ok());
+            let run_holds = directory.as_ref()
+                .and_then(|directory| crate::provider_login_process::run_hold_names(directory, prefix).ok())
                 .is_some_and(|names| !names.is_empty());
+            // A publish cut short leaves a staging name behind (PR #20 re-review B2).
+            let leftovers = directory.as_ref().and_then(|directory| directory.entries().ok()).is_some_and(|entries| entries.flatten()
+                .any(|entry| entry.file_name().to_str().is_some_and(|name| name.starts_with(&format!(".{prefix}-")) && name.ends_with(".staging"))));
+            let run_holds = run_holds || leftovers;
             if !run_holds && !self.fence_is_run_bound(name) { continue; }
             if name.starts_with("claude") {
                 self.claude_login.release_bound_fence(&self.storage, &self.projects);
@@ -2593,13 +2598,20 @@ mod tests {
         };
         let freed = [
             hold("codex", 'a', String::new()),                                          // died before it launched anything
-            hold("codex", 'b', format!("{} {}\n", ended.pid, ended.start_us)),          // a model list whose process ended
+            // A model list whose provider (its own session, registered before it ran) ended.
+            hold("codex", 'b', format!("{0} {1}\nsession {0} {1}\n", ended.pid, ended.start_us)),
             hold("claude", 'c', format!("{} {}\nlogin-processes-terminated-locked-v2\n", ended.pid, ended.start_us)), // a check that ended cleanly
         ];
-        let kept = hold("claude", 'd', format!("{} {}\n", live.pid, live.start_us));     // its process still lives
+        let kept = [
+            hold("claude", 'd', format!("{0} {1}\nsession {0} {1}\n", live.pid, live.start_us)), // its process still lives
+            // Something ran, but no session was registered and no marker says
+            // the owner proved its end: fail closed (PR #20 re-review B2).
+            hold("codex", 'e', format!("{} {}\n", ended.pid, ended.start_us)),
+        ];
         sidecar.release_settled_fences();
         for path in &freed { assert!(!path.exists(), "{path:?} stayed"); }
-        assert!(kept.exists(), "a hold whose process lives stays");
+        for path in &kept { assert!(path.exists(), "{path:?} was let go"); }
+        std::fs::remove_file(&kept[1]).unwrap();
         // With the Codex holds gone, signing in to Codex is possible again.
         let profile = crate::provider_profile::CodexProfileBinding::from_storage(&sidecar.storage).unwrap();
         crate::provider_login_process::LoginProcess::reserve(&profile).unwrap().finish().unwrap();

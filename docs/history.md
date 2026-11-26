@@ -2,6 +2,20 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #20 재검토 B2 두 경로 반영 (`orca/ade-multiproject-b`)
+재검토 `~/Documents/elsecrew-ade-multiproject-2026-11-26/REVIEW-pr20-2.md`(대상 0d7fe46b). B1·B3은 해소로 확인됐다.
+
+- **기록되지 않은 자식**: 관문이 공급자를 자기 세션(`setsid`)으로 띄우고, 엔진은 뿌리를 기록한 직후·공급자 실행 전에 `session <pid> <start>`를 잠금에 등록한다. 회수는 기록된 프로세스가 모두 끝나고 그 세션(과 기록된 각 번호의 세션)에 살아 있는 구성원이 없을 때만 한다(`sessions_ended`; 프로세스 목록을 못 읽으면 끝나지 않은 것으로 봄). 무언가 실행됐는데 세션 등록도 종료 표시도 없으면 회수하지 않는다(fail-closed). 정상 정리도 세션에 남은 프로세스를 끝내고 세션이 빌 때만 깨끗한 종료로 본다(`reap_session`). 묶인 실행·로그인 잠금 복구도 세션이 등록돼 있으면 같은 확인을 더한다.
+  - 남는 한계: 세션을 떠난(`setsid`) 자손이 엔진이 보기 전에 생겨 부모보다 오래 살면 macOS에서 찾을 수 없다(커널 지원 없이 불가). 엔진이 본 자손은 그 번호의 세션까지 본다.
+- **게시 중단**: 게시를 임시 이름 → `renameatx_np(RENAME_EXCL)` 한 번으로 바꿨다. 예전 방식이 남긴 링크 두 개·임시 파일은 `clean_publish_leftovers`가 파일 잠금을 잡은 뒤 같은 파일임을 확인하고 임시 이름만 지운다(앱 시작·연결 확인 복구).
+- **SIGKILL 경계 시험**(시험 바이너리를 엔진으로 다시 띄워 정한 지점에서 멈춘 뒤 SIGKILL, 자기 자식만 종료)
+  - `an_engine_killed_while_publishing_leaves_a_recoverable_state`: 임시 파일 단계(아무것도 막지 않음, 정리됨)와 게시 직후(이름 하나, nlink 1, 회수됨).
+  - `an_engine_killed_after_the_launch_never_lets_a_hold_go_while_a_child_lives`: 실행 직후 엔진 종료, 공급자가 엔진이 못 본 자식을 즉시/1초 뒤 만들고 끝남 → 자식이 살아 있는 동안 회수 안 됨·로그인 busy, 자식이 끝나면 회수.
+  - `a_hold_left_with_two_names_by_an_earlier_publish_is_recovered`: 예전 방식의 링크 두 개 정리 후 회수.
+  - `a_crashed_checks_hold_is_freed_when_the_app_starts` 갱신: 세션 등록된 잠금은 회수, 세션 없이 프로세스만 기록된 잠금은 남음.
+- **검증**: `cargo test --workspace` core 267·protocol 75·sidecar 964·통합 16 실패 0, `npm test` 1016/1016, `git diff --check`.
+- **실제 동시 실행 재시험**(`pr-b/real-review2`, 세션 변경 뒤): Claude 2 + Codex 2 모두 성공, 최고 동시 4, Claude 56초·Codex 305초 겹침, 도중·뒤 Claude 확인 `connected`, 끝난 뒤 남은 잠금 없음.
+
 ### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #20 검토(차단 3·중요 4) 반영 (`orca/ade-multiproject-b`)
 검토 `~/Documents/elsecrew-ade-multiproject-2026-11-26/REVIEW-pr20.md`(대상 5bcc7859).
 

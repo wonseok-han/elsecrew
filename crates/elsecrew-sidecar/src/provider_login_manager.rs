@@ -59,6 +59,7 @@ impl LoginManager {
         }
         // Run holds first: they never block the sign-in hold's proof.
         let sign_in = |profile: &dyn crate::provider_profile::LoginProfile| {
+            let _ = crate::provider_login_process::clean_publish_leftovers(profile);
             let _ = recover_run_holds(profile, storage, Some(projects));
             if !crate::provider_login_process::has_login_hold(profile)? {
                 return Err(SidecarError::new("providerLoginRecoveryRequired", "no sign-in hold"));
@@ -167,6 +168,7 @@ impl LoginManager {
                 }
                 // Runs' own holds whose runs ended, then the sign-in hold.
                 let recover = |profile: &dyn crate::provider_profile::LoginProfile| {
+                    crate::provider_login_process::clean_publish_leftovers(profile)?;
                     let runs = recover_run_holds(profile, storage, projects);
                     if !crate::provider_login_process::has_login_hold(profile)? {
                         return runs;

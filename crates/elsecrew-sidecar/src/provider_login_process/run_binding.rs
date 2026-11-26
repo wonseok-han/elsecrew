@@ -62,27 +62,13 @@ fn read_bound(
     if !binding.matches_file(meta.dev(), meta.ino(), dir_meta.dev(), dir_meta.ino()) {
         return Err(failure());
     }
-    let mut recorded = BTreeSet::new();
-    for line in lines {
-        let (pid, start) = line.split_once(' ').ok_or_else(failure)?;
-        let identity = ProcIdentity {
-            pid: pid.parse().map_err(|_| failure())?,
-            start_us: start.parse().map_err(|_| failure())?,
-        };
-        if identity.pid <= 1
-            || identity.start_us <= 0
-            || line != format!("{} {}", identity.pid, identity.start_us)
-            || !recorded.insert(identity)
-            || recorded.len() > MAX_TRACKED
-        {
-            return Err(failure());
-        }
-    }
+    let (recorded, sessions) = super::parse_hold_lines(lines)?;
     let reservation = Reservation {
         name: name.to_owned(),
         directory,
         file,
         recorded,
+        sessions,
         failed: false,
     };
     reservation.verify()?;
@@ -132,6 +118,11 @@ pub(crate) fn recover_bound_run(
             return Err(failure());
         }
     }
+    // The run's own session, where registered: every process in it ended,
+    // seen or not (PR #20 re-review B2).
+    if !reservation.sessions.is_empty() && !super::sessions_ended(&reservation.sessions, &reservation.recorded) {
+        return Err(failure());
+    }
     if profile.revalidate()? != home
         || !crate::provider_profile::same_directory(
             &reservation.directory,
@@ -174,6 +165,7 @@ pub(crate) fn recover_unbound_run(profile: &dyn LoginProfile, name: &str) -> Res
     if bytes.len() as u64 != meta.len() || bytes.contains(&b'\r') {
         return Err(failure());
     }
+    let marked = bytes.ends_with(LOGIN_TERMINATED);
     let body = bytes.strip_suffix(LOGIN_TERMINATED).unwrap_or(&bytes);
     let text = std::str::from_utf8(body).map_err(|_| failure())?;
     if !text.ends_with('\n') {
@@ -183,24 +175,19 @@ pub(crate) fn recover_unbound_run(profile: &dyn LoginProfile, name: &str) -> Res
     if lines.next() != Some("elsecrew provider login pending v1") {
         return Err(failure());
     }
-    let mut recorded = BTreeSet::new();
-    for line in lines {
-        if line.starts_with("run-binding-v1 ") {
-            return Ok(false);
-        }
-        let (pid, start) = line.split_once(' ').ok_or_else(failure)?;
-        let identity = ProcIdentity {
-            pid: pid.parse().map_err(|_| failure())?,
-            start_us: start.parse().map_err(|_| failure())?,
-        };
-        if identity.pid <= 1 || identity.start_us <= 0
-            || line != format!("{} {}", identity.pid, identity.start_us)
-            || !recorded.insert(identity) || recorded.len() > MAX_TRACKED
-        {
-            return Err(failure());
-        }
+    let lines: Vec<&str> = lines.collect();
+    if lines.first().is_some_and(|line| line.starts_with("run-binding-v1 ")) {
+        return Ok(false);
     }
-    let reservation = Reservation { name: name.to_owned(), directory, file, recorded, failed: false };
+    let (recorded, sessions) = super::parse_hold_lines(lines.into_iter())?;
+    // Something ran: only the whole tree's end lets the hold go. The
+    // provider's session was registered before it ran; without it, or the
+    // owner's termination marker, nothing proves that (fail closed; PR #20
+    // re-review B2).
+    if !recorded.is_empty() && sessions.is_empty() && !marked {
+        return Err(failure());
+    }
+    let reservation = Reservation { name: name.to_owned(), directory, file, recorded, sessions, failed: false };
     reservation.verify()?;
     // The lock is ours, so the owner is gone: a reused process ID proves the
     // recorded process ended.
@@ -208,6 +195,11 @@ pub(crate) fn recover_unbound_run(profile: &dyn LoginProfile, name: &str) -> Res
         if !matches!(elsecrew_core::proctree::SettledProcTable.probe(*identity), elsecrew_core::proctree::ProbeResult::Gone) {
             return Err(failure());
         }
+    }
+    // Every process of the provider's session ended, the ones the engine
+    // never saw included.
+    if !reservation.sessions.is_empty() && !super::sessions_ended(&reservation.sessions, &reservation.recorded) {
+        return Err(failure());
     }
     if profile.revalidate()? != home
         || !crate::provider_profile::same_directory(&reservation.directory, &profile.login_lease_directory()?)?

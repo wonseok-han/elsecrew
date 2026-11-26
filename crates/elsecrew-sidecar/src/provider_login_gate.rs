@@ -38,6 +38,14 @@ pub(super) fn command(program: &Path, args: &[&OsStr], cwd: &Path) -> io::Result
         ));
     }
     let mut command = Command::new("/bin/sh");
+    // The provider and everything it starts live in a session of their own
+    // (the gate's PID): a child the engine never observed is still found by
+    // its session, so a hold is only let go once the whole tree has ended
+    // (PR #20 re-review B2). `setsid` is async-signal-safe.
+    unsafe {
+        use std::os::unix::process::CommandExt;
+        command.pre_exec(|| if libc::setsid() == -1 { Err(io::Error::last_os_error()) } else { Ok(()) });
+    }
     command
         .args(["-c", SCRIPT, "elsecrew-login-gate"])
         .arg(program)
