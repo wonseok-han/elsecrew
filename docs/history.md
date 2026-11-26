@@ -17,6 +17,7 @@
 
 - **history 롤오버**: 새 기준(엔트리 부분만 계산, 500줄 초과 시)으로 엔트리 부분 약 170줄이라 대상이 아니다.
 - **검증**: core 259(축약기 14), sidecar 영향 묶음 22, `npm test` 994/994, `pnpm build`. 전체 Rust·CI 결과는 아래 줄에 덧붙인다.
+- **전체 검증(f193d7c2)**: `cargo test --workspace` core 259·protocol 75·sidecar lib 930·stdio_process 16 실패 0. CI(run 45830531151) macOS·Windows·website·GitGuardian 모두 통과. 남은 것: 노예의 B1 재확인, 머지. 큰 Write 권한 요청(128KiB 초과)은 여전히 세션을 끊는다(별도 설계).
 
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — history 롤오버 기준 변경 (`orca/ade-stability`, 조정자 지시)
 - **결정(사용자 결정, 조정자 전달)**: 롤오버 줄 수는 **워크로그 엔트리 부분만** 센다(고정 섹션·머리말·아카이브 포인터 제외). 엔트리 부분이 500줄을 넘으면 **날짜와 상관없이 가장 오래된 엔트리부터** `docs/archive/`로 옮겨 300줄 이하로 줄인다. 같은 날짜가 나뉘어도 되지만 엔트리 하나는 쪼개지 않는다. 옮긴 뒤 `pnpm m5:check:history`는 반드시 통과해야 한다. `CLAUDE.md`·`AGENTS.md`(같은 내용)·`docs/README.md`에 반영했다.
