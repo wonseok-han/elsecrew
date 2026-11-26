@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
@@ -1528,6 +1529,107 @@ test("G4 file streams correlate descriptors, chunks, hashes, and project watcher
   unwatch();
   child.stdout.write(eventLine({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: "watch_stream_01", seq: 2, event: "diff.changed", payload: { projectId: "project_01", event: "diff.changed", paths: ["src/App.tsx"], rescanRequired: false } }));
   assert.equal(watched.length, 1, "unsubscribe must remove the exact event wrapper");
+});
+
+test("task-workspace file reads settle their streams: many opened files never exhaust the active-stream bound", async () => {
+  const { child, client } = createClient();
+  const started = client.start();
+  child.stdout.write(`${readyLine()}\n`);
+  await started;
+  const ref = { chatId: "chat_01", projectId: "project_01", worktreeId: "worktree_01", workspaceIdentity: "workspace_01" };
+  const seen: unknown[] = [];
+  const unwatch = client.onWorkspaceEvent(event => seen.push(event));
+  // More than the 16 streams that may be open at once.
+  for (let index = 0; index < 40; index += 1) {
+    const read = client.readWorkspaceFile({ ...ref, path: "src/App.tsx" });
+    const request = JSON.parse(child.writes.at(-1) ?? "{}") as { requestId: string; method: string };
+    assert.equal(request.method, "workspace.file.read");
+    child.stdout.write(`${JSON.stringify({
+      protocolVersion: 1, kind: "response", sidecarInstanceId: "sidecar_test_01", requestId: request.requestId, ok: true,
+      result: { ...ref, path: "src/App.tsx", classification: "utf8", byteLength: 5,
+        version: "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        stream: { streamId: `workspace_read_${index}`, chunkBytes: 262144 } },
+    })}\n`);
+    await read;
+    child.stdout.write(eventLine({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: `workspace_read_${index}`, seq: 1, event: "workspace.blob.chunk", payload: { ...ref, text: "hello" } }));
+    assert.equal(client.failure, undefined, `read ${index}`);
+  }
+  assert.equal(seen.length, 40, "the renderer still receives every chunk");
+  unwatch();
+  // A chunk for a stream that already completed is still refused.
+  child.stdout.write(eventLine({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: "workspace_read_0", seq: 2, event: "workspace.blob.chunk", payload: { ...ref, text: "x" } }));
+  assert.match(String(client.failure?.message), /unknown or completed stream/);
+});
+
+// PR #15 review I3·M2: task-workspace files and diffs of many chunks settle,
+// with each chunk encoded once (never the whole text again per chunk).
+async function startedWorkspaceClient() {
+  const { child, client } = createClient();
+  const started = client.start();
+  child.stdout.write(`${readyLine()}\n`);
+  await started;
+  return { child, client, ref: { chatId: "chat_01", projectId: "project_01", worktreeId: "worktree_01", workspaceIdentity: "workspace_01" } };
+}
+function answer(child: { writes: string[]; stdout: { write(text: string): unknown } }, result: object) {
+  const request = JSON.parse(child.writes.at(-1) ?? "{}") as { requestId: string };
+  child.stdout.write(`${JSON.stringify({ protocolVersion: 1, kind: "response", sidecarInstanceId: "sidecar_test_01", requestId: request.requestId, ok: true, result })}\n`);
+}
+const sha256 = (text: string) => `sha256:${createHash("sha256").update(text).digest("hex")}`;
+
+test("task-workspace streams of many chunks settle, each chunk encoded once", async () => {
+  const { child, client, ref } = await startedWorkspaceClient();
+  const chunks = Array.from({ length: 40 }, (_, index) => `${String(index).padStart(3, "0")}:${"가나다abc".repeat(4000)}\n`);
+  const text = chunks.join("");
+  const byteLength = Buffer.byteLength(text);
+  const encode = TextEncoder.prototype.encode;
+  let encoded = 0;
+  TextEncoder.prototype.encode = function (input?: string) { const bytes = encode.call(this, input); encoded += bytes.byteLength; return bytes; };
+  try {
+    for (let round = 0; round < 20; round += 1) {
+      const read = client.readWorkspaceFile({ ...ref, path: "big.txt" });
+      answer(child, { ...ref, path: "big.txt", classification: "utf8", byteLength, version: sha256(text), stream: { streamId: `big_${round}`, chunkBytes: 262144 } });
+      await read;
+      chunks.forEach((chunk, index) => child.stdout.write(eventLine({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: `big_${round}`, seq: index + 1, event: "workspace.blob.chunk", payload: { ...ref, text: chunk } })));
+      assert.equal(client.failure, undefined, `file ${round}`);
+      const diff = client.getWorkspaceDiffFile({ ...ref, path: "big.txt" });
+      answer(child, { ...ref, kind: "modified", path: "big.txt", oldPath: null, baseVersion: sha256("old"), worktreeVersion: sha256(text), byteLength, stream: { streamId: `diff_${round}`, chunkBytes: 262144 } });
+      await diff;
+      chunks.forEach((chunk, index) => child.stdout.write(eventLine({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: `diff_${round}`, seq: index + 1, event: "workspace.blob.chunk", payload: { ...ref, text: chunk } })));
+      assert.equal(client.failure, undefined, `diff ${round}`);
+    }
+  } finally {
+    TextEncoder.prototype.encode = encode;
+  }
+  // 20 files and 20 diffs of ~1.9 MiB settled (more than the 16 open at
+  // once). Encoding stays linear in what arrived: about 5x with the event
+  // envelope checks, where re-encoding the whole text per chunk cost ~25x.
+  assert.ok(encoded < 40 * byteLength * 8, `encoded ${encoded} bytes for ${40 * byteLength}`);
+});
+
+test("task-workspace streams still refuse a wrong hash, and an empty file opens no stream", async () => {
+  const empty = await startedWorkspaceClient();
+  const read = empty.client.readWorkspaceFile({ ...empty.ref, path: "empty.txt" });
+  answer(empty.child, { ...empty.ref, path: "empty.txt", classification: "utf8", byteLength: 0, version: sha256(""), stream: { streamId: "empty_1", chunkBytes: 262144 } });
+  await read;
+  assert.equal(empty.client.failure, undefined);
+  empty.child.stdout.write(eventLine({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: "empty_1", seq: 1, event: "workspace.blob.chunk", payload: { ...empty.ref, text: "x" } }));
+  assert.match(String(empty.client.failure?.message), /unknown or completed stream/);
+
+  const wrong = await startedWorkspaceClient();
+  const second = wrong.client.readWorkspaceFile({ ...wrong.ref, path: "a.txt" });
+  answer(wrong.child, { ...wrong.ref, path: "a.txt", classification: "utf8", byteLength: 10, version: sha256("helloworld"), stream: { streamId: "a_1", chunkBytes: 262144 } });
+  await second;
+  wrong.child.stdout.write(eventLine({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: "a_1", seq: 1, event: "workspace.blob.chunk", payload: { ...wrong.ref, text: "hello" } }));
+  assert.equal(wrong.client.failure, undefined, "half a stream is fine");
+  wrong.child.stdout.write(eventLine({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: "a_1", seq: 2, event: "workspace.blob.chunk", payload: { ...wrong.ref, text: "WORLD" } }));
+  assert.match(String(wrong.client.failure?.message), /hash does not match/);
+
+  const over = await startedWorkspaceClient();
+  const third = over.client.readWorkspaceFile({ ...over.ref, path: "b.txt" });
+  answer(over.child, { ...over.ref, path: "b.txt", classification: "utf8", byteLength: 3, version: sha256("abc"), stream: { streamId: "b_1", chunkBytes: 262144 } });
+  await third;
+  over.child.stdout.write(eventLine({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: "b_1", seq: 1, event: "workspace.blob.chunk", payload: { ...over.ref, text: "abcd" } }));
+  assert.match(String(over.client.failure?.message), /exceeds declared stream size/);
 });
 
 test("G4 rejects unknown, oversized, and hash-mismatched blob streams without retry", async () => {
