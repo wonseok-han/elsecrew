@@ -825,7 +825,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         <p>{removal?.label}</p><p>{t(removal?.chatId ? "m5.catalog.removeChatHelp" : "m5.catalog.removeHelp")}</p>
         {removalError && <p role="alert">{t("m5.catalog.removeError")}</p>}
         <div className="m5-dialog-actions"><button type="button" disabled={removing} onClick={() => setRemoval(null)}>{t("m5.editor.cancel")}</button>
-        <button type="button" className="m5-danger" disabled={!canRemove} onClick={() => removal && void deleteTarget(removal)}>{t("m5.catalog.remove")}</button></div>
+        <button type="button" className="m5-danger m5-btn-danger-solid" disabled={!canRemove} onClick={() => removal && void deleteTarget(removal)}>{t("m5.catalog.remove")}</button></div>
       </dialog>
       {!snapshot.project && !railExpanded && <button type="button" className="m5-sidebar-reopen" onClick={() => setRailExpanded(true)} aria-label={t("m5.catalog.expand")} title={t("m5.catalog.expand")} aria-expanded={false}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>}
       <header className={`m5-toolbar${snapshot.project ? " m5-toolbar-project m5-topbar" : ""}`} data-testid="top-bar">

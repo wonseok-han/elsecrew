@@ -17,7 +17,7 @@ test("renderer navigation unmounts resources but bfcache suspension preserves th
   let hide!: (event: { persisted: boolean }) => void;
   runInNewContext(compiled, {
     exports: {},
-    React: { createElement: () => ({}), StrictMode: {} }, M5Workbench: {},
+    React: { createElement: () => ({}), StrictMode: {} }, M5Workbench: {}, startTheme: () => undefined,
     ReactDOM: { createRoot: () => ({ render() { renders++; }, unmount() { unmounts++; } }) },
     document: { getElementById: () => ({}) },
     window: { addEventListener(name: string, listener: typeof hide) { assert.equal(name, "pagehide"); hide = listener; } },

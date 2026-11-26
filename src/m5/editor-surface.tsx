@@ -7,6 +7,17 @@ import type { TreeEntryV1 } from "./contracts/project-v1.ts";
 import { diffPages, diffSides, splitDiffPage, DIFF_PAGE_ROWS } from "./diff-view.ts";
 import { requestEditorSave } from "./editor-actions.ts";
 import { languageFor } from "./editor-language.ts";
+import { currentMonacoTheme, subscribeTheme } from "./theme.ts";
+
+// One Monaco theme for the whole page, read from the color tokens; it follows
+// the brightness choice (one listener for the page, like Monaco's own theme).
+let followingTheme = false;
+function defineElsecrewTheme(monaco: typeof Monaco): void {
+  monaco.editor.defineTheme("elsecrew", currentMonacoTheme());
+  if (followingTheme) return;
+  followingTheme = true;
+  subscribeTheme(() => { monaco.editor.defineTheme("elsecrew", currentMonacoTheme()); monaco.editor.setTheme("elsecrew"); });
+}
 import { isProsePath } from "./editor-paths.ts";
 
 type MonacoApi = typeof Monaco;
@@ -189,13 +200,7 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
       if (cancelled || !host.current) return;
       const current = latest.current;
       let appliedReadOnly = current.readOnly || current.tab.saveState === "saving";
-      monaco.editor.defineTheme("elsecrew", {
-        base: "vs-dark", inherit: true, rules: [],
-        colors: { "editor.background": "#111315", "editor.foreground": "#eceeed",
-          "editorLineNumber.foreground": "#697078", "editorLineNumber.activeForeground": "#c3c7cd",
-          "editorGutter.background": "#111315", "editor.lineHighlightBackground": "#191b1e",
-          "editor.selectionBackground": "#354352", "editor.inactiveSelectionBackground": "#29323b" },
-      });
+      defineElsecrewTheme(monaco);
       const nextEditor = monaco.editor.create(host.current, {
         model: null,
         theme: "elsecrew",
@@ -326,13 +331,7 @@ export function MonacoDiff({ path, before, after, sideBySide, wrap, fit = false,
     let models: Monaco.editor.ITextModel[] = [];
     void loadMonaco().then(monaco => {
       if (cancelled || !host.current) return;
-      monaco.editor.defineTheme("elsecrew", {
-        base: "vs-dark", inherit: true, rules: [],
-        colors: { "editor.background": "#111315", "editor.foreground": "#eceeed",
-          "editorLineNumber.foreground": "#697078", "editorLineNumber.activeForeground": "#c3c7cd",
-          "editorGutter.background": "#111315", "editor.lineHighlightBackground": "#191b1e",
-          "editor.selectionBackground": "#354352", "editor.inactiveSelectionBackground": "#29323b" },
-      });
+      defineElsecrewTheme(monaco);
       const common = {
         theme: "elsecrew", readOnly: true, automaticLayout: true,
         minimap: { enabled: false }, scrollBeyondLastLine: false, fontSize: 13, lineHeight: 20,
