@@ -2,6 +2,30 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 개발 중 반복되는 Keychain 허용 창 원인 확정과 사이드카 쓰기 경로 수정
+Orca 조정자 작업. 기준은 feature/ade 907eeba4, 브랜치 `orca/ade-keychain-fix` → PR base feature/ade.
+
+- **원인 확정**(`security dump-keychain -a`로 ACL·partition만 확인, 비밀 값은 읽지 않음)
+  - `Claude Code-credentials-f97f5bae`: 허용 앱은 `/usr/bin/security` 하나, partition은 `cdhash:dd3f…, apple-tool:`. Claude Code와 사이드카의 읽기는 모두 `/usr/bin/security`라 `apple-tool:`로 통과한다.
+  - `cdhash:` 항목을 만든 것은 사이드카의 토큰 갱신 쓰기(`security_framework::set_generic_password`)뿐이다. 자체 서명 사이드카는 Team ID가 없어 cdhash로 묶이고, 다시 빌드할 때마다 해시가 바뀌어 다시 물었다. 지정 요구사항이 같아도 partition 검사가 따로 있다.
+  - `Elsecrew Safe Storage`: 허용 앱이 ADE-개발 경로 하나이고 partition은 `cdhash:74cc2c91…`. 하지만 ADE-개발·ade-phase1a·이 워크트리(`node install.js`로 새로 품)의 Electron.app cdhash가 모두 74cc2c91…로 같다. 이 워크트리의 Electron으로 safeStorage 왕복(7ms)과 실제 개발 앱 시작·정상 종료(봉인 키 복호화·새 봉인 기록)가 창 없이 됐고, 항목의 ACL·mdat는 바뀌지 않았다. 워크스페이스마다 다시 묻는다는 추정은 사실이 아니어서 Electron 쪽은 바꾸지 않았다.
+- **수정**(`provider_claude_refresh.rs`)
+  - 갱신 쓰기를 `/usr/bin/security -i` + stdin 한 줄(`add-generic-password -U -a "unknown" -s "<서비스>" -X <hex>`)로 바꿨다. argv는 `-i`뿐이고 stdout·stderr는 버린다. 줄 버퍼는 비밀 바이트를 넣기 전에 크기를 정해 재할당 사본이 남지 않고, 쓰기 뒤 0으로 지운다.
+  - 서비스·계정에 따옴표·역슬래시·제어 문자가 있으면 줄을 만들지 않는다. 줄이 4032자를 넘으면(로그인 약 1.9KB 초과) 예전 native 호출로 되돌린다.
+  - `security`는 종료 코드만 알려 주므로 쓰기 뒤 다시 읽어 같은지 확인한다.
+  - 배포판에도 그대로 쓴다. 읽기는 이미 배포판에서 `/usr/bin/security`를 쓰고, 항목의 ACL은 Claude Code가 만들 때부터 `/usr/bin/security`만 허용해 넓어지는 권한이 없다. 서명된 배포판도 업데이트마다 갱신 쓰기 허용 창이 생길 여지가 없어진다.
+  - `scripts/m5-dev-sign-sidecar.mjs`와 테스트를 지우고 `m5:dev`를 PR #2 이전으로 되돌렸다. 사이드카의 Keychain 접근이 모두 `/usr/bin/security`라 사이드카 서명은 Keychain에 영향이 없다. 첫 `codesign` 개인 키 허용 창과 인증서 의존도 사라진다. 로그인 키체인의 "Elsecrew Dev" 인증서는 그대로 두었다.
+- **확인**
+  - 단위 테스트: 줄 형식·hex만 포함·한 줄·상한·따옴표 거부. 임시 키체인(macOS)에서 `security -i`가 비밀을 가진 동안 `ps -axww`의 어떤 argv에도 평문·hex가 없음, 갱신 뒤 값 일치, ACL(`/usr/bin/security`만) 불변.
+  - 로그인 키체인(조정자 승인): 더미 항목 `Elsecrew keychain-fix probe`(계정 `probe-20261126…`)를 `/usr/bin/security`로 만들고, cdhash가 다른 두 빌드(329e767d…, 302776f4…)의 새 쓰기 경로로 갱신했다. 둘 다 창 없이 0.04초 안에 끝났고 partition은 `apple-tool:`, 허용 앱은 `/usr/bin/security` 그대로였다. 끝난 뒤 그 서비스+계정 하나만 걸리는 것을 확인하고 지웠다.
+  - 실제 `Claude Code-credentials-f97f5bae`는 읽기(ACL) 외에 건드리지 않았다(mdat 20261126005712Z 그대로). 기존 partition의 `cdhash:dd3f…`는 남아 있지만 해롭지 않다.
+  - 실수 기록: 개발 앱 확인 때 `pnpm m5:dev -- -- …`의 `--`가 하나 많아 `--user-data-dir`·디버깅 포트가 적용되지 않았고, 개발 기본 프로필(`~/Library/Application Support/Elsecrew`)로 떴다. 다른 개발 앱 인스턴스는 없었고, 시작 화면 뒤 SIGTERM으로 정상 종료해 봉인이 다시 기록됐다(정상 사용분). 다음부터는 `pnpm m5:dev -- --user-data-dir=…` 형태로 쓴다.
+- **테스트**: `cargo test -p elsecrew-sidecar` 통과(lib 887, 무시 44 / 통합 16, 무시 1). 새 테스트 2개와 수동 probe 1개(`#[ignore]`) 포함. `npm test` 752 통과(지운 서명 스크립트 테스트 7개만큼 줄었다), `pnpm build` 통과, `git diff --check` 통과. Rust workspace 전체는 다시 돌리지 않았다(변경은 macOS 전용 `provider_claude_refresh` 하나).
+- **미검증**: 실제 만료 토큰 갱신(새 쓰기 경로로 실제 Claude 항목 갱신)은 만료 시점에만 일어나 이번에 돌리지 않았다. 같은 함수를 로그인 키체인 더미 항목으로 확인했다.
+- **다음 할 일**
+  - 이 PR의 CI·독립 검토 대응
+  - 다음 실제 토큰 만료 때 개발 앱에서 창이 뜨지 않는지 관찰
+
 ### 2026-11-25 · by Claude Opus 5.5 (claude-opus-5-5) — ADE 고도화 전 진단, 개발 빌드 사이드카 고정 서명, Codex 0.171 연결 실패 수정
 Orca 조정자 작업 두 건이다. 기준 HEAD는 01d85814이고, 브랜치는 주인님 결정(파생 브랜치 + PR로 feature/ade)에 따라 `ade/dev-signing-codex`다.
 
@@ -116,9 +140,12 @@ Orca 조정자 작업(주인님 전체 실제 시험 승인 2026-11-23). 기준 
     2. `codex app-server generate-ts --out <임시>`로 스키마를 본다.
     3. 실제 직렬화는 인증 없이 임시 CODEX_HOME + 같은 `-c` 설정으로 `config/read`를 호출해 확인한다.
   - 실제 자격 증명 복사본으로는 재현하지 않는다(refresh token 회전 위험).
-- **개발 빌드 서명과 키체인(2026-11-25)**: `m5:dev`는 디버그 사이드카를 로컬 "Elsecrew Dev" 인증서로 서명한다(지정 요구사항 = 식별자 + 인증서라 다시 빌드해도 같다).
-  - 인증서가 없으면 경고만 내고 ad-hoc으로 진행한다. 그 경우 토큰 갱신 때마다 키체인이 다시 묻는다.
-  - 개발용 Electron.app은 다시 서명하지 않는다. ad-hoc cdhash가 Electron 버전마다 결정적이라, `Elsecrew Safe Storage`는 버전을 올릴 때만 다시 묻는다.
+- **키체인 허용 창과 partition list(2026-11-26, 11-25 서명 판단 정정)**: macOS 키체인 항목은 허용 앱 목록(ACL)과 별개로 partition list를 검사한다. 항목을 만든·허용받은 코드가 Apple Team ID로 서명됐으면 `teamid:`, `/usr/bin/security` 같은 Apple 도구는 `apple-tool:`, **자체 서명·ad-hoc 코드는 `cdhash:`(바이너리 해시)**로 묶인다.
+  - 그래서 "Elsecrew Dev" 자체 서명(지정 요구사항이 고정)은 소용이 없었다. 다시 빌드할 때마다 cdhash가 바뀌어 partition 검사에서 다시 묻는다. 11-25의 "한 번 허용하면 다시 묻지 않는다"는 지정 요구사항만 본 잘못된 판단이었고, `m5-dev-sign-sidecar.mjs`는 11-26에 제거했다.
+  - 해결: 사이드카는 앱 전용 Claude 로그인을 읽기·쓰기 모두 `/usr/bin/security`로 한다. 쓰기는 `security -i`에 stdin으로 `add-generic-password -U -a … -s … -X <hex>` 한 줄을 넘긴다(Claude Code 자신과 같은 방식). 비밀 값은 argv·로그·파일에 남지 않는다.
+  - `security -i`의 한 줄 상한은 개행 포함 4095자(macOS 26 실측)다. 넘으면 남은 부분이 별도 명령으로 실행되고 "unknown command" 오류에 그 내용이 찍힌다. 그래서 4032자로 미리 막고, 넘는 로그인(약 1.9KB 초과, 실제는 약 600바이트)만 native 호출로 되돌린다.
+  - `security create-keychain`으로 만든 임시 키체인은 버전 256이라 partition list가 생기지 않는다. partition 동작은 로그인 키체인에서만 확인된다.
+  - `Elsecrew Safe Storage`(Electron safeStorage)는 바꾸지 않는다. 같은 Electron 버전의 Electron.app은 워크스페이스·경로가 달라도 cdhash가 같고(74cc2c91…, 43.4.0), 경로가 다른 워크트리에서도 창 없이 읽혔다. Electron 버전을 올릴 때만 한 번 묻는다.
   - Keychain 항목은 지우지 않는다.
 - **에이전트는 실제 브라우저·Node를 실행할 수 없다(2026-11-23 확인)**: 실행 샌드박스(`provider_runtime_sandbox.rs` `POLICY`, `deny default`)는 `/System`·`/usr`·작업 공간·프로필만 읽게 하고 로컬 소켓을 막는다. 그래서 Chrome·Firefox·WebKit(Swift)·Homebrew Node가 모두 실패하고, 에이전트는 macOS `jsc`와 가짜 DOM으로만 웹 앱을 확인한다. 웹 앱 결과의 실제 동작은 사람이(또는 시험자가 별도 Chrome으로) 확인해야 한다. 이 경계를 넓히는 것은 안전 결정이다.
 - **"요청 내용 보기"는 사라진 요청에 오류를 내지 않는다(2026-11-23)**: Claude CLI는 권한 요청을 스스로 취소할 수 있다(`control_cancel_request`). 대기하지 않는 요청의 inspect는 `inspection: null`, 허용·거절은 `agentApprovalChanged`. approval 결과는 sidecar client·main·preload·화면에서 네 번 검증되므로 계약 검증은 자기 출력을 다시 통과해야 한다(멱등).
