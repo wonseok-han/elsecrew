@@ -16,6 +16,7 @@
   - 둘째: 대기 상한을 넘은 연결만 실패한다. 자리 보유자는 계속 진행한다.
   - 시험 기한은 연결별로 줄여 쓴다(`set_large_line_limits`, 시험 전용). 자리를 쓰는 시험들은 `LARGE_LINE_TEST_LOCK`으로 서로 겹치지 않게 했다(Claude 세션 시험 포함).
 - **검증**: sidecar 관련 묶음 15 통과. 전체 Rust·CI는 다음 줄에 덧붙인다.
+- **전체 검증(bd9e9b5c)**: `cargo test --workspace` core 259·protocol 75·sidecar lib 932·stdio_process 16 실패 0. CI(run 45833521943) macOS·Windows·website·GitGuardian 모두 통과. TS 변경 없음. 남은 것: 머지. 큰 Write 권한 요청(128KiB 초과)은 별도 설계.
 
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #17 Codex 검토(차단 1·중요 4·경미 2) 반영 (`orca/ade-stability`)
 검토 `~/Documents/elsecrew-ade-stability-2026-11-26/REVIEW-pr17.md`(대상 d9562788). 원칙(조정자): 승인에 쓰는 값(화면 표시·지문·되돌려 보내는 입력)은 원문만 쓰고, 축약은 관측·표시 전용으로 둔다.
