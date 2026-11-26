@@ -60,6 +60,15 @@ jobs:
       - name: 기준선 기계 검증 하네스
         run: pnpm test:harness
 
+      # 렌더러 마운트 스모크(가짜 bridge로 작업대 전체 흐름)는 g4·g6 게이트에만 있어
+      # 한동안 깨진 채 아무도 돌리지 않았다(2026-11-26). macOS에서만 매번 돌린다.
+      # pnpm은 electron postinstall을 막으므로 바이너리를 직접 받는다.
+      - name: 렌더러 마운트 스모크 (Electron, macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          node node_modules/electron/install.js
+          pnpm m5:test:editor
+
       - name: 하네스 증거 업로드
         if: always()
         uses: actions/upload-artifact@v4
