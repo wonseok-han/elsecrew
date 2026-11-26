@@ -23,6 +23,7 @@
   - Codex 승인 요청은 명령(64KiB)·경로만 담아 이 문제가 없다.
 - **시험**: core `a_large_write_is_kept_exactly_and_echoed_whole`(훅·권한 요청 300KB 원문 보관·되돌려 보냄·예산 반환), `a_request_too_large_to_keep_is_refused_with_guidance`(4MiB 초과·예산 초과 보류, 안내 거절, 세션 계속, 응답하면 예산 회복), `permission_requests_handshake_and_results_are_never_shortened`(권한 요청은 바이트 그대로 통과), `claude_allow_echoes_the_original_input_after_shortened_frames`(축약된 assistant 뒤 큰 요청도 원문 되돌림); sidecar `a_large_write_request_is_allowed_whole_and_the_session_goes_on`(가짜 Claude가 받은 허용 응답 SHA-256이 원문과 일치, 이어서 답변), `only_a_session_sends_frames_over_the_line_bound`, `a_large_tool_input_is_shown_in_part_with_its_size_and_hash`; 화면 `a large Claude tool input arrives in part, with its full size and SHA-256`.
 - **검증**: core 261, sidecar 관련 묶음 통과, `npm test` 995/995, `pnpm build`. 전체 Rust·CI는 아래에 덧붙인다.
+- **전체 검증(12413137)**: `cargo test --workspace` core 261·protocol 75·sidecar lib 936·stdio_process 16 실패 0. PR https://github.com/wonseok-han/elsecrew/pull/19 (`--base feature/ade`), CI(run 45844680823) macOS·Windows·website·GitGuardian 모두 통과.
 - **남은 일**: Codex 검토 대응. 명령 허용 설정의 Codex 의미 차이를 어떻게 할지 판단. 8MiB 넘는 권한 요청 줄은 여전히 세션 실패. 큰 Write 실제 계정 확인은 출력 토큰 비용 때문에 하지 않았다(가짜 Claude 끝단 시험으로 대체).
 
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #17 재확인(B1 해소, 새 중요 1건) 반영: 큰 줄 자리 기한 (`orca/ade-stability`)
