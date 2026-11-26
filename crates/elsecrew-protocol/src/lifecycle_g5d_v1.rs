@@ -143,11 +143,11 @@ fn parse_followup_status(
     let mut output = false;
     let mut preview = false;
     let extended = capabilities.is_some_and(|capabilities| {
-        // Result preview: an optional pair right after the installation suffix.
-        if capabilities.len() >= 2
-            && capabilities[capabilities.len() - 2].as_str() == Some("preview.resolve")
-            && capabilities.last().and_then(Value::as_str) == Some("preview.readAsset") {
-            capabilities.truncate(capabilities.len() - 2);
+        // Result preview: an optional group right after the installation suffix.
+        let methods = crate::preview_v1::PREVIEW_METHODS_V1;
+        if capabilities.len() >= methods.len()
+            && capabilities[capabilities.len() - methods.len()..].iter().map(Value::as_str).eq(methods.iter().map(|method| Some(*method))) {
+            capabilities.truncate(capabilities.len() - methods.len());
             preview = true;
         }
         if capabilities.last().and_then(Value::as_str) == Some("provider.install") {

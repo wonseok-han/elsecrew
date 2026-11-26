@@ -1,6 +1,7 @@
 import { parseG5DAgentFixtureReadyPayloadV1, parseG5DNativeReadyPayloadV1 } from "./agent-adapter-v1.ts";
 import { APP_SCHEMA_VERSION, type ProtocolErrorV1, type ReadyPayloadV1 } from "./protocol-v1.ts";
 import { parseG5DProductReadyPayloadV1 } from "./run-recovery-v1.ts";
+import { PREVIEW_METHODS_V1 } from "./preview-v1.ts";
 
 export const G5D_ALLOWED_WHILE_STORAGE_NOT_READY_V1 = [
   "system.status",
@@ -101,14 +102,16 @@ export function parseCurrentSystemStatusV1(value: unknown, agentFixture: boolean
     const sidecar = value.sidecar;
     if (typeof sidecar === "object" && sidecar !== null && "capabilities" in sidecar && Array.isArray(sidecar.capabilities)) {
       const caps = sidecar.capabilities;
-      // Result preview: an optional pair right after the installation suffix.
-      if (caps.includes("preview.resolve") || caps.includes("preview.readAsset")) {
-        if (caps[caps.length - 2] !== "preview.resolve" || caps[caps.length - 1] !== "preview.readAsset" || caps[caps.length - 3] !== "provider.install"
-          || caps.filter(item => item === "preview.resolve" || item === "preview.readAsset").length !== 2) {
+      // Result preview: an optional group right after the installation suffix.
+      const preview: readonly string[] = PREVIEW_METHODS_V1;
+      if (caps.some(item => preview.includes(item))) {
+        const tail = caps.slice(-preview.length);
+        if (tail.join("\n") !== preview.join("\n") || caps[caps.length - preview.length - 1] !== "provider.install"
+          || caps.filter(item => preview.includes(item)).length !== preview.length) {
           throw new Error("invalid preview capability baseline");
         }
-        const parsed = parseCurrentSystemStatusV1({ ...value, sidecar: { ...sidecar, capabilities: caps.slice(0, -2) } }, agentFixture, native);
-        return { ...parsed, sidecar: { ...parsed.sidecar, capabilities: [...parsed.sidecar.capabilities, "preview.resolve", "preview.readAsset"] } };
+        const parsed = parseCurrentSystemStatusV1({ ...value, sidecar: { ...sidecar, capabilities: caps.slice(0, -preview.length) } }, agentFixture, native);
+        return { ...parsed, sidecar: { ...parsed.sidecar, capabilities: [...parsed.sidecar.capabilities, ...preview] } };
       }
       const index = caps.indexOf("agent.outputHead");
       if (index >= 0 || caps.includes("agent.outputPage")) {

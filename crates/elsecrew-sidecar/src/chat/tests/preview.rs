@@ -310,3 +310,62 @@ fn read_asset_stops_for_a_discarded_or_foreign_workspace() {
     assert!(read_at(&mut fixture, &ha, &a.address, "a.txt", 0).is_err());
     assert_eq!(outcome(&mut fixture, &hb, &b.address, "b.txt"), "ok");
 }
+
+fn build_plan(fixture: &mut Fixture, opened: &Opened) -> Value {
+    let project_id = fixture.project_id.clone();
+    fixture.projects.preview_build_plan(&fixture.storage, &project_id, &opened.chat_id).unwrap().result
+}
+
+/// Build-then-preview (결과 미리보기 확장 1단계): the plan comes from the chat's
+/// own workspace, reads `package.json` without following links, and refuses
+/// a build whose output or packages Git would record with the task's steps.
+#[test]
+fn build_plan_reads_the_task_package_and_requires_ignored_output() {
+    let mut fixture = Fixture::new();
+    let opened = workspace_of(&mut fixture, "build_plan", Kind::GitWorktree);
+    let root = opened.root.clone();
+    let plan = build_plan(&mut fixture, &opened);
+    assert_eq!(plan["refusal"], json!("noPackage"));
+    assert_eq!(plan["workspacePath"], Value::Null);
+    assert_eq!(plan["workspaceIdentity"], json!(opened.address.workspace_identity));
+
+    fs::write(root.join("package.json"), r#"{"scripts":{"dev":"vite"}}"#).unwrap();
+    assert_eq!(build_plan(&mut fixture, &opened)["refusal"], json!("noBuildScript"));
+    fs::write(root.join("package.json"), "{not json").unwrap();
+    assert_eq!(build_plan(&mut fixture, &opened)["refusal"], json!("invalidPackage"));
+
+    fs::write(root.join("package.json"), r#"{"scripts":{"build":"tsc -b && vite build"},"devDependencies":{"vite":"6"}}"#).unwrap();
+    fs::write(root.join("vite.config.ts"), "export default { build: { outDir: 'web' } }").unwrap();
+    // Nothing ignored yet: installing would put node_modules into the task's history.
+    assert_eq!(build_plan(&mut fixture, &opened)["refusal"], json!("dependenciesNotIgnored"));
+    fs::write(root.join(".gitignore"), "node_modules\n").unwrap();
+    assert_eq!(build_plan(&mut fixture, &opened)["refusal"], json!("outputNotIgnored"));
+    fs::write(root.join(".gitignore"), "node_modules\nweb/\n").unwrap();
+    let plan = build_plan(&mut fixture, &opened);
+    assert_eq!(plan["refusal"], Value::Null, "{plan}");
+    assert_eq!(plan["workspacePath"], json!(root.to_str().unwrap()));
+    assert_eq!(plan["packageManager"], json!("npm"));
+    assert_eq!(plan["lockfile"], json!(false));
+    assert_eq!(plan["outputDir"], json!("web"));
+    assert_eq!(plan["buildScript"], json!("tsc -b && vite build"));
+    assert_eq!(plan["needsInstall"], json!(true));
+    fs::create_dir_all(root.join("node_modules")).unwrap();
+    fs::write(root.join("package-lock.json"), "{}").unwrap();
+    let plan = build_plan(&mut fixture, &opened);
+    assert_eq!((plan["needsInstall"].clone(), plan["lockfile"].clone()), (json!(false), json!(true)));
+
+    // A package.json that is a link out of the workspace is not read.
+    let outside = fixture._root.path().join("outside-package.json");
+    fs::write(&outside, r#"{"scripts":{"build":"evil"}}"#).unwrap();
+    fs::remove_file(root.join("package.json")).unwrap();
+    symlink(&outside, root.join("package.json")).unwrap();
+    assert_eq!(build_plan(&mut fixture, &opened)["refusal"], json!("noPackage"));
+
+    // An old standalone copy is not built here.
+    let copy = workspace_of(&mut fixture, "build_plan_copy", Kind::Snapshot);
+    assert_eq!(build_plan(&mut fixture, &copy)["refusal"], json!("unsupportedWorkspace"));
+    // A discarded or closed workspace is an error, as for reads.
+    fixture.projects.workspace_close(&fixture.storage, &opened.address).unwrap();
+    let project_id = fixture.project_id.clone();
+    assert!(fixture.projects.preview_build_plan(&fixture.storage, &project_id, &opened.chat_id).is_err());
+}

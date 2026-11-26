@@ -57,7 +57,8 @@
       "recovery.resolveAgent",
       "storage.status",
       "preview.resolve",
-      "preview.readAsset"
+      "preview.readAsset",
+      "preview.buildPlan"
     ],
     "events": [
       "system.ready",

@@ -72,3 +72,18 @@ fn windows_watch_initial_scan_retains_only_a_bounded_slice() {
     assert!(scan.snapshot == expected);
     assert_eq!(scan.snapshot.len(), 300);
 }
+
+#[test]
+fn watcher_scan_skips_installed_packages_at_the_top() {
+    let root = tempfile::tempdir().unwrap();
+    fs::create_dir_all(root.path().join("node_modules/react")).unwrap();
+    fs::write(root.path().join("node_modules/react/index.js"), b"x").unwrap();
+    fs::create_dir_all(root.path().join("src/node_modules")).unwrap();
+    fs::write(root.path().join("src/node_modules/kept.js"), b"x").unwrap();
+    fs::write(root.path().join("package.json"), b"{}").unwrap();
+    let held = Dir::open_ambient_dir(root.path(), ambient_authority()).unwrap();
+    let snapshot = snapshot_tree(&held).unwrap();
+    assert!(snapshot.keys().all(|path| !path.starts_with("node_modules")), "{snapshot:?}");
+    assert!(snapshot.contains_key("src/node_modules/kept.js"));
+    assert!(snapshot.contains_key("package.json"));
+}

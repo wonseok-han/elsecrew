@@ -16,6 +16,9 @@ import * as usageContract from "../src/m5/contracts/provider-usage-v1.ts";
 import * as previewContract from "../src/m5/contracts/preview-v1.ts";
 import * as previewPolicy from "../electron/preview-policy.ts";
 import * as previewManagerModule from "../electron/preview-manager.ts";
+import { PreviewBuildManagerV1 } from "../electron/preview-build.ts";
+import { previewBuildConsentBox } from "../electron/preview-build-policy.ts";
+import { EventEmitter } from "node:events";
 import * as previewFlag from "../electron/preview-flag.ts";
 import * as zoomMenuModel from "../electron/zoom-menu-model.ts";
 /** The View menu's zoom callback main.ts installed (the real menu needs Electron). */
@@ -374,6 +377,10 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
       sidecarCalls.push("getSystemStatus");
       return { state: "ready" };
     }
+    async previewBuildPlan(input: { projectId: string; chatId: string }) {
+      sidecarCalls.push(`previewBuildPlan:${JSON.stringify(input)}`);
+      return { ...input, worktreeId: "worktree_1", workspaceIdentity: "workspace_1", ...fakePreviewBuild.plan };
+    }
     async previewResolve(input: { projectId: string; chatId: string; entry: string | null }) {
       sidecarCalls.push(`previewResolve:${JSON.stringify(input)}`);
       return { ...input, worktreeId: "worktree_1", workspaceIdentity: "workspace_1", previewHandle: "ph_cccccccccccccccccccccccccccccccc", entry: null, refusal: null };
@@ -474,6 +481,8 @@ function moduleFor(
   if (specifier.endsWith("preview-v1.ts")) return previewContract;
   if (specifier === "./preview-policy.ts") return previewPolicy;
   if (specifier === "./preview-manager.ts") return previewManagerModule;
+  // The real runner with this computer's parts faked (no program ever starts).
+  if (specifier === "./preview-build-host.ts") return { createPreviewBuildManager: fakePreviewBuild.create };
   // The platform is the harness's (macOS unless a test names another), not the machine's.
   if (specifier === "./preview-flag.ts") return { previewFlags: (packaged: boolean) => previewFlag.previewFlagsFromEnvironment(fakes.env, packaged, fakes.env.TEST_PLATFORM ?? "darwin") };
   if (specifier.endsWith("git-selection-v1.ts")) return gitSelectionContract;
@@ -546,6 +555,30 @@ import * as externalLinkContract from "../src/m5/contracts/external-link-v1.ts";
 const quitAnswer = { value: { blockers: [] as string[], safeToQuit: true } };
 /** The folder the fake open dialog picks (an empty one, on macOS), or none. */
 const folderPick: { path: string | null } = { path: null };
+/** Build-then-preview: the real runner, this computer's parts faked. */
+const fakePreviewBuild = {
+  plan: { refusal: null, workspacePath: "/Users/me/elsecrew/workspaces/app/task-1", packageManager: "npm", lockfile: true, buildScript: "vite build", outputDir: "dist", needsInstall: false } as Record<string, unknown>,
+  spawns: [] as { program: string; args: string[]; cwd: unknown; env: Record<string, string>; detached: unknown }[],
+  kills: [] as [number, string][],
+  children: [] as (EventEmitter & { stdout: EventEmitter & { setEncoding(): void }; stderr: EventEmitter & { setEncoding(): void }; pid: number })[],
+  create: (options: { enabled: boolean; sidecar(): never; ask(box: unknown): Promise<number>; korean(): boolean; log(label: string): void }) => new PreviewBuildManagerV1({
+    enabled: options.enabled, sidecar: options.sidecar,
+    confirm: async consent => (await options.ask(previewBuildConsentBox(consent, options.korean()))) === 1,
+    findTools: () => ({ program: "/opt/homebrew/bin/npm", pathDirs: ["/opt/homebrew/bin", "/usr/bin", "/bin"] }),
+    isWorkspaceFolder: () => true,
+    spawn: (program, args, spawnOptions) => {
+      fakePreviewBuild.spawns.push({ program, args, cwd: spawnOptions.cwd, env: spawnOptions.env as Record<string, string>, detached: spawnOptions.detached });
+      const stream = () => Object.assign(new EventEmitter(), { setEncoding() {} });
+      const child = Object.assign(new EventEmitter(), { stdout: stream(), stderr: stream(), pid: 4242 + fakePreviewBuild.children.length });
+      fakePreviewBuild.children.push(child);
+      return child as never;
+    },
+    killGroup: (pid, signal) => { fakePreviewBuild.kills.push([pid, signal]); },
+    environment: { HOME: "/Users/me", PATH: "/usr/bin", ANTHROPIC_API_KEY: "sk-ant-api03-secretsecretsecret", OPENAI_API_KEY: "sk-proj-secretsecretsecret", GITHUB_TOKEN: "ghp_secretsecretsecretsecret", ELSECREW_PREVIEW: "1", LANG: "ko_KR.UTF-8" },
+    writeLog: () => undefined,
+    log: options.log,
+  }),
+};
 /** Timers main.ts set, held so a test can run them. */
 const heldTimers: (() => void)[] = [];
 /** main's app update handle, played by the harness (ADE U8): its state and what main asked of it. */
@@ -695,7 +728,7 @@ test("update readiness rejects unsolicited, stale and foreign replies", async ()
 });
 
 test("result preview IPC is on by default on macOS, off with ELSECREW_PREVIEW=0 and elsewhere, answers only the main frame, and never takes a workspace, token or URL", async () => {
-  const open = { action: "open", projectId: "project_1", chatId: "chat_1", entry: null, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", pixelRatio: 1, page: { width: 1280, height: 800 } };
+  const open = { action: "open", projectId: "project_1", chatId: "chat_1", entry: null, source: "workspace", bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", pixelRatio: 1, page: { width: 1280, height: 800 } };
   // Windows is not checked yet (PR #9 review I2·I5): off unless asked for.
   const windows = await loadMain(undefined, false, { TEST_PLATFORM: "win32" });
   assert.deepEqual(windows.switches, []);
@@ -970,5 +1003,69 @@ test("update restart: main's yes, then the screen's readiness and the quit prepa
     quitAnswer.value = quit;
     quitExit.simulate = false;
     fakeUpdate.state = "unavailable";
+  }
+});
+
+test("build-then-preview: a build runs only after main's own box, in the folder the engine named, without the app's secrets (결과 미리보기 확장 1단계)", async () => {
+  const harness = await loadMain();
+  const handler = harness.handlers.get(previewContract.PREVIEW_BUILD_CHANNEL_V1)!;
+  assert.ok(handler, "the build channel is registered");
+  const answer = externalLinkAnswer.value;
+  const start = { action: "start", projectId: "project_1", chatId: "chat_1", step: "build" };
+  const boxes = () => harness.sidecarCalls.filter(call => call.startsWith("confirm:"));
+  fakePreviewBuild.spawns.length = 0;
+  try {
+    // Another frame or page is refused before the engine or a box.
+    const previewPage = { mainFrame: { url: `elsecrew-preview://${"a".repeat(32)}/index.html` } };
+    await assert.rejects(handler({ sender: previewPage, senderFrame: previewPage.mainFrame }, start));
+    // The page cannot name a folder, a command or a program.
+    for (const bad of [{ ...start, cwd: "/tmp" }, { ...start, command: "rm -rf /" }, { ...start, step: "dev" }, { ...start, workspacePath: "/" }]) {
+      await assert.rejects(handler(harness.currentEvent(), bad));
+    }
+    assert.equal(boxes().length, 0);
+    assert.ok(!harness.sidecarCalls.some(call => call.startsWith("previewBuildPlan:")));
+    // The plan the page sees has the commands, never the folder.
+    const plan = await handler(harness.currentEvent(), { action: "plan", projectId: "project_1", chatId: "chat_1" }) as { plan: Record<string, unknown> };
+    assert.deepEqual(plan.plan, { refusal: null, installCommand: "npm ci --no-audit --no-fund", buildCommand: "npm run build", needsInstall: false, outputDir: "dist" });
+    assert.ok(!JSON.stringify(plan).includes("/Users/me"));
+    // "취소" in main's box: nothing runs.
+    externalLinkAnswer.value = 0;
+    assert.equal((await handler(harness.currentEvent(), start) as { outcome: string }).outcome, "declined");
+    assert.equal(fakePreviewBuild.spawns.length, 0);
+    const box = boxes().at(-1)!;
+    for (const shown of ["실행할 명령: npm run build", "위치: /Users/me/elsecrew/workspaces/app/task-1", "프로그램: /opt/homebrew/bin/npm", "빌드 스크립트: vite build"]) assert.ok(box.includes(shown), shown);
+    // "빌드" in main's box: the fixed command in the engine's folder, its own group, no secrets.
+    externalLinkAnswer.value = 1;
+    assert.equal((await handler(harness.currentEvent(), start) as { outcome: string }).outcome, "started");
+    assert.equal(fakePreviewBuild.spawns.length, 1);
+    const spawned = fakePreviewBuild.spawns[0]!;
+    assert.deepEqual([spawned.program, spawned.args, spawned.cwd, spawned.detached], ["/opt/homebrew/bin/npm", ["run", "build"], "/Users/me/elsecrew/workspaces/app/task-1", true]);
+    assert.deepEqual(Object.keys(spawned.env).filter(name => /KEY|TOKEN|ELSECREW/.test(name)), []);
+    assert.equal(spawned.env.HOME, "/Users/me");
+    // One job per task: a second start while it runs is busy, without a box.
+    const asked = boxes().length;
+    assert.equal((await handler(harness.currentEvent(), start) as { outcome: string }).outcome, "busy");
+    assert.equal(boxes().length, asked);
+    // A secret the build prints is masked before the page can read it.
+    const child = fakePreviewBuild.children.at(-1)!;
+    child.stdout.emit("data", "token=ghp_abcdefghijklmnopqrstuvwxyz0123\nbuilt in 1s\n");
+    const status = await handler(harness.currentEvent(), { action: "status", projectId: "project_1", chatId: "chat_1", cursor: 0 }) as { job: { lines: string[]; state: string } };
+    assert.ok(status.job.lines.some(line => line === "built in 1s"));
+    assert.ok(!status.job.lines.join("\n").includes("abcdefghijklmnopqrstuvwxyz0123"));
+    // The app page's process ending stops it: only its own group is signalled.
+    fakePreviewBuild.kills.length = 0;
+    harness.window.webContents.listeners.get("render-process-gone")!();
+    assert.deepEqual(fakePreviewBuild.kills, [[child.pid, "SIGTERM"]]);
+    child.emit("close", null);
+    const ended = await handler(harness.currentEvent(), { action: "status", projectId: "project_1", chatId: "chat_1", cursor: 0 }) as { job: { state: string } };
+    assert.equal(ended.job.state, "cancelled");
+    // Packages missing: building is refused (the page offers installing), without a box.
+    fakePreviewBuild.plan = { ...fakePreviewBuild.plan, needsInstall: true };
+    const before = boxes().length;
+    assert.equal((await handler(harness.currentEvent(), start) as { outcome: string }).outcome, "refused");
+    assert.equal(boxes().length, before);
+  } finally {
+    externalLinkAnswer.value = answer;
+    fakePreviewBuild.plan = { ...fakePreviewBuild.plan, needsInstall: false };
   }
 });

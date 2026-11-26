@@ -11,6 +11,7 @@ pub(crate) const WINDOWS_GIT_EXECUTION_ENABLED: bool = false;
 use crate::process_spawn::SpawnGuarded as _;
 mod app_roles;
 mod preview;
+mod preview_build;
 #[cfg(test)]
 pub(crate) use preview::set_preview_test_hook;
 mod latest_apply;
@@ -7276,7 +7277,11 @@ impl WatchScan {
                 .file_name()
                 .into_string()
                 .map_err(|_| ProjectFailure::manifest("watched path is not valid Unicode"))?;
-            if is_internal_temp_name(&name) || (prefix.is_empty() && name == ".git") {
+            // `node_modules` at the top: installed packages (결과 미리보기
+            // 빌드 1단계 installs them, Git-ignored by rule) are thousands of
+            // files that would overflow the bounded scan; changes there are
+            // never the task's own work.
+            if is_internal_temp_name(&name) || (prefix.is_empty() && (name == ".git" || name == "node_modules")) {
                 continue;
             }
             let relative = if prefix.is_empty() {

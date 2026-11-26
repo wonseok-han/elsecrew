@@ -8,7 +8,7 @@ import { validateModelChoicesRequest, validateModelChoicesResult, type ModelChoi
 import { validateApprovalRequest, validateApprovalResult, type ApprovalRequest, type ApprovalResult } from "../src/m5/contracts/approval-v1.ts";
 import { validateLoginRequest, validateLoginStatus, type LoginRequest, type LoginStatus } from "../src/m5/contracts/provider-login-v1.ts";
 import { validateInstallRequest, validateInstallStatus, type InstallRequest, type InstallStatus } from "../src/m5/contracts/provider-install-v1.ts";
-import { validatePreviewReadAssetRequestV1, validatePreviewReadAssetResultV1, validatePreviewResolveRequestV1, validatePreviewResolveResultV1, type PreviewReadAssetRequestV1, type PreviewReadAssetResultV1, type PreviewResolveRequestV1, type PreviewResolveResultV1 } from "../src/m5/contracts/preview-v1.ts";
+import { PREVIEW_METHODS_V1, validatePreviewBuildPlanRequestV1, validatePreviewBuildPlanResultV1, type PreviewBuildPlanRequestV1, type PreviewBuildPlanResultV1, validatePreviewReadAssetRequestV1, validatePreviewReadAssetResultV1, validatePreviewResolveRequestV1, validatePreviewResolveResultV1, type PreviewReadAssetRequestV1, type PreviewReadAssetResultV1, type PreviewResolveRequestV1, type PreviewResolveResultV1 } from "../src/m5/contracts/preview-v1.ts";
 import { validateProjectCatalogRequest, validateProjectCatalogResult, type ProjectCatalogRequest, type ProjectCatalogResult } from "../src/m5/contracts/project-catalog-v1.ts";
 import type { ChildProcess, SpawnOptionsWithoutStdio } from "node:child_process";
 import { spawn } from "node:child_process";
@@ -685,6 +685,11 @@ export class SidecarClientV1 {
     if (!this.#ready?.capabilities.includes("preview.readAsset")) return Promise.reject(new Error("preview unavailable"));
     return this.#request("preview.readAsset", { ...validatePreviewReadAssetRequestV1(input) }) as Promise<PreviewReadAssetResultV1>;
   }
+
+  previewBuildPlan(input: PreviewBuildPlanRequestV1): Promise<PreviewBuildPlanResultV1> {
+    if (!this.#ready?.capabilities.includes("preview.buildPlan")) return Promise.reject(new Error("preview build unavailable"));
+    return this.#request("preview.buildPlan", { ...validatePreviewBuildPlanRequestV1(input) }) as Promise<PreviewBuildPlanResultV1>;
+  }
   getAgentOutputHead(input: AgentRunBindingV1): Promise<OutputHead | null> {
     this.#requireAgentAdapter();
     if (!this.#ready?.capabilities.includes("agent.outputHead")) return Promise.reject(new Error("durable output query unavailable"));
@@ -812,12 +817,12 @@ export class SidecarClientV1 {
     if (envelope.kind === "event") {
       if (envelope.event === "system.ready") {
         const advertisedReady = parseReadyPayload(envelope);
-        // Result preview: an optional pair after the installation suffix.
-        const hasPreview = advertisedReady.capabilities.at(-2) === "preview.resolve"
-          && advertisedReady.capabilities.at(-1) === "preview.readAsset";
+        // Result preview: an optional group after the installation suffix.
+        const previewMethods: readonly string[] = PREVIEW_METHODS_V1;
+        const hasPreview = advertisedReady.capabilities.slice(-previewMethods.length).join("\n") === previewMethods.join("\n");
         if (hasPreview) {
-          if (advertisedReady.capabilities.at(-3) !== "provider.install") throw new Error("invalid preview capability baseline");
-          advertisedReady.capabilities = advertisedReady.capabilities.slice(0, -2);
+          if (advertisedReady.capabilities.at(-previewMethods.length - 1) !== "provider.install") throw new Error("invalid preview capability baseline");
+          advertisedReady.capabilities = advertisedReady.capabilities.slice(0, -previewMethods.length);
         }
         const hasInstall = advertisedReady.capabilities.at(-1) === "provider.install";
         if (hasInstall) {
@@ -868,7 +873,7 @@ export class SidecarClientV1 {
         if (hasApproval) negotiatedReady.capabilities = [...negotiatedReady.capabilities, "run.approval"];
         if (hasCatalog) negotiatedReady.capabilities = [...negotiatedReady.capabilities, "project.catalog"];
         if (hasInstall) negotiatedReady.capabilities = [...negotiatedReady.capabilities, "provider.install"];
-        if (hasPreview) negotiatedReady.capabilities = [...negotiatedReady.capabilities, "preview.resolve", "preview.readAsset"];
+        if (hasPreview) negotiatedReady.capabilities = [...negotiatedReady.capabilities, ...previewMethods];
         this.#ready = negotiatedReady;
         this.#agentAdapterNegotiated = negotiatedG5A || negotiatedG5DAgent;
         this.#nativeAdapterNegotiated = negotiatedNative;
@@ -1062,6 +1067,7 @@ export class SidecarClientV1 {
       case "storage.status": return validateStorageStatusV1(response.result);
       case "preview.resolve": return validatePreviewResolveResultV1(response.result, validatePreviewResolveRequestV1(pending.params));
       case "preview.readAsset": return validatePreviewReadAssetResultV1(response.result, validatePreviewReadAssetRequestV1(pending.params));
+      case "preview.buildPlan": return validatePreviewBuildPlanResultV1(response.result, validatePreviewBuildPlanRequestV1(pending.params));
       case "project.open": return validateProjectIdentityV1(response.result);
       case "project.catalog": return validateProjectCatalogResult(response.result, validateProjectCatalogRequest(pending.params));
       case "project.getTree": {

@@ -2,6 +2,22 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — 결과 미리보기 확장 1단계: 빌드해서 보기, 2단계 개발 서버 설계 (`orca/ade-preview-build`, 기준 main 760e1e66)
+주인님 질문(2026-11-26, 아이템 #40): index.html 정적 미리보기만 되는데 React처럼 서버 개념이 필요한 결과물은? 1단계(빌드 뒤 정적 미리보기) 구현과 2단계(관리되는 개발 서버) 설계. 현행 설명은 architecture "결과 미리보기 → 빌드해서 보기", 2·3단계는 `docs/proposals/m5-preview-dev-server.md`(제안).
+
+- **sidecar `preview.buildPlan`(읽기 전용, `project/preview_build.rs`)**: 채팅 바인딩·결속 검사, 링크 없는 `package.json`·`vite.config.*` 읽기, 패키지 관리자·잠금·빌드 스크립트·산출물 폴더·설치 필요. `node_modules`·산출물 폴더가 Git 무시가 아니면 거절(단계 커밋 `git add -A` 섞임 방지). 준비 능력은 `preview.*` 세 개 묶음(Rust·TS 파서, 시험 갱신).
+- **main**: `m5:previewBuild:v1`(`plan|start|cancel|status`). 시작마다 계획을 다시 묻고 기본 대화상자(명령·빌드 스크립트·프로그램·위치, 설치는 인터넷 사용)에서 '예'일 때만 실행. 고정 인자, 허용 목록 환경, 자기 프로세스 그룹, 작업당 하나·전체 둘, 시간 제한(설치 10분·빌드 5분), 멈춤·화면 새로고침·창 닫힘·종료 준비·종료 때 그 그룹만 종료. 로그는 `maskSecrets` 뒤 보관·저장. 환경·PATH·프로세스는 `preview-build-host.ts`(main.ts가 환경 변수를 읽지 않는다는 보안 시험 때문).
+- **미리보기**: `open`의 `source: "build"`는 main의 성공 기록으로만 열림. 산출물 폴더를 출처 뿌리로(`/assets/…`), 확장자 없는 경로는 진입 페이지(history fallback). 페이지는 뿌리의 `/index.html`로 연다.
+- **화면**: 미리보기 탭 빌드 막대(설치·빌드·멈추기·빌드 기록·빌드 결과/원래 파일 전환, Git 무시·Node.js 없음 안내, 팀이 일하는 동안 비활성). 계획은 탭이 보일 때만 묻는다(작업 전환 지연 방지).
+- **실제 앱에서 찾아 고친 것**: ① 빌드 페이지를 `/dist/index.html`로 열어 경로가 두 번 붙음 → 뿌리로 연다. ② `npm install` 뒤 감시 스캔이 1만 항목을 넘어 "파일 변경이 많아…" 띠 → 최상위 `node_modules`를 감시에서 뺐다(`watcher_scan_skips_installed_packages_at_the_top`).
+- **시험 스크립트 함정**: 실제 Claude 승인은 `inspect`로 모든 쪽을 읽은 뒤에만 `acceptOnce`가 된다(PR #19). 바로 허용하면 `agentApprovalChanged`로 거절되고, 그 요청을 본 것으로 기록하면 실행이 승인 대기로 멈춘다(1회 발생, 자기 PID 45931만 종료 후 고쳐 재실행). 회귀 아님.
+- **검증**
+  - `npm test` 1030/1030, `pnpm build`, Rust `cargo test --workspace` core 267·protocol 75·sidecar 967·통합 16 실패 0, 새 시험: Rust `preview_build` 단위·`build_plan_reads_the_task_package_and_requires_ignored_output`, TS `tests/m5-preview-build.test.mts`, 매니저 빌드 원본, 보안 하네스 빌드 동의.
+  - 실제 앱 합성(`node scripts/m5-preview-build-run.mjs --build`, 격리 앱 데이터): PASS 10/10.
+  - 실제 앱 실제 팀(`--real`, 개발 앱 데이터, 실행 전 ps로 다른 Elsecrew 앱 없음 확인, 자기 PID만): 총괄·개발 Claude Code가 Vite+React todo 앱 8개 파일 작성(Bash 1건 거절, Glob·Read·Write 허용) → 실제 `npm install`(네트워크) → `vite build` → 빌드 결과 미리보기에서 키 입력으로 할 일 추가 → `/active` 새로고침(history fallback) → 느린 두 번째 빌드 멈춤: 그룹 4개 프로세스(npm·sh·node·손자 node) 모두 종료 확인 → 로그 토큰 가림 확인. PASS 10/10. 시험 프로젝트는 삭제 요청함(작업 공간 폴더 `~/elsecrew/workspaces/todo-vite/task-a33340ee`는 앱의 삭제 마무리 대상으로 남음).
+  - 캡처·결과: `~/Documents/elsecrew-ade-preview-build-2026-11-27/{synthetic,real}/`(동의 대화상자는 이 컴퓨터에서 화면 캡처가 막혀 main에 전달된 옵션을 그린 `0-consent-boxes.png`와 `consent-boxes.json`).
+- **다음 할 일**: Codex 검토 대응, CI. 2단계 구현은 제안 문서의 열린 결정(동의 기억·상한 합산·알 수 없는 도구·3단계 기본값) 확정 뒤. Windows 빌드 실행은 꺼져 있음(미검증).
+
 ### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #20 재검토 B2 두 경로 반영 (`orca/ade-multiproject-b`)
 재검토 `~/Documents/elsecrew-ade-multiproject-2026-11-26/REVIEW-pr20-2.md`(대상 0d7fe46b). B1·B3은 해소로 확인됐다.
 
@@ -452,6 +468,7 @@ PR #18 머지(68503092) 뒤 WIP(afaaa370)를 그 위로 옮겨 이어 갔다. �
   - 함정: 프로젝트 설정을 저장하면 `RoleSettings`가 revision 키로 다시 마운트돼 컴포넌트 안 상태(안내 문구 등)가 사라진다. 저장 뒤에도 보여야 할 안내는 작업대(`workbench.tsx`)가 들고 있어야 한다.
   - 함정: sidecar 통합 시험(`orchestration_dispatch`)의 fake 에이전트는 `target/debug/elsecrew-sidecar` 실행 파일을 띄운다. `cargo test --lib`만 돌리면 "fake agent control launcher failed: No such file"로 15개가 실패하니 `cargo build -p elsecrew-sidecar`를 먼저 한다.
 
+- **빌드해서 보기의 경계(2026-11-27, 결과 미리보기 확장 1단계)**: 빌드·설치는 미리보기 격리 밖의 일반 프로세스다. 실행 결정은 main이 sidecar `preview.buildPlan`(읽기 전용)을 다시 묻고 기본 대화상자의 '예'로만 한다(페이지는 폴더·명령을 말하지 못함). `node_modules`·산출물 폴더가 그 작업 공간에서 Git 무시가 아니면 거절한다 — 앱의 단계 커밋이 `git add -A`라 섞이기 때문이다. 빌드 원본 미리보기는 산출물 폴더를 출처 뿌리로 쓰고 확장자 없는 경로를 진입 페이지로 돌려준다. 페이지를 `/<산출물>/index.html`로 열면 경로가 두 번 붙어 깨진다(실제 앱 시험에서 발견, 뿌리의 `/index.html`로 연다). 감시 스캔은 최상위 `node_modules`를 건너뛴다(설치 뒤 1만 항목 상한 초과 → "파일 변경이 많아…" 띠). main.ts는 환경 변수를 직접 읽지 않는다는 시험이 있어 PATH·환경·프로세스는 `electron/preview-build-host.ts`에 둔다. 2단계(개발 서버) 설계는 `docs/proposals/m5-preview-dev-server.md`(제안).
 - **결과 미리보기의 DNS 미리 찾기(2026-11-26)**: Electron 43에서 `<link rel=dns-prefetch>`는 CSP·`webRequest`·고정 프록시를 모두 거치지 않고 실제 DNS 질의를 보낸다. 미리보기가 켜지면(macOS 기본값, Windows·Linux는 `ELSECREW_PREVIEW=1`일 때만, `=0`으로 끔) `--blink-settings=dnsPrefetchingEnabled=false`(앱 전체)를 유지할 것. 미리보기 뷰는 앱 페이지 위에 그려지므로, 미리보기 영역을 덮는 새 화면 요소는 `previewObscured` 목록에 넣거나 DOM 변화로 나타나야 한다(탭이 그리기 전에 붙잡고 뷰를 숨긴 뒤 보임, PR #9 I1). CSS `:hover`만으로 뜨는 덮개와 `pointer-events: none`인 덮개는 감지되지 않는다. 앱 확대·축소에서 좌표는 main이 `getZoomFactor()`로 바꾸고, 렌더러 측정의 `devicePixelRatio`·페이지 크기가 맞지 않으면 숨긴다. 창 크기·확대를 바꾸는 새 경로는 반드시 그 전에 `previewManager.geometryChanged()`를 부를 것(보기 메뉴 확대는 `electron/zoom-menu.ts`). 숨김·표시 순서는 `src/m5/preview-layout-loop.ts` 한 곳에서만 정한다. 확인은 `pnpm m5:test:preview-isolation`의 net log 판정이며 Electron을 올릴 때 다시 돌린다. 미리보기 토큰은 renderer에 주지 않고, 작업 공간 주소는 sidecar가 채팅 바인딩에서 꺼낸다(renderer 값 불사용).
 
 - **작업 레이아웃의 규칙은 순수 함수에 있다(2026-11-26, ADE 1차-나)**: 창 폭 구간·오른쪽 폭·편집기 요청 해석·기본 탭·미리보기 겹침은 `task-layout-model.ts`, 목록 묶음은 `task-list-model.ts`, 단계 칸·카드 결합은 `task-story-model.ts`, 역할 색은 `role-colors.ts`. 화면 컴포넌트는 그 값을 그리기만 한다. 합치기·반영·버리기 버튼은 결과 상자(`result-box.tsx`) 한 곳에만 둔다 — 다른 곳은 "결과 상자에서 넣기" 링크로 가리킨다.

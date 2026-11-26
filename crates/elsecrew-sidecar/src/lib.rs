@@ -1971,6 +1971,17 @@ impl Sidecar {
                     param_nullable_string(params, "entry").map_err(invalid_params)?,
                 )
             }
+            // Build-then-preview (read-only): what a build would need. Main
+            // runs the build itself after the person agrees (project/preview_build.rs).
+            "preview.buildPlan" => {
+                let params = require_exact_params(&request.params, &["projectId", "chatId"])
+                    .map_err(invalid_params)?;
+                self.projects.preview_build_plan(
+                    &self.storage,
+                    param_string(params, "projectId").map_err(invalid_params)?,
+                    param_string(params, "chatId").map_err(invalid_params)?,
+                )
+            }
             "preview.readAsset" => {
                 let params = require_exact_params(
                     &request.params,

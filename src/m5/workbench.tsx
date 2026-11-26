@@ -1189,7 +1189,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         tabs={[
           { id: "preview", label: t("m5.layout.tab.preview"), content: <PreviewTab projectId={chat.activeChat?.projectId ?? null} chatId={chat.switching ? null : chat.activeChat?.chatId ?? null}
             active={rightTab === "preview" && !(bandUsesDrawer(layoutBandNow) ? !drawerOpen : rightCollapsed)} covered={previewCovered} resultKey={previewResultKey}
-            entryRequest={previewEntry} onChanges={() => setRightTab("changes")} /> },
+            entryRequest={previewEntry} onChanges={() => setRightTab("changes")}
+            teamWorking={chat.activeChat?.state === "running" || chat.agentRuns.some(run => ["preparing", "running", "cancelling"].includes(run.state))} /> },
           { id: "changes", label: t("m5.layout.tab.changes"), count: snapshot.rescanRequired ? undefined : snapshot.diffSummary?.entries.length, content: <>
         <aside className="m5-panel m5-changes" aria-label={t("m5.editor.changes")}>
           {snapshot.project ? (
