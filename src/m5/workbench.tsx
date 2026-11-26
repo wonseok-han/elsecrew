@@ -34,7 +34,7 @@ import { HistoryTab } from "./history-tab.tsx";
 import { TaskList, type TaskListItem } from "./task-list.tsx";
 import { ReviewSheet } from "./review-sheet.tsx";
 import { ProjectSwitcher } from "./project-switcher.tsx";
-import { bandSizes, bandUsesDrawer, defaultRightTab, clampRightWidth, layoutBand, panelRequestTarget, parseRightWidth, RIGHT_WIDTH_KEY, type LayoutBand, type RightTab, type SheetMode } from "./task-layout-model.ts";
+import { bandSizes, bandUsesDrawer, defaultRightTab, previewObscured, RIGHT_TABS, clampRightWidth, layoutBand, panelRequestTarget, parseRightWidth, RIGHT_WIDTH_KEY, type LayoutBand, type RightTab, type SheetMode } from "./task-layout-model.ts";
 import { ProviderLogin, type ConnectionReveal } from "./provider-login.tsx";
 import { ChatWorkspaceDiscard } from "./chat-workspace-discard.tsx";
 import { ChatWorkspaceMerge } from "./chat-workspace-merge.tsx";
@@ -655,6 +655,33 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     if (!allChanges && !snapshot.diffVisible) setAllChanges({ focus: null });
   };
   const selectRightTab = (tab: RightTab) => setRightTab(tab);
+  // Keyboard (PLAN 1.6): ⌘1 list · ⌘2 composer · ⌘3 results · ⌘\ results open/closed · ⌘N new task.
+  // Esc closes the sheet or drawer (task-layout.tsx).
+  const [rightCollapsed, setRightCollapsed] = useState(false);
+  const shortcutState = useRef({ open: false, drawer: false, newTask: () => {} });
+  shortcutState.current = {
+    open: Boolean(snapshot.project) && !preferencesOpen && !settingsOpen && !newChatOpen,
+    drawer: bandUsesDrawer(layoutBandNow),
+    newTask: () => { if (admissionReady && projectDataReady && !chat.preparing && !chat.switching) setNewChatOpen(true); },
+  };
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const state = shortcutState.current;
+      const mod = /Mac/.test(navigator.platform) ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+      if (!mod || event.altKey || event.shiftKey || !state.open || document.querySelector("dialog[open]")) return;
+      const focus = (selector: string) => requestAnimationFrame(() => document.querySelector<HTMLElement>(selector)?.focus());
+      if (event.key === "1") { event.preventDefault(); focus("[data-testid=layout-left] [aria-current=true], [data-testid=layout-left] .m5-new-task, [data-testid=layout-left] .m5-rail-group"); }
+      else if (event.key === "2") { event.preventDefault(); focus("[data-testid=layout-center] #m5-followup-text, [data-testid=layout-center] .m5-timeline-list"); }
+      else if (event.key === "3") { event.preventDefault(); if (state.drawer) setDrawerOpen(true); else setRightCollapsed(false); focus("[data-testid=layout-right] [role=tab][aria-selected=true]"); }
+      else if (event.key === "\\") { event.preventDefault(); if (state.drawer) setDrawerOpen(open => !open); else setRightCollapsed(value => !value); }
+      else if (event.key.toLowerCase() === "n") { event.preventDefault(); state.newTask(); }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+  // What covers the preview area (for the isolated preview view, P3); one place.
+  const previewCovered = previewObscured({ sheetOpen, drawerUsed: bandUsesDrawer(layoutBandNow), drawerOpen, dialogOpen: newChatOpen || Boolean(removal) || preferencesOpen || settingsOpen, popoverOpen: false, rightTab });
+
   // A task opens on the results tab its state is about (PLAN 1.5); once per task.
   const defaultTabFor = useRef<string | null>(null);
   useEffect(() => {
@@ -736,6 +763,13 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           </p>
         </div>}
         <div className="m5-toolbar-actions">
+      {snapshot.project && bandUsesDrawer(layoutBandNow) && <nav className="m5-drawer-toggles" data-testid="drawer-toggles" aria-label={t("m5.layout.openResults")}>
+        {RIGHT_TABS.map(tab => <button key={tab} type="button" aria-pressed={drawerOpen && rightTab === tab} data-testid={`drawer-toggle-${tab}`}
+          onClick={() => { if (drawerOpen && rightTab === tab) setDrawerOpen(false); else { setRightTab(tab); setDrawerOpen(true); } }}>
+          {t(`m5.layout.tab.${tab}`)}{tab === "changes" && snapshot.diffSummary && !snapshot.rescanRequired ? ` ${snapshot.diffSummary.entries.length}` : ""}
+          {tab === "changes" && (activePhase === "review" || activePhase === "changedSince") && !drawerOpen && <span className="m5-layout-dot" aria-label={t("m5.layout.ready")} />}
+        </button>)}
+      </nav>}
       {/* Everything about what is happening lives with the bell: progress and
           errors under it, anything that still needs attention inside it. */}
       <NotificationBell center={notifications} onOpen={openNotification} hasProblem={workAttention}
@@ -842,7 +876,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         {chat.error && <section className="m5-error" role="alert"><strong>{t(chat.error.messageKey)}</strong><details><summary>{t("m5.feedback.details")}</summary><pre>{chat.error.detail}</pre></details></section>}
       </>} onSave={(roles, roleDefinitions) => chatController.updateSettings(roles, roleDefinitions)} onReload={() => chatController.reloadSettings()} onClose={closeRoleSettings} returnToDraft={returnToNewChat} projectName={snapshot.project?.name ?? chat.settings.projectId} />}
 
-      {snapshot.project && <TaskLayout band={layoutBandNow} rightTab={rightTab} onRightTab={selectRightTab}
+      {snapshot.project && <TaskLayout band={layoutBandNow} rightTab={rightTab} onRightTab={selectRightTab} rightCollapsed={rightCollapsed} previewCovered={previewCovered}
         drawerOpen={drawerOpen} onDrawerOpenChange={setDrawerOpen} rightWidth={rightWidth} onRightWidth={setRightWidthPreference}
         sheetOpen={sheetOpen} onSheetClose={closeSheet} sheetLabel={t(sheetMode === "changes" ? "m5.sheet.changes" : "m5.sheet.editor")}
         list={<>

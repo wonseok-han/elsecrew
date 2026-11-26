@@ -1151,6 +1151,7 @@ export const ko = {
   "m5.history.none": "작업을 고르면 실행 기록이 여기에 보여요.",
   "m5.history.empty": "아직 실행한 팀원이 없어요.",
   "m5.history.dev": "개발용",
+  "m5.layout.openResults": "결과 열기",
 } as const;
 
 export type MessageKey = keyof typeof ko;

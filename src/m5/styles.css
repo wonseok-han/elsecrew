@@ -1822,3 +1822,39 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 /* The one thing to do now: put the reviewed work into the folder. */
 .m5-workbench .m5-layout-right .m5-result-box:is([data-task-phase="review"], [data-task-phase="changedSince"]) .m5-merge > button:not(.m5-secondary):not(.m5-link-button):not(:disabled),
 .m5-workbench .m5-layout-right .m5-result-box:is([data-task-phase="review"], [data-task-phase="changedSince"]) .m5-apply-latest-head > button:not(:disabled) { background: var(--action-bg); border-color: var(--action-bg); color: var(--action-text); font-weight: 600; }
+
+/* ===== Narrow windows (L6): below 1100px the list is a rail and the results a drawer ===== */
+.m5-layout-left { position: relative; z-index: 6; overflow: visible; }
+.m5-drawer-toggles { display: inline-flex; flex: none; gap: 2px; margin-right: var(--space-2); padding: 2px; border: 1px solid var(--line-default); border-radius: var(--radius-m); }
+.m5-drawer-toggles > button { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border: 0; border-radius: var(--radius-s); background: transparent; color: var(--text-secondary); font-size: var(--text-s); white-space: nowrap; word-break: keep-all; }
+.m5-drawer-toggles > button[aria-pressed="true"] { background: var(--bg-selected); color: var(--text-primary); }
+.m5-drawer-toggles > button:hover { color: var(--text-primary); }
+.m5-layout-scrim { position: absolute; inset: 0; z-index: 14; background: color-mix(in srgb, var(--bg-sunken) 55%, transparent); }
+.m5-task-rail { align-items: center; }
+.m5-rail-groups { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); padding-top: var(--space-2); }
+.m5-rail-group { position: relative; display: grid; place-items: center; width: 38px; height: 34px; padding: 0; border: 1px solid transparent; border-radius: var(--radius-m); background: transparent; }
+.m5-rail-group:hover, .m5-rail-group[aria-expanded="true"] { background: var(--bg-selected); border-color: var(--line-default); }
+.m5-rail-group .m5-group-dot { width: 9px; height: 9px; }
+.m5-rail-badge { position: absolute; top: -3px; right: -2px; min-width: 15px; height: 15px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--status-attention); color: var(--action-text); font-size: 10px; font-weight: 700; line-height: 15px; text-align: center; }
+.m5-rail-badge-working { background: var(--status-running); }
+.m5-rail-badge-review { background: var(--status-review); }
+.m5-task-rail-popover { position: absolute; z-index: 30; top: 0; bottom: 0; left: 100%; width: min(300px, 80vw); display: flex; flex-direction: column; background: var(--bg-pane); border: 1px solid var(--line-strong); border-left: 0; box-shadow: 18px 0 40px #0008; }
+@media (max-width: 1099px) {
+  .m5-task-layout { grid-template-columns: var(--left-w) minmax(0, 1fr); }
+  .m5-layout-right { position: absolute; z-index: 15; top: 0; right: 0; bottom: 0; width: min(440px, 92vw); border-left: 1px solid var(--line-strong); box-shadow: -18px 0 40px #0009; }
+  .m5-task-rail .m5-project-switcher { margin: var(--space-2); }
+  .m5-task-rail .m5-project-switcher > summary { justify-content: center; padding: 6px; }
+  .m5-task-rail .m5-switcher-name, .m5-task-rail .m5-switcher-caret { display: none; }
+  .m5-task-rail .m5-project-switcher-panel { left: 0; width: 300px; }
+  .m5-workbench .m5-task-rail .m5-new-task { width: 38px; height: 34px; margin: 0 var(--space-2) var(--space-2); padding: 0; }
+  .m5-task-rail .m5-new-task-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .m5-workbench .m5-layout-center .m5-timeline.m5-story { padding-left: var(--space-4); padding-right: var(--space-4); }
+  .m5-stage-bar { margin: 0 calc(-1 * var(--space-4)); padding: var(--space-2) var(--space-4); }
+  .m5-workbench .m5-layout-center .m5-followup, .m5-pinned-slot { padding-left: var(--space-4); padding-right: var(--space-4); }
+  .m5-review-sheet { left: var(--left-w); }
+}
+@media (max-width: 819px) {
+  .m5-layout-right { width: 92vw; }
+  .m5-topbar-brand { display: none; }
+  .m5-drawer-toggles > button { padding: 3px 6px; }
+}

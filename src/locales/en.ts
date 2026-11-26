@@ -1153,4 +1153,5 @@ export const en: Record<MessageKey, string> = {
   "m5.history.none": "Pick a task to see its runs here.",
   "m5.history.empty": "No team member has run yet.",
   "m5.history.dev": "For development",
+  "m5.layout.openResults": "Open results",
 };

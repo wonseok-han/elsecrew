@@ -19,8 +19,12 @@ export interface RightTabSpec {
  * drawer. Every panel stays mounted and is only hidden, so Monaco and
  * unsaved drafts survive tab changes and the sheet closing.
  */
-export function TaskLayout({ band, list, story, tabs, rightTab, onRightTab, resultBox, sheet, sheetOpen, sheetLabel, onSheetClose, drawerOpen, onDrawerOpenChange, rightWidth, onRightWidth }: {
+export function TaskLayout({ band, rightCollapsed = false, previewCovered = true, list, story, tabs, rightTab, onRightTab, resultBox, sheet, sheetOpen, sheetLabel, onSheetClose, drawerOpen, onDrawerOpenChange, rightWidth, onRightWidth }: {
   band: LayoutBand;
+  /** ⌘\\ hides the results panel in wide windows. */
+  rightCollapsed?: boolean;
+  /** Something covers the preview area (task-layout-model previewObscured); read by the preview view (P3). */
+  previewCovered?: boolean;
   list: ReactNode;
   story: ReactNode;
   tabs: readonly RightTabSpec[];
@@ -80,9 +84,9 @@ export function TaskLayout({ band, list, story, tabs, rightTab, onRightTab, resu
   const tabIndex = Math.max(0, tabs.findIndex(tab => tab.id === rightTab));
   const resizing = useRef<{ x: number; width: number } | null>(null);
   const saveWidth = (width: number) => { try { localStorage.setItem(RIGHT_WIDTH_KEY, String(width)); } catch { /* optional */ } };
-  const style = drawer ? undefined : { "--right-w": `${rightWidth}px` } as CSSProperties;
-  const rightHidden = drawer && !drawerOpen;
-  return <div className="m5-task-layout" data-testid="task-layout" data-band={band} data-sheet={sheetOpen ? "open" : "closed"} style={style}>
+  const style = drawer ? undefined : { "--right-w": rightCollapsed ? "0px" : `${rightWidth}px` } as CSSProperties;
+  const rightHidden = drawer ? !drawerOpen : rightCollapsed;
+  return <div className="m5-task-layout" data-testid="task-layout" data-band={band} data-sheet={sheetOpen ? "open" : "closed"} data-drawer={drawer ? (drawerOpen ? "open" : "closed") : undefined} data-preview-covered={previewCovered ? "true" : "false"} style={style}>
     <nav className="m5-layout-left" data-testid="layout-left" aria-label={t("m5.layout.list")}>{list}</nav>
     <section className="m5-layout-center" data-testid="layout-center" aria-label={t("m5.layout.story")} inert={sheetOpen || (drawer && drawerOpen) || undefined}>{story}</section>
     {drawer && drawerOpen && <div className="m5-layout-scrim" aria-hidden="true" onClick={() => onDrawerOpenChange(false)} />}
