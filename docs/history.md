@@ -17,6 +17,7 @@
 - **검증**: `cargo test -p elsecrew-core` 252, protocol 75, `-p elsecrew-sidecar` lib 928·stdio_process 16(실패 0), `npm test` 963/963, `pnpm build`.
 - **함정**: scm_breeze 환경에서 `cd <폴더> && ...`의 `cd`가 조용히 실패해 뒤 명령이 현재 워크트리에서 돈다. 시험 폴더용 `git add -A && git commit`이 이 워크트리 변경을 엉뚱한 커밋으로 묶은 일이 있었다(곧바로 `reset --soft`로 되돌림, 손실 없음). 다른 폴더 작업은 `git -C <절대경로>`와 절대경로만 쓴다.
 - **실제 앱 확인(기본 프로필, 개발 앱 PID 15327만 띄우고 종료)**: 새 시험 폴더 `~/Downloads/elsecrew-d2-image-test`(86KB PNG 3장, git)를 프로젝트로 추가하고 팀 역할 기본값을 저장(버전 2, 총괄 Claude default)했다. 작업 "screens 폴더의 PNG 세 장을 Read로 직접 열어 설명"을 보냈다. 앱 전용 Claude 프로필의 세션 기록에서 도구 결과 줄이 232,168·232,168·232,128바이트(한도 131,072 초과)였고, 세션은 끊기지 않고 27초 만에 "답변 완료"로 끝났다(에이전트가 세 그림을 바르게 설명). 앱 로그 오류 0, 정상 종료(engine exit 0). 증거 `~/Documents/elsecrew-ade-stability-2026-11-26/`. 앱 데이터 변화: 프로젝트 1개·작업 1개 추가, 그 프로젝트 팀 역할 저장. `todo-test-1126g` 프로젝트 화면은 닫기만 했다(작업 보존).
+- **PR**: https://github.com/wonseok-han/elsecrew/pull/17 (`--base feature/ade`). feature/ade(PR #14·#16) 병합 뒤 `npm test` 992/992·`pnpm build`, CI(run 45826807799) macOS·Windows·website·GitGuardian 모두 통과.
 - **history 롤오버 보류**: 이 파일이 500줄을 넘었지만 작업 엔트리가 모두 11-26 같은 날짜이고 고정 섹션만 약 400줄이라, 날짜를 쪼개지 않고는 300줄 이하로 줄일 수 없다. 조정자 판단 필요.
 - **남은 일**: Codex 검토 대응. 큰 Write의 권한 요청(입력 128KiB 초과)은 여전히 세션을 끊는다 — 허용 응답 프레임 자체도 128KiB 한도라 별도 설계가 필요하다.
 
