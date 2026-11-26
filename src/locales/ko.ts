@@ -1141,6 +1141,16 @@ export const ko = {
   "m5.story.reviewHint": "팀 작업이 끝났어요. 결과를 오른쪽에서 확인해 주세요.",
   "m5.story.inFolder": "✓ 내 폴더에 들어갔어요",
   "m5.story.composerBusy": "팀에게 전할 말 (지금 단계가 끝나면 보낼 수 있어요)",
+  "m5.resultBox.notYet": "아직 내 폴더에 넣지 않았어요",
+  "m5.resultBox.whenDone": "팀 작업이 끝나면 여기서 넣을 수 있어요",
+  "m5.resultBox.put": "내 폴더에 넣기",
+  "m5.resultBox.goThere": "결과 상자에서 넣기",
+  "m5.preview.notYet": "결과 화면 미리보기는 준비 중이에요",
+  "m5.preview.notYetHelp": "팀이 만든 화면을 앱 안에서 바로 보는 기능이 곧 이 자리에 들어와요. 지금은 '변경'에서 바뀐 내용을 볼 수 있어요.",
+  "m5.preview.toChanges": "변경 보기",
+  "m5.history.none": "작업을 고르면 실행 기록이 여기에 보여요.",
+  "m5.history.empty": "아직 실행한 팀원이 없어요.",
+  "m5.history.dev": "개발용",
 } as const;
 
 export type MessageKey = keyof typeof ko;

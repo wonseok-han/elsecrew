@@ -157,7 +157,8 @@ export function ChangesMergeStatus({ state, changeCount, canMerge, onMerge, phas
       <strong>{done ? t("m5.mergeStatus.merged", { base, count: changeCount })
         : status === "changedSince" ? t("m5.mergeStatus.newSince", { base })
         : t("m5.mergeStatus.notYet", { base, count: changeCount })}</strong>
-      {!done && canMerge && <button type="button" onClick={onMerge}>{t(status === "changedSince" ? "m5.mergeStatus.again" : "m5.merge.open", { base })}</button>}
+      {/* Merging itself is in the result box only (1차-나 L5); this points there. */}
+      {!done && canMerge && <button type="button" className="m5-link-button" onClick={onMerge}>{t("m5.resultBox.goThere")}</button>}
     </div>
   </section>;
 }
