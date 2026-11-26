@@ -2,6 +2,29 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — ADE 1차 통합 검증(V): 완료 기준 6개 실제 todo 측정 (`orca/ade-v-check`, 기준 feature/ade 613dafde)
+진단 보고서 4장의 1차 완료 기준을 실제 앱으로 측정했다. 대상은 개발 앱·기본 프로필이다. 임시 프로필에는 공급자 로그인이 없어 실제 실행이 안 되므로 노예 승인 (A)로 기본 프로필을 썼다. 시나리오는 실제 유료 todo 실행 두 가지다. git 모드는 `todo-test-1126g`, 사본 모드는 `todo-test-1126c`(`ELSECREW_GIT_WORKTREES=0`)이고, 역할은 기획 Codex·나머지 Claude Code다. 보고서는 `~/Documents/elsecrew-ade-v-2026-11-26/REPORT.md`(캡처 207개, 1초 표본·분석·앱 로그 `data/`)에 있다.
+
+- **판정(613dafde 기준)**
+  - 충족 4: 1 폭 50.0%·640×699(경계), 3 다섯 상태 네 곳 일치, 4 마크다운 원문 0, 5 미리보기 넓게 623·좁게 390 실제 입력.
+  - 미충족 2: 2 매 실행 시작 11~31초 문장 공백, 6 반영 확인 문구의 "커밋".
+  - 둘 다 이 브랜치에서 고쳤다. 기준 2는 수정 뒤 짧은 실제 실행에서 공백 0이었다.
+- **함께 확인**
+  - 사용자 정의 역할 '접근성 점검'에 총괄이 위임했고, 확인 뒤 팀을 되돌렸다.
+  - 재시작 3번 모두 마지막 프로젝트·작업이 복원됐다.
+  - 권한 카드 29번이 모두 2~4초 만에 에이전트 쪽에서 거둬졌고, 그동안 '이번만 허용'은 한 번도 켜지지 않았다.
+- **고친 것(8cba9ad3)**
+  - 실행 시작 문장: `startingSentence`, "받은 일을 읽고 시작하는 중이에요".
+  - 미리보기 '다시 불러오기'(띠 없음) 뒤 뷰가 영원히 숨는 결함: PR #9 배치 순서. 변화 없는 띠는 숨김 순서를 타지 않고, `settleLimitMs` 0.5초 뒤 다시 놓는다.
+  - 반영 확인 문구에서 "커밋" 제거.
+- **남긴 큰 결함**
+  - D1: main sidecar 클라이언트의 동시 스트림 16개 한도를 넘으면 늦게 온 `blob.chunk`가 `protocolInvalid`가 되어 엔진이 재시작되고, 실행 중인 에이전트가 '중단됨'이 된다(사본 세션 로그).
+  - D2: 에이전트가 55KB PNG를 읽으면 Claude stream-json 한 줄(약 148KB)이 관측 한도 128KiB를 넘어 `sessionChannel/unknown`으로 실행이 멈춘다.
+  - D3: 권한 카드 깜박임.
+- **실수 기록**: 프로젝트 ID 조회 필드를 잘못 써(`path` → 실제 `canonicalPath`) 기존 `todo-test-1118a`의 팀 배정을 바꿨다. 1분 안에 원래 값으로 되돌렸다(설정 버전 2→4, 내용 동일, 브리지 사용·DB 직접 수정 없음).
+- **검증**: `npm test` 900/900, `pnpm build`, 렌더러 마운트 스모크 68, 실제 앱 미리보기 UI 스모크 35/35(새 검사: 띠 없이 다시 불러오기).
+- **다음**: D1(스트림 한도와 프로토콜 오류 처리)·D2(큰 도구 결과 줄 처리)를 따로 설계한다. 권한 카드 깜박임(D3)과 기준 3 주의(누른 직후 잠깐 섞이는 문구, git 작업의 '내 폴더에 넣기' 상위 표현)를 정리한다.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #9 재확인(B1·I1 부분 해결) 마지막 라운드 (`orca/ade-preview-ui`)
 재확인 `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr9-2.md` 결과 I2·I3은 해결, B1·I1은 부분 해결이었다. 핵심 요구는 "네이티브 뷰가 숨겨진 것이 확인된 뒤에만 좌표를 바꾸거나 덮개를 보인다"였다. 이번 라운드로 둘 다 닫고 **macOS 기본 켜짐을 유지**한다. 코드는 89459c38이다.
 
@@ -66,6 +89,12 @@ PR #6은 머지됐다(8493496e). 재확인(`REVIEW-pr6-2.md`)에서 B1 해결, I
 - 위저드 6단계: 에이전트 선택 → 진단 → 설치 → 로그인 → 첫 프로젝트 → 졸업식
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+- **실제 앱 시험의 함정(2026-11-26, ADE V)**
+  - 앱 전용 로그인은 프로필 안에 있다(Codex `…/m5/codex-profile-v1/auth.json`, Claude는 설정 폴더 경로 해시로 구분된 Keychain 항목). 그래서 임시 `--user-data-dir`로는 실제 실행이 안 된다.
+  - 개발 앱 창이 다른 창에 완전히 가려지면 macOS Electron이 `hide`를 보내 미리보기가 숨고, rAF도 멈춘다. CDP 측정 중 "뷰가 안 보임"은 이것부터 의심한다(창을 앞으로 가져오면 다시 보인다).
+  - main 디버거(`--inspect=<port>`)에서는 `require.cache[".../.vite/build/main.cjs"].exports.previewManager`로 미리보기 상태(`currentLayout`·`visibility`·`refusedMeasurements`)를 읽을 수 있다.
+  - 큰 도구 결과(이미지)가 Claude 출력 한 줄 128KiB를 넘으면 실행이 멈춘다(D2).
+  - 동시 스트림 16개를 넘으면 엔진이 재시작된다(D1).
 
 - **팀 역할 편집의 규칙(2026-11-26, custom roles R0·R1·R2·R4)**: 화면 `role-settings.tsx`, 순수 함수 `team-draft.ts`(insert/move/duplicate/restore/teamChanges/uniqueRoleName/newMemberId), 템플릿 `role-templates.ts`(TS에만). 현행 설명은 architecture "팀 역할 편집".
   - 목록 순서는 보기 순서다. 실행 순서는 총괄이 정한다(Q1). 새 팀원 ID는 무작위 `member-xxxxxx`이고 지운 기본 역할은 원래 ID로 되살린다.
