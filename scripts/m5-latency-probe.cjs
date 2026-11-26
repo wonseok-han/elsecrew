@@ -49,36 +49,21 @@ fs.mkdirSync(path.join(root, 'logs'), { recursive: true });
 app.setAppLogsPath(path.join(root, 'logs'));
 dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [source] });
 
-// The sidecar runs the fake agent and writes its timing log; main-side times
-// of every request line and its response, by request id.
-const stdio = new Map();
+// The sidecar runs the fake agent and writes its timing log. Every engine
+// start is counted: a restart inside a stage makes its numbers invalid.
+const engineStarts = [];
 const spawn = cp.spawn;
 cp.spawn = function (command, args, options) {
   if (typeof command === 'string' && path.basename(command) === 'elsecrew-sidecar' && args?.[0] === '--stdio') {
     // LATENCY_SIDECAR: another build of the engine (a saved baseline, say).
     const binary = process.env.LATENCY_SIDECAR || command;
-    const child = Reflect.apply(spawn, this, [binary, ['--stdio-agent-fixture', 'paced-long-stream-read-only', ...args.slice(1)], { ...options, env: { ...(options?.env ?? process.env), ELSECREW_SIDECAR_TIMING_LOG: timingLog } }]);
-    const write = child.stdin.write;
-    child.stdin.write = function (chunk, ...rest) {
-      try { const value = JSON.parse(String(chunk)); if (value.kind === 'request') stdio.set(value.requestId, { method: value.method, sent: Date.now() }); } catch { /* not one line */ }
-      return Reflect.apply(write, this, [chunk, ...rest]);
-    };
-    let tail = '';
-    child.stdout.on('data', chunk => {
-      tail += chunk.toString('utf8');
-      let end;
-      while ((end = tail.indexOf('\n')) !== -1) {
-        const line = tail.slice(0, end); tail = tail.slice(end + 1);
-        if (!line.includes('"kind":"response"')) continue;
-        try { const value = JSON.parse(line); const entry = stdio.get(value.requestId); if (entry) entry.received = Date.now(); } catch { /* ignore */ }
-      }
-    });
-    return child;
+    engineStarts.push({ at: Date.now(), fromSeal: args.includes('--storage-seal') });
+    return Reflect.apply(spawn, this, [binary, ['--stdio-agent-fixture', 'paced-long-stream-read-only', ...args.slice(1)], { ...options, env: { ...(options?.env ?? process.env), ELSECREW_SIDECAR_TIMING_LOG: timingLog } }]);
   }
   return Reflect.apply(spawn, this, [command, args, options]);
 };
 
-const report = { stage, root, samples, seedChats, measurements: [], notes: [] };
+const report = { stage, root, samples, seedChats, seedRuns, engineStarts, rounds: [], measurements: [], notes: [] };
 const persist = () => fs.writeFileSync(resultFile, JSON.stringify(report, null, 2));
 let finished = false;
 let lastWindow = null;
@@ -106,14 +91,14 @@ app.on('browser-window-created', (_event, window) => {
 });
 
 function sidecarTimings() {
-  const byId = new Map();
+  const requests = [];
   const phases = [];
-  if (!fs.existsSync(timingLog)) return { byId, phases };
+  if (!fs.existsSync(timingLog)) return { requests, phases };
   for (const line of fs.readFileSync(timingLog, 'utf8').split('\n')) {
     if (!line) continue;
-    try { const v = JSON.parse(line); if (v.kind === 'request') byId.set(v.requestId, v); else phases.push(v); } catch { /* partial */ }
+    try { const v = JSON.parse(line); (v.kind === 'request' ? requests : phases).push(v); } catch { /* partial */ }
   }
-  return { byId, phases };
+  return { requests, phases };
 }
 
 async function run(window) {
@@ -157,6 +142,8 @@ async function run(window) {
     report.task = await make('지연 측정 작업');
     const seeded = [];
     for (let i = 0; i < seedChats; i++) seeded.push(await make(`채움 작업 ${i}`));
+    report.seedChatsDone = seeded.length;
+    report.seedRunsDone = 0;
     // Runs started and stopped on the seed tasks: stored run records like a
     // project that has been used for a while.
     report.seedRunErrors = [];
@@ -187,7 +174,7 @@ async function run(window) {
         }
         return null;
       })().catch(e => String(e && e.message || e).slice(0, 200))`);
-      if (outcome) { report.seedRunErrors.push(outcome); if (report.seedRunErrors.length > 5) break; }
+      if (outcome) { report.seedRunErrors.push(outcome); if (report.seedRunErrors.length > 5) break; } else report.seedRunsDone++;
     }
     report.seedRunsMs = Date.now() - seedStarted;
     fs.writeFileSync(path.join(root, 'task.json'), JSON.stringify({ projectId, ...report.task }));
@@ -233,14 +220,20 @@ async function run(window) {
     // open (an error notice, a tree locked while the engine restarts) is
     // clicked again every 3 s, up to a minute.
     const visible = () => page(`Array.from(document.querySelectorAll('.monaco-editor .view-lines')).some(v => v.textContent.replace(/\\u00a0/g, ' ').includes(${JSON.stringify(marker)}))`);
+    // Finding the row (opening folders, scrolling) is not part of the open:
+    // the clock starts right before the click that is sent (review I1: not
+    // after it returns, when the read may already be on its way).
     const click = async () => {
-      try { await reveal('src', true); await reveal(folder, true); await reveal(file, false); } catch { return false; }
-      return page(`(() => { const row = document.querySelector('.m5-file-row[title=${JSON.stringify(file)}]'); if (!row || row.disabled) return false; row.click(); return true; })()`);
+      try { await reveal('src', true); await reveal(folder, true); await reveal(file, false); } catch { return null; }
+      const before = Date.now();
+      const sent = await page(`(() => { const row = document.querySelector('.m5-file-row[title=${JSON.stringify(file)}]'); if (!row || row.disabled) return false; row.click(); return true; })()`);
+      return sent ? before : null;
     };
     let t0 = null, clicks = 0, ok = false;
     const until = Date.now() + 60_000;
     while (Date.now() < until && !ok) {
-      if (await click()) { t0 ??= Date.now(); clicks++; }
+      const sentAt = await click();
+      if (sentAt !== null) { t0 ??= sentAt; clicks++; }
       const retryAt = Date.now() + 3000;
       while (Date.now() < retryAt && !ok) { ok = await visible(); if (!ok) await sleep(20); }
     }
@@ -250,22 +243,31 @@ async function run(window) {
   };
   const getChat = `window.m5.getChat({ chatId: ${JSON.stringify(task.chatId)}, afterEventSequence: 0, cursor: null, limit: 50 })`;
   let uiOpened = stage === 'first' ? 0 : 200;
-  const measureRound = async (condition, identity) => {
+  // A round's every sample records whether the load it is named after held
+  // from before its first call to after its last (`loaded`): the team run
+  // still running, or the background check's copy still being checked.
+  const measureRound = async (condition, load) => {
+    const round = { condition, start: Date.now(), samples: 0, loadedSamples: 0 };
+    report.rounds.push(round);
     for (let i = 0; i < samples; i++) {
+      const first = report.measurements.length;
+      const loadBefore = load ? await load.held() : null;
       await timed('getChat', condition, getChat);
-      if (identity) {
-        await timed('approval:list', condition, `window.m5Approval.request({ action: 'list', identity: ${JSON.stringify(identity)} })`);
-        const live = await page(`window.m5.getChat({ chatId: ${JSON.stringify(task.chatId)}, afterEventSequence: 0, cursor: null, limit: 1 }).then(d => (d.agentRuns ?? []).some(r => r.runId === ${JSON.stringify(identity.runId)} && ['starting', 'running'].includes(r.state)), () => null)`);
-        report.measurements.at(-1).runLive = live;
-      }
+      if (load?.identity) await timed('approval:list', condition, `window.m5Approval.request({ action: 'list', identity: ${JSON.stringify(load.identity)} })`);
       // Files are opened the way a person does (the screen's file tree), a
       // different one each time; direct bridge reads would leave streams the
       // screen never asked for.
       const part = uiOpened % 20, file = Math.floor(uiOpened / 20) % 20;
       uiOpened++;
       await uiOpen(condition, `src/part${part}/file${file}.ts`, `part ${part} file ${file}`);
+      const loadAfter = load ? await load.held() : null;
+      const loaded = load ? loadBefore === true && loadAfter === true : null;
+      for (const m of report.measurements.slice(first)) m.loaded = loaded;
+      round.samples++;
+      if (loaded) round.loadedSamples++;
       await sleep(200);
     }
+    round.end = Date.now();
     persist();
   };
 
@@ -282,7 +284,8 @@ async function run(window) {
     const identity = Object.fromEntries(['chatId', 'taskId', 'projectId', 'worktreeId', 'workspaceIdentity', 'runId'].map(key => [key, binding[key]]));
     report.runIdentity = identity;
     await sleep(2500);
-    await measureRound('running', identity);
+    const runLive = () => page(`window.m5.getChat({ chatId: ${JSON.stringify(task.chatId)}, afterEventSequence: 0, cursor: null, limit: 1 }).then(d => (d.agentRuns ?? []).some(r => r.runId === ${JSON.stringify(identity.runId)} && r.state === 'running'), () => null)`);
+    await measureRound('running', { identity, held: runLive });
     const ended = await page(`(async () => {
       const detail = await window.m5.getChat({ chatId: ${JSON.stringify(task.chatId)}, afterEventSequence: 0, cursor: null, limit: 50 });
       const c = detail.chat, trigger = [...detail.messages].reverse().find(m => m.kind === 'user');
@@ -299,45 +302,28 @@ async function run(window) {
     const appeared = await waitFor(() => busy(), 180_000, 'background check').then(() => Date.now(), () => null);
     report.backgroundCheckStartedAt = appeared;
     if (appeared) {
-      await measureRound('background-check', null);
+      await measureRound('background-check', { held: async () => busy() });
       report.backgroundCheckStillBusyAfter = busy();
     }
   }
 
-  // Join the renderer calls with the sidecar requests they made.
+  // What the engine saw during each round: every request of these methods in
+  // the round's time window (the screen's own polling included), not a
+  // per-call join (PR #15 review I1). The timing log carries no request IDs.
   await sleep(500);
-  const { byId, phases } = sidecarTimings();
-  const methodOf = label => label.startsWith('ui-open') ? 'workspace.file.read' : label === 'getChat' ? 'chat.get' : label === 'approval:list' ? 'run.approval' : null;
-  const used = new Set();
-  for (const m of report.measurements) {
-    const method = methodOf(m.label);
-    if (!method) continue;
-    let match = null;
-    for (const [id, entry] of stdio) {
-      if (used.has(id) || entry.method !== method || entry.sent < m.t0 - 1 || entry.sent > m.t1) continue;
-      if (!match || entry.sent < match[1].sent) match = [id, entry];
+  const { requests, phases } = sidecarTimings();
+  const pct = (values, p) => { if (!values.length) return null; const sorted = [...values].sort((x, y) => x - y); return sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)]; };
+  for (const round of report.rounds) {
+    round.engine = {};
+    for (const method of ['workspace.file.read', 'chat.get', 'run.approval']) {
+      const seen = requests.filter(v => v.method === method && v.at >= round.start && v.at <= round.end);
+      if (!seen.length) continue;
+      round.engine[method] = { count: seen.length, queueP50: pct(seen.map(v => v.queueMs), 50), queueMax: Math.max(...seen.map(v => v.queueMs)), handleP50: pct(seen.map(v => v.handleMs), 50), handleMax: Math.max(...seen.map(v => v.handleMs)) };
     }
-    if (!match) continue;
-    used.add(match[0]);
-    const [id, entry] = match;
-    const side = byId.get(id);
-    m.segments = {
-      ipcInMs: entry.sent - m.t0,
-      sidecarRoundTripMs: entry.received - entry.sent,
-      queueMs: side?.queueMs ?? null,
-      handleMs: side?.handleMs ?? null,
-      ipcOutMs: m.t1 - entry.received,
-    };
+    round.slowPhases = phases.filter(v => v.at >= round.start && v.at <= round.end).length;
   }
-  report.unmatched = report.measurements.filter(m => methodOf(m.label) && !m.segments).length;
-  report.stdioSample = [...stdio.values()].filter(e => ['workspace.file.read', 'chat.get', 'run.approval'].includes(e.method)).slice(0, 5);
+  report.timingDropped = Math.max(0, ...requests.map(v => v.dropped ?? 0), ...phases.map(v => v.dropped ?? 0));
   report.phases = phases.map(({ at, phase, ms }) => ({ at, phase, ms }));
-  report.requestsByMethod = {};
-  for (const v of byId.values()) {
-    const key = v.action ? `${v.method}:${v.action}` : v.method;
-    const row = report.requestsByMethod[key] ??= { count: 0, maxQueueMs: 0, maxHandleMs: 0, totalHandleMs: 0 };
-    row.count++; row.maxQueueMs = Math.max(row.maxQueueMs, v.queueMs); row.maxHandleMs = Math.max(row.maxHandleMs, v.handleMs); row.totalHandleMs += v.handleMs;
-  }
   persist();
 }
 

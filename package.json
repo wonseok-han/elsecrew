@@ -26,7 +26,7 @@
     "m5:test:security": "node --test --experimental-strip-types tests/m5-electron-security.test.mts tests/m5-renderer-csp.test.mts tests/m5-electron-scaffold.test.mts tests/m5-sidecar-staging.test.mts tests/m5-preview-policy.test.mts tests/m5-preview-manager.test.mts tests/m5-preview-tab.test.mts tests/m5-preview-layout-loop.test.mts && node --experimental-strip-types --check electron/main.ts",
     "m5:test:preview-isolation": "cargo build -p elsecrew-sidecar --locked && node scripts/m5-preview-isolation-probe.mjs --build",
     "m5:test:preview-ui": "node scripts/m5-preview-ui-run.mjs",
-    "m5:test:latency": "cargo build -p elsecrew-sidecar --locked && node scripts/m5-latency-run.mjs --build --check --samples 10 --seed-chats 20 --seed-runs 40",
+    "m5:measure:latency": "cargo build -p elsecrew-sidecar --locked && node scripts/m5-latency-run.mjs --build --check",
     "m5:check:history": "node scripts/m5-history-entries.mjs",
     "m5:test:package": "node --test --experimental-strip-types tests/m5-g6-package-gate.test.mts tests/m5-package-metrics.test.mts tests/m5-sidecar-staging.test.mts && node scripts/m5-g6-package-gate.mjs",
     "m5:test:core": "cargo test --workspace --manifest-path Cargo.toml --locked",

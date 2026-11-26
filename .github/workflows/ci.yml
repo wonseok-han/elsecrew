@@ -75,8 +75,9 @@ jobs:
       # 디버그 sidecar 빌드와 수 분의 실행이 필요하다. 미리보기는 macOS에서만 기본으로
       # 켜지고(Windows는 꺼짐, PR #9 검토 I2·I5) 세 검사도 macOS 전용이라 Windows에서는
       # 종료 코드 2(미실행)로 끝난다. 결과는 사람이 macOS에서 돌려 PR에 증거로 남긴다.
-      # 응답 시간 검사(m5:test:latency)도 같은 이유로 CI에서 돌리지 않는다: 실제 창에서
-      # 파일 트리를 눌러 여는 시간을 재고, 디버그 sidecar와 약 10분이 필요하며 macOS 전용이다.
+      # 응답 시간 진단(m5:measure:latency)도 CI에서 돌리지 않는다: 실제 창에서 파일 트리를
+      # 눌러 여는 시간을 재고, 디버그 sidecar와 약 10분이 필요하며 macOS 전용이다. G6 게이트가
+      # 아니다(fake 공급자에는 승인 큐가 없음, PR #15 검토 B1).
       - name: 하네스 증거 업로드
         if: always()
         uses: actions/upload-artifact@v4
