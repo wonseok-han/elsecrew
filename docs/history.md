@@ -2,6 +2,65 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #4 독립 검토(차단 0·중요 4·경미 2) 전부 반영
+검토 문서: `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr4.md`(검토 HEAD d677a1e3). 같은 브랜치 `orca/ade-keychain-fix`에서 한 번에 고쳤다. 바뀐 곳은 `provider_claude_refresh.rs`, 호출부 `provider_claude_login.rs`, `Cargo.toml`, `docs/architecture.md`다.
+
+- **I1 Keychain 대기 무제한**
+  - 모든 `security` 호출을 `run_bounded`로 감쌌다. 30초 제한이 있고, 제한이나 취소에 걸리면 자식을 죽이고 거둔 뒤에야 돌아온다. 예약은 그 뒤에야 풀린다.
+  - 취소는 토큰 교환 전까지만 받는다. 교환 뒤에는 서버가 옛 refresh token을 폐기했을 수 있어, 새 값 저장을 끝까지 시도한다(제한 30초 안에서).
+  - 쓰기가 중단되거나 실패해도 다시 읽어 결과를 셋으로 가른다. 새 값이면 성공, 원래 값 그대로면 실패(기존 토큰 유지), 그 밖은 "결과 확인 불가"(`outcome_unknown`)다.
+  - 호출부는 갱신 중 취소되면 "canceled"를 알린다.
+  - 테스트:
+    - `a_keychain_call_waiting_past_its_deadline_is_killed_and_reaped`
+    - `a_keychain_call_is_stopped_when_the_login_is_canceled`
+    - `a_write_stopped_at_its_deadline_keeps_the_stored_login`
+    - `a_write_stopped_after_it_landed_is_confirmed_by_reading_back`
+    - `canceling_before_the_exchange_contacts_no_server_and_writes_nothing`
+    - `canceling_during_the_exchange_still_stores_the_rotated_login`
+- **I2 비교와 쓰기 사이 경합**
+  - 쓰기 직전에 항목이 같은 항목(생성 시각 `cdat`)이고 같은 값인지 다시 확인한다. 아니면 쓰지 않는다.
+  - 쓴 뒤에도 같은 항목인지 확인한다. 몇 밀리초 사이에 지워져 `-U`로 다시 만들어진 경우는 새 생성 시각으로 감지해 "결과 확인 불가"로 보고한다.
+  - `security`는 조건부 갱신을 할 수 없다. 그 몇 밀리초 동안 다른 프로그램이 쓴 더 새 로그인을 덮는 것은 막지 못하며, 이 한계를 architecture의 보장 문구에 명시했다.
+  - 테스트:
+    - `a_login_changed_during_the_exchange_is_not_overwritten`
+    - `an_item_deleted_just_before_the_write_is_reported_unconfirmed`
+    - `a_profile_moved_during_the_exchange_writes_nothing`
+- **I3 비ASCII 재검증**
+  - 저장 JSON을 ASCII로만 직렬화한다(`AsciiJson` 포매터, 비ASCII는 `\uXXXX`).
+  - 읽기는 `-w`가 비ASCII 값을 hex로 내보내는 경우(임시 키체인에서 실측)를 풀어 읽는다. JSON은 `{`로 시작하므로 hex와 구별된다.
+  - 테스트:
+    - `renewal_keeps_escaped_non_ascii_metadata_ascii`
+    - `password_output_in_hex_is_decoded`
+    - `the_real_tool_renews_confirms_and_reads_non_ascii_back`(임시 키체인에서 실제 `security`로 갱신·확인하고, UTF-8 저장값을 왕복)
+- **I4 코어 덤프**
+  - 비밀을 다루는 자식은 exec 전에 `RLIMIT_CORE` soft·hard를 0으로 둔다(`secret_child`). 사이드카 자신도 갱신 시작 때 soft 한도를 0으로 낮춘다(이후 자식에게도 상속된다).
+  - 비밀 버퍼(읽은 값, 명령 줄, 응답, 교체 값)는 `zeroize::Zeroizing`으로 바꿨다. 오류·패닉 경로에서도 지워지고 컴파일러가 지우기를 없애지 않는다.
+  - 명령 줄은 stdin에 쓰자마자, 자식이 끝나기 전에 지운다.
+  - 외부 `security` 프로세스 안의 사본(Apple 소스는 해제 전에 지우지 않는다)은 통제할 수 없다. 대신 그 프로세스의 코어 덤프를 막는다.
+  - 테스트:
+    - `secret_children_cannot_dump_core`
+    - `renewing_turns_off_this_process_core_dumps`
+    - `the_secret_line_is_wiped_once_written_even_before_the_child_exits`
+- **경미 1(4032자 초과 시 native 대체)**
+  - native 대체를 없앴다. 제한 없는 in-process 호출이라 I1과도 맞지 않았다.
+  - 대신 1400바이트 이상인 로그인은 서버에 요청하기 전에 갱신을 거절한다(기존 토큰 유지). 실제 로그인은 약 600바이트다.
+  - `security-framework` 직접 의존을 지우고 `zeroize =1.9.0`을 추가했다(이미 lock에 있던 버전).
+  - 테스트: `a_login_too_long_to_store_safely_is_never_exchanged`, `security_line_carries_only_hex_and_stays_within_one_line`
+- **경미 2(레이블 초기화)**
+  - 속성 출력에서 기존 레이블을 읽어 `-l`로 돌려준다. 따옴표로 감쌀 수 없는 레이블이면 도구 기본값(서비스 이름)으로 둔다. Claude Code 자신의 쓰기와 같다.
+  - 테스트: `security_line_keeps_a_quotable_label_and_drops_an_unsafe_one`, `security_update_keeps_the_secret_out_of_argv_the_acl_and_the_label`(사용자 레이블·ACL 불변·argv 비노출)
+- **함정**
+  - `pgrep -f "cargo |rustc"`는 다른 워커의 개발 앱 셸(`sh -c cargo build … && electron-forge start`)과 자기 대기 명령에도 걸린다. 실제 빌드 확인은 `pgrep -x cargo; pgrep -x rustc`로 한다.
+- **작업 기록 롤오버**: 517줄이 되어 11-25·11-23 엔트리를 `docs/archive/history-2026-11.md` 맨 위로 옮겼다(417줄). 고정 섹션만 약 330줄이라 엔트리만으로는 300줄 이하가 되지 않는다. 더 줄이려면 고정 섹션 정리가 필요하다.
+- **테스트 결과**
+  - `cargo test -p elsecrew-sidecar --lib provider_claude_refresh`: 24 통과(새 20개 포함).
+  - `cargo test -p elsecrew-sidecar` 전체: lib 904 통과, 1 실패, 무시 43. 실패한 `chat::tests::a_sign_in_hold_is_released_after_its_task_or_project_was_deleted_and_the_computer_restarted`는 `providerLoginRecoveryRequired` 대신 `providerBusy`가 나왔다. 같은 시각 다른 워커의 cargo 빌드가 돌던 부하 중이었다. 이 `recover` 경로는 갱신 코드를 거치지 않으며, 단독으로 3회 다시 돌려 모두 통과했다. 타이밍성 실패로 보고 기록만 남긴다.
+  - `npm test` 752 통과, `pnpm build` 통과, `git diff --check` 통과.
+- **미검증**
+  - 이번 변경 뒤 로그인 키체인 probe는 다시 하지 않았다. 호출자는 같은 `/usr/bin/security`이고, `-l` 추가가 ACL을 바꾸지 않음은 임시 키체인에서 확인했다.
+  - 실제 만료 토큰 갱신도 아직 보지 못했다.
+  - Electron `claude-usage.ts`의 `-w` 읽기도 비ASCII 저장값(Claude Code가 UTF-8로 쓴 경우)이면 hex를 받는다. 기존 문제이며 이번 범위 밖이다.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 개발 중 반복되는 Keychain 허용 창 원인 확정과 사이드카 쓰기 경로 수정
 Orca 조정자 작업. 기준은 feature/ade 907eeba4, 브랜치 `orca/ade-keychain-fix` → PR base feature/ade.
 
@@ -27,106 +86,6 @@ Orca 조정자 작업. 기준은 feature/ade 907eeba4, 브랜치 `orca/ade-keych
   - 이 PR의 CI·독립 검토 대응
   - 다음 실제 토큰 만료 때 개발 앱에서 창이 뜨지 않는지 관찰
 
-### 2026-11-25 · by Claude Opus 5.5 (claude-opus-5-5) — ADE 고도화 전 진단, 개발 빌드 사이드카 고정 서명, Codex 0.171 연결 실패 수정
-Orca 조정자 작업 두 건이다. 기준 HEAD는 01d85814이고, 브랜치는 주인님 결정(파생 브랜치 + PR로 feature/ade)에 따라 `ade/dev-signing-codex`다.
-
-- **ADE 고도화 전 진단(코드 변경 없음)**
-  - 산출물(저장소 밖):
-    - 보고서: `~/Documents/elsecrew-ade-diagnosis-2026-11-25/REPORT.md`
-    - 스크린샷 49장: 같은 폴더의 `screenshots/`
-    - 디자인 방향 목업 3개: `mockups/` — A 작업 관제실, B 작업 보드, C 결과 캔버스(HTML+PNG)
-  - 개발 앱을 CDP로 조작해 다음 흐름을 따라갔다.
-    - 첫 실행: 임시 `--user-data-dir` 프로필
-    - 프로젝트 추가·전환
-    - todo-test-1123a 짧은 실제 작업 1회: 13분, 총괄 → 개발 → 검증, 권한 요청 2회
-    - 합치기, 재시작, 라이트 모드·좁은 창
-  - 총평: 에이전트는 일을 해내지만 화면이 "편집기에 채팅을 붙인 것"이다.
-  - 주요 발견:
-    - 빈 편집기가 화면 중앙을 차지하고, 대화는 높이 419px(1280×768 기준) 칸에 마크다운 원문으로 쌓인다.
-    - **상태 오표시**: 진행 중인 작업의 변경 탭에 "✓ main에 합쳐짐"이 나온다. 합친 작업도 작업 목록에서는 "검토 준비"로 나온다. 역할 설정을 열기만 해도 "저장하지 않은 변경"이 뜬다.
-    - 프로젝트 전환에 '화면 닫기'가 필요하다.
-    - 다음 기능이 없다: 계획 편집, 진행 중 지시 추가, 부분 수락, 앱 안 결과 미리보기, 전역 단축키, 라이트 테마, 재시작 때 마지막 작업 복원.
-  - 로드맵(1~3차)과 방향 선택은 주인님 결정 대기다. 진단으로 생긴 앱 데이터 변경은 정상 사용분뿐이다: todo-test-1123a에 "오늘 날짜 표시" 작업을 합쳤다.
-- **개발 빌드 사이드카 고정 서명**(82115e1c)
-  - 변경: `m5:dev`가 `cargo build` 직후 `scripts/m5-dev-sign-sidecar.mjs`를 실행한다. 이 스크립트는 `target/debug/elsecrew-sidecar`를 로그인 키체인의 자체 서명 인증서 "Elsecrew Dev"와 고정 식별자 `com.wonseokhan.elsecrew.sidecar`로 서명한다.
-  - 동작 세부:
-    - 이미 같은 인증서로 서명돼 있으면 다시 서명하지 않는다.
-    - 인증서가 없거나 서명이 실패하면 경고만 낸다(120초 타임아웃). 개발 앱 시작은 막지 않는다.
-    - 패키징(`m5-stage-sidecar.mjs`의 release 빌드)은 바뀌지 않는다.
-  - 검증:
-    - 지정 요구사항: `identifier "com.wonseokhan.elsecrew.sidecar" and certificate leaf = H"18764b2f…"`.
-    - 세 번 다시 링크했다. 서명 전 ad-hoc cdhash는 매번 달랐고, 서명 후 지정 요구사항은 세 번 모두 같았다. `codesign --verify --strict` 통과.
-    - 첫 `codesign`은 개인 키 접근 허용 창을 띄웠다. 주인님이 '항상 허용'을 눌렀다.
-  - 남은 허용 창:
-    - 서명된 사이드카가 만료된 Claude 토큰을 처음 갱신할 때 `Claude Code-credentials-…` 항목에 대해 한 번 뜬다. 앱 시작·"연결 상태 다시 확인"의 Claude 확인(`provider_claude_login.rs` → `refresh_if_expired`)에서 생긴다.
-    - '항상 허용' 한 번이면 이후 다시 빌드해도 묻지 않는다. 읽기는 원래부터 `/usr/bin/security`로 한다.
-  - Electron.app은 다시 서명하지 않는다. `Elsecrew Safe Storage`는 개발용 Electron.app의 ad-hoc cdhash에 묶여 있지만, 다시 묻는 경우는 드물다.
-    - 공식 zip(`~/Library/Caches/electron/…/electron-v43.4.0-darwin-arm64.zip`)의 실행 파일과 node_modules의 실행 파일이 바이트까지 같다(cdhash `74cc2c91…`). 그래서 같은 버전으로 다시 설치하면 다시 묻지 않고, Electron 버전을 올릴 때만 한 번 묻는다.
-    - 다시 서명하면 지금 한 번 더 묻는다. 또 `pnpm install`이 원본을 다시 풀 때마다 서명이 사라져, 서명한 상태와 안 한 상태가 번갈아 생긴다.
-- **Codex 연결 실패 원인과 수정**(b921d23a, fcbbb223)
-  - 원인: CLI 변경이다. 계정 문제도, 기존 앱 버그도 아니다.
-    - ChatGPT.app이 11-23 11:22에 업데이트되며 내장 codex-cli가 0.171.0-alpha.13이 됐다(마지막 성공 실행은 같은 날 09:07).
-    - 그 뒤 앱의 사전 확인이 연달아 두 군데에서 실패했다.
-  - 첫째 실패 `account notification phase or envelope`:
-    - `account/updated` params에 `reason`(null | "unknown" | "workspaceRoutingReady")이 생겼는데, `deny_unknown_fields`가 이를 거절했다. 생성 스키마 `AccountUpdatedNotification`으로 확인했다.
-    - 수정: 사전 확인과 로그인 흐름이 이 세 값만 받는다. 초기 알림과 routing-ready 알림을 각각 한 번씩 허용하고, routing-ready는 스레드 시작 중에도 받는다(사이드카는 그 구간에서 최대 3프레임을 읽는다).
-  - 둘째 실패 `effective filesystem or network policy`:
-    - 원인: `config/read`가 network에 `"transparent_tcp": null`을 새로 직렬화했다. 인증 없이 임시 CODEX_HOME에 같은 `-c` 설정을 주고 재현했다.
-    - 수정: 이 null을 다른 기본값처럼 지운다. 실제 값이 들어 있으면 계속 불일치로 본다.
-  - 실제 앱에서 "이 앱에 Codex 로그인이 연결됐어요"를 확인했다. 상태 표시줄은 Codex "7일 0%"였고, 앱 로그 오류는 0건이었다(`screenshots/49-codex-connected-after-fix.png`).
-- **독립 검토(상시 검토자) 2회**
-  - 1차: 차단 0, 중요 1, 경미 4.
-    - I1: 사이드카가 스레드 시작 뒤 프레임을 정확히 2개만 읽어, 늦게 오는 routing 알림이 core 허용과 무관하게 실패했다.
-    - M2: ObservationsMatched 허용이 쓰이지 않았다.
-    - M3: "unknown" 단독 수락 테스트가 없었다.
-    - M5: 서명 스크립트에 타임아웃이 없었고, 다른 인증서로 서명된 경우의 테스트가 없었다.
-  - 1차 지적 중 I1, M2, M3, M5를 반영했다. M4(로그인 흐름 알림 반복 횟수 제한 없음, 기존 동작)는 그대로 뒀다.
-  - 2차: 차단·중요 0. 경미 1(초기 알림과 routing 알림이 둘 다 늦으면 3프레임 상한에서 fail-closed)은 주석으로 명시했다.
-  - 검토자 판단: `transparent_tcp`를 null 기본값으로 보는 것은 타당하다. 이 값은 관리형 SOCKS5 프록시가 켜져야만 의미가 있고, 기대 정책은 `network.enabled:false`이기 때문이다.
-- **테스트**
-  - core `vendor_observation::codex` 111 통과. 새 테스트: reason 수락·1회 제한·스레드 시작 중 수락, `transparent_tcp` null 수락·값 거부·모르는 null 거부, 로그인 reason.
-  - sidecar `--lib provider_` 171 통과(36 무시). preflight fixture에 `thread-routed` 사례를 추가했다.
-  - `npm test` 759 통과(새 `m5-dev-sign-sidecar` 7개), `pnpm build` 통과.
-  - 설치 CLI를 쓰는 `installed_codex_*` 테스트는 별도 승인이 필요해서 실행하지 않았다.
-  - Rust 전체 workspace는 다시 돌리지 않았다. 변경 범위가 Codex 관찰 모듈과 preflight 세션뿐이었다.
-- **PR #2 CI(첫 PR CI)**
-  - 첫 실행에서 Windows 하네스가 기존 결함 1건으로 실패했다. 11-17 6d7238e9가 추가한 `proctree::tests::after_the_owner_is_gone_a_reused_process_id_proves_the_recorded_process_ended`이다.
-  - 원인: `identity_of`는 unix에만 있는데, 이 테스트에 `#[cfg(unix)]`가 빠져 있었다. 그때까지 feature/ade에 CI가 돌지 않아 드러나지 않았다.
-  - 수정(6aa3032d) 뒤 macOS·Windows·website·GitGuardian이 모두 통과했다.
-- **미검증**: 수정 뒤 실제 Codex 작업 실행은 하지 않았다(유료 실행). 이 경로는 스레드 시작 단계가 포함된다.
-- **작업 기록**: 롤오버로 11-20 엔트리 3개를 `docs/archive/history-2026-11.md` 맨 위로 옮겼다.
-- **다음 할 일**
-  - PR(`ade/dev-signing-codex` → feature/ade)의 CI와 리뷰 대응
-  - 진단 보고서의 방향·로드맵 결정
-  - 진단에서 찾은 상태 오표시 결함 수정: 진행 중 "main에 합쳐짐", 작업 목록 "검토 준비", 설정의 거짓 미저장
-  - 11-23 엔트리의 남은 항목
-
-### 2026-11-23 · by Claude Opus 5.5 (claude-opus-5-5) — 실제 todo 앱 개발 시험(목표 확인), 사본·git 반영 화면 실제 확인, 권한 조회 경합 수정
-Orca 조정자 작업(주인님 전체 실제 시험 승인 2026-11-23). 기준 HEAD fb568f6f. 역할: 기획만 Codex(gpt-6.2-sol·medium), 나머지 Claude Code(default·claude-opus-5-5).
-
-- **진행 목표 "앱을 직접 띄워 쓰면서 테스트용 todo 앱이 문제없이 개발되는 수준": 충족**
-  - 새 일반 폴더 `~/Downloads/todo-test-1123a`(README 한 줄)를 개발 앱(`pnpm m5:dev -- --remote-debugging-port=9351`, CDP로 조작)에 추가했다. 개발용 폴더 선택 훅(`dev-pick-directory.txt`)이 기록 생성 확인을 대신했다.
-  - 역할 설정 저장 → 첫 작업 확인 체크 → 목표 한 문장 전송(09:07). 총괄 → 기획(Codex, `docs/plan.md`) → 디자인(`docs/design.md`) → 개발(`index.html`·`style.css`·`app.js`·README) → 검증(`docs/review.md`, 경미 2건 지적) → 개발(수정) → 총괄 최종 요약. 09:40 "팀 작업 완료", 변경 7개 +1447, 커밋 5개. 사람 개입은 시작 확인뿐이었다.
-  - 합치기 전 변경 탭 "변경된 파일 7개 · 아직 main에 합치지 않았어요" → "main에 합치기 → 합치기" → **"✓ main에 합쳐짐 · 파일 7개" + "이 작업에서 바꾼 파일"**, 결과 막대 "이 작업은 main에 합쳐졌어요"·"main에 합침"(비활성). 사용자 폴더 git 상태 깨끗. 앱 재시작 뒤에도 같은 상태.
-  - **만든 todo 앱은 실제 Chrome에서 동작**(헤드리스, 임시 프로필, CDP 실제 키·마우스 입력, `file://`): 빈 칸 Enter 안내, Enter·추가 버튼 추가(앞뒤 공백 제거), 체크, 남은 개수, 진행 중/완료/전체 필터, 새로고침 뒤 목록·체크 유지, 삭제, 완료 항목 지우기와 비활성, `<b>x</b>` 글자 그대로 — 17개 항목 모두 통과. 사본 작업 반영 뒤에도 같은 17개 통과, 제목 "오늘 할 일"·"완료: N개" 확인.
-- **사본(v1) 작업 3상태 실제 화면 확인(처음)**: `ELSECREW_GIT_WORKTREES=0`으로 다시 띄워 같은 프로젝트에 작은 작업("완료: N개" 표시)을 보냈다.
-  - 반영 전 "변경된 파일 4개" + "내 폴더에 반영" → 확인 → **"✓ 내 폴더에 반영됨 · 파일 4개"**, 결과 막대 "이 작업은 내 폴더에 반영됐어요"·"내 폴더에 반영함".
-  - 같은 작업에 추가 요청(제목 변경) → **"반영 뒤 새로 바뀐 파일 2개" + "다시 반영"**(화면 캡처로 확인) → 다시 반영 → "✓ 내 폴더에 반영됨 · 파일 5개". 일반 모드로 재시작한 뒤에도 반영됨 상태 유지.
-- **발견·수정**
-  - 권한 요청 조회 경합(앱 로그 오류 1건): Claude CLI가 권한 요청을 스스로 취소(`control_cancel_request`)한 직후 "요청 내용 보기"를 누르면 `agentApprovalChanged: Claude approval is no longer live`가 나고 Electron 로그 `Error occurred in handler for 'm5:approval:v1'`와 카드 오류 문구가 잠깐 보였다. 앱이 허용한 것은 아니다(권한 우회 아님). 이제 대기하지 않는 요청(취소·응답됨·멈춘/끝난 실행)의 inspect는 현재 목록과 `inspection: null`을 돌려주고, 허용·거절은 계속 거절한다. 계약은 null을 네 번의 검증(sidecar client·main·preload·화면) 모두에서 유지하고, 목록에 남은 요청의 null은 거절한다(cfc9f941).
-  - 총괄 요약이 "병합(merge) 버튼을 눌러 내 브랜치에 합칩니다"라고 안내했다(화면은 "main에 합치기"). 총괄 지시문에 실제 버튼 이름("Merge into main"/"main에 합치기", "Apply to my folder"/"내 폴더에 반영")과 "화면 그대로 부르고 묻지 않으면 브랜치 얘기를 하지 말 것"을 넣었다(899f6174).
-  - 좁은 변경 패널에서 "다시 반영" 버튼이 "다시 반 / 영"으로 줄바꿈됐다. `word-break: keep-all`(7f0f0eed).
-- **독립 검토(상시 검토자) 2회**: 1차 차단 1(B1: 첫 검증이 `inspection` 키를 빼서 main의 두 번째 검증에서 거절 — 실제 앱에선 오류가 그대로 남았을 것)·중요 0·경미 3(M1 등록 실패 실행의 inspect도 "대기 없음": list와 같고 허용은 거절되므로 회귀 아님 / M2 Codex의 멈춘 실행 inspect는 여전히 오류 / M3 `nowrap`이 긴 브랜치 이름에서 넘칠 수 있음). B1(null 유지 + 연쇄·멱등 테스트), M3(`keep-all`로 변경) 반영. 2차 차단·중요 0.
-- **테스트**: Rust 전체(`cargo test --workspace --locked`, 이번 Rust 수정이 모두 들어간 상태) core 239, protocol 70, sidecar 885(43 무시), stdio 16, 기타 3, 실패 0. 새 단언: 끝난 실행 inspect·decline 뒤 inspect·Claude acceptOnce 뒤 inspect(null, 재허용·거절은 거절), 총괄 지시문 버튼 이름. `npm test` 752 통과(새 `m5-approval` 2개), `pnpm build` 통과.
-- **실제 앱 세션 3회**(개발 빌드): 1회차 로그 오류는 위 권한 조회 1건, 2회차(사본 모드)·3회차(수정 빌드) 0건. 모두 Apple 이벤트 quit으로 정상 종료(exit 0). 점검용 헤드리스 Chrome과 개발 앱은 종료했다.
-- **관찰(미수정)**
-  - 에이전트 실행 샌드박스(`provider_runtime_sandbox.rs`, `deny default`)에서는 Chrome·Firefox·WebKit을 띄울 수 없고(`/Applications` 읽기·로컬 소켓 불가) Homebrew Node도 없다. 그래서 개발·검증 담당이 실제 브라우저로 앱을 열어 보지 못하고 jsc+가짜 DOM으로만 확인했고, 총괄도 "실제 브라우저로는 아무도 열어 보지 못했다"고 정직하게 알렸다. 웹 앱 개발에서 이 한계를 풀지(안전 경계 변경)는 주인님 결정 사항이다.
-  - 개발 중 권한 요청 카드가 사용자가 누르기 전에 나타났다 사라지는 경우가 2번 있었다(Claude CLI의 자체 취소). 비개발자에게는 깜박임으로 보일 수 있다.
-  - 사본 작업이 "반영 뒤 또 바뀜"일 때 결과 막대는 "변경 파일 5개 · 내 폴더에 반영"(작업 전체 기준)이고 변경 탭은 "새로 바뀐 파일 2개 · 다시 반영"이라 표현이 다르다. git 작업도 같은 구조다. 변경 목록에서 반영 뒤 새로 바뀐 파일을 따로 표시하지 않는다.
-  - 단계 커밋 메시지가 담당 보고 첫 문단 전체라 매우 길다(예: 디자인 단계 한 줄이 수백 자).
-  - 이 폴더 프로젝트(그림자 git)에 사본 작업을 반영했으므로 사용자 폴더에 커밋되지 않은 변경 5개가 남아 있다(시험 프로젝트, 정상 동작). 다음 git 작업의 합치기는 11-19 규칙대로 사용자 변경을 먼저 기록한다.
-- **다음 할 일**: M2(Codex 멈춘 실행의 inspect 오류), 위 관찰 중 결과 막대 표현·브라우저 실행 한계 결정, 기존 남은 경미(M16, M19, M20, M25, M31, M35, M39, M40, M42, M43, M45, M46, M49), 남은 핵심 작업(Windows·G6·배포). 로컬 커밋 3개(+기록 커밋)는 push가 필요하다(승인 대상).
-
 ## 프로젝트 요약 (고정)
 터미널을 한 번도 안 열어본 비개발자를 **코딩 에이전트(Claude Code·Codex)가 굴러가는 상태까지** 데려다주는 데스크톱 GUI 앱. 현재 배포 경로는 Tauri 2 + React 19이고, M5는 Electron + React/TypeScript + Monaco와 Rust sidecar의 별도 작업대 골격으로 전환 중이다.
 - 기획 원본: `~/Library/CloudStorage/OneDrive-개인/ObsidianVault/오픈소스/아이디어/후보/에이전트-스타터.md`
@@ -144,7 +103,9 @@ Orca 조정자 작업(주인님 전체 실제 시험 승인 2026-11-23). 기준 
 - **키체인 허용 창과 partition list(2026-11-26, 11-25 서명 판단 정정)**: macOS 키체인 항목은 허용 앱 목록(ACL)과 별개로 partition list를 검사한다. 항목을 만든·허용받은 코드가 Apple Team ID로 서명됐으면 `teamid:`, `/usr/bin/security` 같은 Apple 도구는 `apple-tool:`, **자체 서명·ad-hoc 코드는 `cdhash:`(바이너리 해시)**로 묶인다.
   - 그래서 "Elsecrew Dev" 자체 서명(지정 요구사항이 고정)은 소용이 없었다. 다시 빌드할 때마다 cdhash가 바뀌어 partition 검사에서 다시 묻는다. 11-25의 "한 번 허용하면 다시 묻지 않는다"는 지정 요구사항만 본 잘못된 판단이었고, `m5-dev-sign-sidecar.mjs`는 11-26에 제거했다.
   - 해결: 사이드카는 앱 전용 Claude 로그인을 읽기·쓰기 모두 `/usr/bin/security`로 한다. 쓰기는 `security -i`에 stdin으로 `add-generic-password -U -a … -s … -X <hex>` 한 줄을 넘긴다(Claude Code 자신과 같은 방식). 비밀 값은 argv·로그·파일에 남지 않는다.
-  - `security -i`의 한 줄 상한은 개행 포함 4095자(macOS 26 실측)다. 넘으면 남은 부분이 별도 명령으로 실행되고 "unknown command" 오류에 그 내용이 찍힌다. 그래서 4032자로 미리 막고, 넘는 로그인(약 1.9KB 초과, 실제는 약 600바이트)만 native 호출로 되돌린다.
+  - `security -i`의 한 줄 상한은 개행 포함 4095자(macOS 26 실측)다. 넘으면 남은 부분이 별도 명령으로 실행되고 "unknown command" 오류에 그 내용이 찍힌다. 그래서 4032자로 미리 막는다. native 대체는 없고, 1400바이트 이상인 로그인은 교환 전에 갱신을 거절한다(검토 반영).
+  - `find-generic-password -w`는 출력할 수 없는 바이트(비ASCII UTF-8 등)가 있으면 값 전체를 hex로 낸다. 저장은 ASCII JSON으로 하고 읽기는 hex를 푼다.
+  - Keychain 호출은 30초 제한 자식 프로세스이고, 코어 덤프를 막고, 죽인 뒤 거둔다. 취소는 토큰 교환 전까지만 받는다. 쓰기 전후로 항목 신원(`cdat`)과 값을 확인한다. 확인과 쓰기 사이 몇 밀리초의 외부 변경은 막을 수 없다(한계).
   - `security create-keychain`으로 만든 임시 키체인은 버전 256이라 partition list가 생기지 않는다. partition 동작은 로그인 키체인에서만 확인된다.
   - `Elsecrew Safe Storage`(Electron safeStorage)는 바꾸지 않는다. 같은 Electron 버전의 Electron.app은 워크스페이스·경로가 달라도 cdhash가 같고(74cc2c91…, 43.4.0), 경로가 다른 워크트리에서도 창 없이 읽혔다. Electron 버전을 올릴 때만 한 번 묻는다.
   - Keychain 항목은 지우지 않는다.
@@ -457,4 +418,4 @@ Orca 조정자 작업(주인님 전체 실제 시험 승인 2026-11-23). 기준 
 ---
 지난 워크로그: [11월](archive/history-2026-11.md) · 그 이전(Elsecrew 이름 변경 전) 기록은 2026-11-13에 정리했다. 필요하면 `git log -- docs/archive/`로 찾는다.
 
-2026-11-11~11-20 워크로그(11-17 엔트리 안의 11-18 오전 후속 포함)는 `docs/archive/history-2026-11.md`로 이동했다.
+2026-11-11~11-25 워크로그(11-17 엔트리 안의 11-18 오전 후속 포함)는 `docs/archive/history-2026-11.md`로 이동했다.

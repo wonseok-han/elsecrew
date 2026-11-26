@@ -293,7 +293,6 @@ dependencies = [
  "libc",
  "reqwest",
  "rusqlite",
- "security-framework",
  "serde",
  "serde_json",
  "sha1",
@@ -301,6 +300,7 @@ dependencies = [
  "tempfile",
  "unicode-normalization",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

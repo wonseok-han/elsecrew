@@ -1,3 +1,103 @@
+### 2026-11-25 · by Claude Opus 5.5 (claude-opus-5-5) — ADE 고도화 전 진단, 개발 빌드 사이드카 고정 서명, Codex 0.171 연결 실패 수정
+Orca 조정자 작업 두 건이다. 기준 HEAD는 01d85814이고, 브랜치는 주인님 결정(파생 브랜치 + PR로 feature/ade)에 따라 `ade/dev-signing-codex`다.
+
+- **ADE 고도화 전 진단(코드 변경 없음)**
+  - 산출물(저장소 밖):
+    - 보고서: `~/Documents/elsecrew-ade-diagnosis-2026-11-25/REPORT.md`
+    - 스크린샷 49장: 같은 폴더의 `screenshots/`
+    - 디자인 방향 목업 3개: `mockups/` — A 작업 관제실, B 작업 보드, C 결과 캔버스(HTML+PNG)
+  - 개발 앱을 CDP로 조작해 다음 흐름을 따라갔다.
+    - 첫 실행: 임시 `--user-data-dir` 프로필
+    - 프로젝트 추가·전환
+    - todo-test-1123a 짧은 실제 작업 1회: 13분, 총괄 → 개발 → 검증, 권한 요청 2회
+    - 합치기, 재시작, 라이트 모드·좁은 창
+  - 총평: 에이전트는 일을 해내지만 화면이 "편집기에 채팅을 붙인 것"이다.
+  - 주요 발견:
+    - 빈 편집기가 화면 중앙을 차지하고, 대화는 높이 419px(1280×768 기준) 칸에 마크다운 원문으로 쌓인다.
+    - **상태 오표시**: 진행 중인 작업의 변경 탭에 "✓ main에 합쳐짐"이 나온다. 합친 작업도 작업 목록에서는 "검토 준비"로 나온다. 역할 설정을 열기만 해도 "저장하지 않은 변경"이 뜬다.
+    - 프로젝트 전환에 '화면 닫기'가 필요하다.
+    - 다음 기능이 없다: 계획 편집, 진행 중 지시 추가, 부분 수락, 앱 안 결과 미리보기, 전역 단축키, 라이트 테마, 재시작 때 마지막 작업 복원.
+  - 로드맵(1~3차)과 방향 선택은 주인님 결정 대기다. 진단으로 생긴 앱 데이터 변경은 정상 사용분뿐이다: todo-test-1123a에 "오늘 날짜 표시" 작업을 합쳤다.
+- **개발 빌드 사이드카 고정 서명**(82115e1c)
+  - 변경: `m5:dev`가 `cargo build` 직후 `scripts/m5-dev-sign-sidecar.mjs`를 실행한다. 이 스크립트는 `target/debug/elsecrew-sidecar`를 로그인 키체인의 자체 서명 인증서 "Elsecrew Dev"와 고정 식별자 `com.wonseokhan.elsecrew.sidecar`로 서명한다.
+  - 동작 세부:
+    - 이미 같은 인증서로 서명돼 있으면 다시 서명하지 않는다.
+    - 인증서가 없거나 서명이 실패하면 경고만 낸다(120초 타임아웃). 개발 앱 시작은 막지 않는다.
+    - 패키징(`m5-stage-sidecar.mjs`의 release 빌드)은 바뀌지 않는다.
+  - 검증:
+    - 지정 요구사항: `identifier "com.wonseokhan.elsecrew.sidecar" and certificate leaf = H"18764b2f…"`.
+    - 세 번 다시 링크했다. 서명 전 ad-hoc cdhash는 매번 달랐고, 서명 후 지정 요구사항은 세 번 모두 같았다. `codesign --verify --strict` 통과.
+    - 첫 `codesign`은 개인 키 접근 허용 창을 띄웠다. 주인님이 '항상 허용'을 눌렀다.
+  - 남은 허용 창:
+    - 서명된 사이드카가 만료된 Claude 토큰을 처음 갱신할 때 `Claude Code-credentials-…` 항목에 대해 한 번 뜬다. 앱 시작·"연결 상태 다시 확인"의 Claude 확인(`provider_claude_login.rs` → `refresh_if_expired`)에서 생긴다.
+    - '항상 허용' 한 번이면 이후 다시 빌드해도 묻지 않는다. 읽기는 원래부터 `/usr/bin/security`로 한다.
+  - Electron.app은 다시 서명하지 않는다. `Elsecrew Safe Storage`는 개발용 Electron.app의 ad-hoc cdhash에 묶여 있지만, 다시 묻는 경우는 드물다.
+    - 공식 zip(`~/Library/Caches/electron/…/electron-v43.4.0-darwin-arm64.zip`)의 실행 파일과 node_modules의 실행 파일이 바이트까지 같다(cdhash `74cc2c91…`). 그래서 같은 버전으로 다시 설치하면 다시 묻지 않고, Electron 버전을 올릴 때만 한 번 묻는다.
+    - 다시 서명하면 지금 한 번 더 묻는다. 또 `pnpm install`이 원본을 다시 풀 때마다 서명이 사라져, 서명한 상태와 안 한 상태가 번갈아 생긴다.
+- **Codex 연결 실패 원인과 수정**(b921d23a, fcbbb223)
+  - 원인: CLI 변경이다. 계정 문제도, 기존 앱 버그도 아니다.
+    - ChatGPT.app이 11-23 11:22에 업데이트되며 내장 codex-cli가 0.171.0-alpha.13이 됐다(마지막 성공 실행은 같은 날 09:07).
+    - 그 뒤 앱의 사전 확인이 연달아 두 군데에서 실패했다.
+  - 첫째 실패 `account notification phase or envelope`:
+    - `account/updated` params에 `reason`(null | "unknown" | "workspaceRoutingReady")이 생겼는데, `deny_unknown_fields`가 이를 거절했다. 생성 스키마 `AccountUpdatedNotification`으로 확인했다.
+    - 수정: 사전 확인과 로그인 흐름이 이 세 값만 받는다. 초기 알림과 routing-ready 알림을 각각 한 번씩 허용하고, routing-ready는 스레드 시작 중에도 받는다(사이드카는 그 구간에서 최대 3프레임을 읽는다).
+  - 둘째 실패 `effective filesystem or network policy`:
+    - 원인: `config/read`가 network에 `"transparent_tcp": null`을 새로 직렬화했다. 인증 없이 임시 CODEX_HOME에 같은 `-c` 설정을 주고 재현했다.
+    - 수정: 이 null을 다른 기본값처럼 지운다. 실제 값이 들어 있으면 계속 불일치로 본다.
+  - 실제 앱에서 "이 앱에 Codex 로그인이 연결됐어요"를 확인했다. 상태 표시줄은 Codex "7일 0%"였고, 앱 로그 오류는 0건이었다(`screenshots/49-codex-connected-after-fix.png`).
+- **독립 검토(상시 검토자) 2회**
+  - 1차: 차단 0, 중요 1, 경미 4.
+    - I1: 사이드카가 스레드 시작 뒤 프레임을 정확히 2개만 읽어, 늦게 오는 routing 알림이 core 허용과 무관하게 실패했다.
+    - M2: ObservationsMatched 허용이 쓰이지 않았다.
+    - M3: "unknown" 단독 수락 테스트가 없었다.
+    - M5: 서명 스크립트에 타임아웃이 없었고, 다른 인증서로 서명된 경우의 테스트가 없었다.
+  - 1차 지적 중 I1, M2, M3, M5를 반영했다. M4(로그인 흐름 알림 반복 횟수 제한 없음, 기존 동작)는 그대로 뒀다.
+  - 2차: 차단·중요 0. 경미 1(초기 알림과 routing 알림이 둘 다 늦으면 3프레임 상한에서 fail-closed)은 주석으로 명시했다.
+  - 검토자 판단: `transparent_tcp`를 null 기본값으로 보는 것은 타당하다. 이 값은 관리형 SOCKS5 프록시가 켜져야만 의미가 있고, 기대 정책은 `network.enabled:false`이기 때문이다.
+- **테스트**
+  - core `vendor_observation::codex` 111 통과. 새 테스트: reason 수락·1회 제한·스레드 시작 중 수락, `transparent_tcp` null 수락·값 거부·모르는 null 거부, 로그인 reason.
+  - sidecar `--lib provider_` 171 통과(36 무시). preflight fixture에 `thread-routed` 사례를 추가했다.
+  - `npm test` 759 통과(새 `m5-dev-sign-sidecar` 7개), `pnpm build` 통과.
+  - 설치 CLI를 쓰는 `installed_codex_*` 테스트는 별도 승인이 필요해서 실행하지 않았다.
+  - Rust 전체 workspace는 다시 돌리지 않았다. 변경 범위가 Codex 관찰 모듈과 preflight 세션뿐이었다.
+- **PR #2 CI(첫 PR CI)**
+  - 첫 실행에서 Windows 하네스가 기존 결함 1건으로 실패했다. 11-17 6d7238e9가 추가한 `proctree::tests::after_the_owner_is_gone_a_reused_process_id_proves_the_recorded_process_ended`이다.
+  - 원인: `identity_of`는 unix에만 있는데, 이 테스트에 `#[cfg(unix)]`가 빠져 있었다. 그때까지 feature/ade에 CI가 돌지 않아 드러나지 않았다.
+  - 수정(6aa3032d) 뒤 macOS·Windows·website·GitGuardian이 모두 통과했다.
+- **미검증**: 수정 뒤 실제 Codex 작업 실행은 하지 않았다(유료 실행). 이 경로는 스레드 시작 단계가 포함된다.
+- **작업 기록**: 롤오버로 11-20 엔트리 3개를 `docs/archive/history-2026-11.md` 맨 위로 옮겼다.
+- **다음 할 일**
+  - PR(`ade/dev-signing-codex` → feature/ade)의 CI와 리뷰 대응
+  - 진단 보고서의 방향·로드맵 결정
+  - 진단에서 찾은 상태 오표시 결함 수정: 진행 중 "main에 합쳐짐", 작업 목록 "검토 준비", 설정의 거짓 미저장
+  - 11-23 엔트리의 남은 항목
+
+### 2026-11-23 · by Claude Opus 5.5 (claude-opus-5-5) — 실제 todo 앱 개발 시험(목표 확인), 사본·git 반영 화면 실제 확인, 권한 조회 경합 수정
+Orca 조정자 작업(주인님 전체 실제 시험 승인 2026-11-23). 기준 HEAD fb568f6f. 역할: 기획만 Codex(gpt-6.2-sol·medium), 나머지 Claude Code(default·claude-opus-5-5).
+
+- **진행 목표 "앱을 직접 띄워 쓰면서 테스트용 todo 앱이 문제없이 개발되는 수준": 충족**
+  - 새 일반 폴더 `~/Downloads/todo-test-1123a`(README 한 줄)를 개발 앱(`pnpm m5:dev -- --remote-debugging-port=9351`, CDP로 조작)에 추가했다. 개발용 폴더 선택 훅(`dev-pick-directory.txt`)이 기록 생성 확인을 대신했다.
+  - 역할 설정 저장 → 첫 작업 확인 체크 → 목표 한 문장 전송(09:07). 총괄 → 기획(Codex, `docs/plan.md`) → 디자인(`docs/design.md`) → 개발(`index.html`·`style.css`·`app.js`·README) → 검증(`docs/review.md`, 경미 2건 지적) → 개발(수정) → 총괄 최종 요약. 09:40 "팀 작업 완료", 변경 7개 +1447, 커밋 5개. 사람 개입은 시작 확인뿐이었다.
+  - 합치기 전 변경 탭 "변경된 파일 7개 · 아직 main에 합치지 않았어요" → "main에 합치기 → 합치기" → **"✓ main에 합쳐짐 · 파일 7개" + "이 작업에서 바꾼 파일"**, 결과 막대 "이 작업은 main에 합쳐졌어요"·"main에 합침"(비활성). 사용자 폴더 git 상태 깨끗. 앱 재시작 뒤에도 같은 상태.
+  - **만든 todo 앱은 실제 Chrome에서 동작**(헤드리스, 임시 프로필, CDP 실제 키·마우스 입력, `file://`): 빈 칸 Enter 안내, Enter·추가 버튼 추가(앞뒤 공백 제거), 체크, 남은 개수, 진행 중/완료/전체 필터, 새로고침 뒤 목록·체크 유지, 삭제, 완료 항목 지우기와 비활성, `<b>x</b>` 글자 그대로 — 17개 항목 모두 통과. 사본 작업 반영 뒤에도 같은 17개 통과, 제목 "오늘 할 일"·"완료: N개" 확인.
+- **사본(v1) 작업 3상태 실제 화면 확인(처음)**: `ELSECREW_GIT_WORKTREES=0`으로 다시 띄워 같은 프로젝트에 작은 작업("완료: N개" 표시)을 보냈다.
+  - 반영 전 "변경된 파일 4개" + "내 폴더에 반영" → 확인 → **"✓ 내 폴더에 반영됨 · 파일 4개"**, 결과 막대 "이 작업은 내 폴더에 반영됐어요"·"내 폴더에 반영함".
+  - 같은 작업에 추가 요청(제목 변경) → **"반영 뒤 새로 바뀐 파일 2개" + "다시 반영"**(화면 캡처로 확인) → 다시 반영 → "✓ 내 폴더에 반영됨 · 파일 5개". 일반 모드로 재시작한 뒤에도 반영됨 상태 유지.
+- **발견·수정**
+  - 권한 요청 조회 경합(앱 로그 오류 1건): Claude CLI가 권한 요청을 스스로 취소(`control_cancel_request`)한 직후 "요청 내용 보기"를 누르면 `agentApprovalChanged: Claude approval is no longer live`가 나고 Electron 로그 `Error occurred in handler for 'm5:approval:v1'`와 카드 오류 문구가 잠깐 보였다. 앱이 허용한 것은 아니다(권한 우회 아님). 이제 대기하지 않는 요청(취소·응답됨·멈춘/끝난 실행)의 inspect는 현재 목록과 `inspection: null`을 돌려주고, 허용·거절은 계속 거절한다. 계약은 null을 네 번의 검증(sidecar client·main·preload·화면) 모두에서 유지하고, 목록에 남은 요청의 null은 거절한다(cfc9f941).
+  - 총괄 요약이 "병합(merge) 버튼을 눌러 내 브랜치에 합칩니다"라고 안내했다(화면은 "main에 합치기"). 총괄 지시문에 실제 버튼 이름("Merge into main"/"main에 합치기", "Apply to my folder"/"내 폴더에 반영")과 "화면 그대로 부르고 묻지 않으면 브랜치 얘기를 하지 말 것"을 넣었다(899f6174).
+  - 좁은 변경 패널에서 "다시 반영" 버튼이 "다시 반 / 영"으로 줄바꿈됐다. `word-break: keep-all`(7f0f0eed).
+- **독립 검토(상시 검토자) 2회**: 1차 차단 1(B1: 첫 검증이 `inspection` 키를 빼서 main의 두 번째 검증에서 거절 — 실제 앱에선 오류가 그대로 남았을 것)·중요 0·경미 3(M1 등록 실패 실행의 inspect도 "대기 없음": list와 같고 허용은 거절되므로 회귀 아님 / M2 Codex의 멈춘 실행 inspect는 여전히 오류 / M3 `nowrap`이 긴 브랜치 이름에서 넘칠 수 있음). B1(null 유지 + 연쇄·멱등 테스트), M3(`keep-all`로 변경) 반영. 2차 차단·중요 0.
+- **테스트**: Rust 전체(`cargo test --workspace --locked`, 이번 Rust 수정이 모두 들어간 상태) core 239, protocol 70, sidecar 885(43 무시), stdio 16, 기타 3, 실패 0. 새 단언: 끝난 실행 inspect·decline 뒤 inspect·Claude acceptOnce 뒤 inspect(null, 재허용·거절은 거절), 총괄 지시문 버튼 이름. `npm test` 752 통과(새 `m5-approval` 2개), `pnpm build` 통과.
+- **실제 앱 세션 3회**(개발 빌드): 1회차 로그 오류는 위 권한 조회 1건, 2회차(사본 모드)·3회차(수정 빌드) 0건. 모두 Apple 이벤트 quit으로 정상 종료(exit 0). 점검용 헤드리스 Chrome과 개발 앱은 종료했다.
+- **관찰(미수정)**
+  - 에이전트 실행 샌드박스(`provider_runtime_sandbox.rs`, `deny default`)에서는 Chrome·Firefox·WebKit을 띄울 수 없고(`/Applications` 읽기·로컬 소켓 불가) Homebrew Node도 없다. 그래서 개발·검증 담당이 실제 브라우저로 앱을 열어 보지 못하고 jsc+가짜 DOM으로만 확인했고, 총괄도 "실제 브라우저로는 아무도 열어 보지 못했다"고 정직하게 알렸다. 웹 앱 개발에서 이 한계를 풀지(안전 경계 변경)는 주인님 결정 사항이다.
+  - 개발 중 권한 요청 카드가 사용자가 누르기 전에 나타났다 사라지는 경우가 2번 있었다(Claude CLI의 자체 취소). 비개발자에게는 깜박임으로 보일 수 있다.
+  - 사본 작업이 "반영 뒤 또 바뀜"일 때 결과 막대는 "변경 파일 5개 · 내 폴더에 반영"(작업 전체 기준)이고 변경 탭은 "새로 바뀐 파일 2개 · 다시 반영"이라 표현이 다르다. git 작업도 같은 구조다. 변경 목록에서 반영 뒤 새로 바뀐 파일을 따로 표시하지 않는다.
+  - 단계 커밋 메시지가 담당 보고 첫 문단 전체라 매우 길다(예: 디자인 단계 한 줄이 수백 자).
+  - 이 폴더 프로젝트(그림자 git)에 사본 작업을 반영했으므로 사용자 폴더에 커밋되지 않은 변경 5개가 남아 있다(시험 프로젝트, 정상 동작). 다음 git 작업의 합치기는 11-19 규칙대로 사용자 변경을 먼저 기록한다.
+- **다음 할 일**: M2(Codex 멈춘 실행의 inspect 오류), 위 관찰 중 결과 막대 표현·브라우저 실행 한계 결정, 기존 남은 경미(M16, M19, M20, M25, M31, M35, M39, M40, M42, M43, M45, M46, M49), 남은 핵심 작업(Windows·G6·배포). 로컬 커밋 3개(+기록 커밋)는 push가 필요하다(승인 대상).
+
 ### 2026-11-20 · by Claude Opus 5.5 (claude-opus-5-5) — 사본 작업 3상태 실제 화면 확인, 결과 막대 반영 버튼 정리
 - **실제 앱 확인**(개발 빌드, todo-test-1117a의 사본(v1) 작업, 변경 11개; 승인된 todo 시험 프로젝트)
   - 반영 전 상태가 맞게 나왔다: "변경된 파일 11개"와 "내 폴더에 반영" 버튼.
