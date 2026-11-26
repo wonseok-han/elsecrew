@@ -1,6 +1,7 @@
 // ADE 1차 통합 검증(V, 2026-11-26)에서 실제 앱으로 찾은 작은 결함의 시험.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 
 import { startingSentence } from "../src/m5/agent-output-window.ts";
 import { en } from "../src/locales/en.ts";
@@ -23,4 +24,10 @@ test("applying to the folder does not say 'commit' to a non-developer (완료 �
   assert.doesNotMatch(ko["m5.apply.confirm"], /커밋|브랜치/);
   assert.doesNotMatch(en["m5.apply.confirm"], /\bcommit|\bbranch/i);
   assert.match(ko["m5.apply.confirm"], /되돌릴 수 없어요/, "the warning itself stays");
+});
+
+test("the start sentence is not shown over a failed output read, nor again after a run showed its activity (PR #13 review M2)", () => {
+  const panel = readFileSync("src/m5/agent-output-panel.tsx", "utf8");
+  assert.match(panel, /const starting = state !== "failed" && !activeSeen\.current\.has\(binding\.runId\) && startingSentence\(run!\.state, rows\);/);
+  assert.match(panel, /if \(rows\?\.some\(row => row\.channel === "activity"\)\) activeSeen\.current\.add\(binding\.runId\);/);
 });

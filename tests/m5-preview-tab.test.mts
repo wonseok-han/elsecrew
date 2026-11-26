@@ -94,11 +94,13 @@ test("the view is hidden first, then the cover is shown (PR #9 review I1, re-rev
   assert.match(source, /new PreviewLayoutLoop\(\{/);
   assert.match(source, /close: \(\) => bridge\.close\(\{ previewId \}\)/);
   // Bands that move the stage appear only once the view is hidden (re-review B1).
-  for (const change of ["setNotice(true)", "setNotice(false)", "setNewResult(true)", "setNewResult(false)"]) assert.ok(source.includes(`shift(() => ${change})`), change);
-  assert.match(source, /useLayoutEffect\(\(\) => \{ bands\.current = \{ newResult, notice \}; loopRef\.current\?\.settled\(\); \}, \[newResult, notice\]\);/);
-  // A band change that would change nothing hides nothing (ADE V check, 2026-11-26).
-  assert.match(source, /if \(bands\.current\.newResult\) shift\(\(\) => setNewResult\(false\)\)/);
-  assert.match(source, /!bands\.current\.notice\) shift\(\(\) => setNotice\(true\)\)/);
+  for (const [which, value] of [["notice", "true"], ["notice", "false"], ["newResult", "true"], ["newResult", "false"]]) assert.ok(source.includes(`setBand("${which}", ${value})`), `${which} ${value}`);
+  // Bands change only through PreviewBands (queued behind the hide, placed
+  // again on the page's own layout — never a timer; tests/m5-preview-layout-loop.test.mts).
+  assert.match(source, /queue: apply => \{ const loop = loopRef\.current; if \(loop\) loop\.afterHidden\(apply\); else apply\(\); \}/);
+  assert.match(source, /useLayoutEffect\(\(\) => \{ bandModel\.current!\.rendered\(\{ newResult, notice \}\); \}, \[newResult, notice\]\);/);
+  assert.doesNotMatch(source, /setNewResult\(true\)|setNotice\(true\)/, "no band shown around the queue");
+  assert.doesNotMatch(readFileSync("src/m5/preview-layout-loop.ts", "utf8"), /settleLimit|settleTimer/, "no timer places the view again (PR #13 review I1)");
   // Something in the tab that moved the stage is held the same way.
   assert.match(source, /if \(own\?\.contains\(node\)\) \{\n\s+if \(moved\) \{ holdElement\(node\);/);
   // Every measurement carries the page's devicePixelRatio and size.

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { PreviewLayoutLoop, type LoopLayout } from "../src/m5/preview-layout-loop.ts";
+import { PreviewBands, type PreviewBandState } from "../src/m5/preview-tab-model.ts";
 
 type Answer = { closed: boolean; snapshot: string | null };
 interface Pending { layout: LoopLayout; resolve(answer?: Partial<Answer>): void; reject(): void }
@@ -236,30 +237,73 @@ test("while hidden, a stage measured on and off sends nothing more; the next sho
   assert.deepEqual(h.sent.at(-1)!.layout.bounds, { x: 568, y: 185, width: 424, height: 458 });
 });
 
-test("a queued change that changes nothing on screen does not keep the view hidden for good (ADE V check, 2026-11-26)", async () => {
+/** The loop with the tab's bands on it, the page's render played by the test. */
+function withBands() {
   const h = harness();
+  const renders: PreviewBandState[] = [];
+  const bands = new PreviewBands({
+    queue: apply => h.loop.afterHidden(apply),
+    render: next => { renders.push(next); },
+    settled: () => h.loop.settled(),
+  });
+  /** The page lays out what it was asked to render (the layout effect); a band pushes the stage down. */
+  const layOut = () => { const next = renders.at(-1)!; h.state.bounds = { x: 900, y: next.newResult || next.notice ? 190 : 150, width: 500, height: next.newResult || next.notice ? 560 : 600 }; bands.rendered(next); };
+  return { ...h, bands, renders, layOut };
+}
+
+test("a band the page lays out late keeps the view hidden until it is laid out — no timer shows it at the old place (PR #13 review I1)", async () => {
+  const h = withBands();
   await shown(h);
-  // "다시 불러오기" with no band shown: the change runs, but the page never re-renders.
-  h.loop.afterHidden(() => undefined);
+  h.bands.set("notice", true);
+  assert.equal(h.sent.at(-1)!.layout.obscured, true, "hidden first");
   h.sent.at(-1)!.resolve();
   await h.settle();
-  const before = h.sent.length;
-  assert.ok(h.sent.slice(before).every(sent => sent.layout.obscured), "still waiting for the page");
-  assert.equal(h.loop.holding, true);
-  // No `settled` from the page: the limit places the view again.
-  h.fire(500);
+  assert.deepEqual(h.renders, [{ newResult: false, notice: true }], "the band is asked for only after main hid the view");
+  // The page is slow to lay the band out: no show, however long it takes.
+  for (const ms of [250, 500, 1000, 1500, 3000, 5000]) h.fire(ms);
+  for (const sent of h.sent) sent.resolve();
   await h.settle();
-  assert.equal(h.loop.holding, false);
-  assert.equal(h.sent.at(-1)!.layout.obscured, false, "shown again");
-  // `settled` from the page first clears the limit: nothing more happens at the limit.
+  assert.ok(h.sent.every((sent, index) => index === 0 || sent.layout.obscured), "nothing shown before the band is laid out");
+  // Laid out: shown again, at the stage's new place.
+  h.layOut();
+  const show = h.sent.at(-1)!.layout;
+  assert.equal(show.obscured, false);
+  assert.equal(show.bounds.y, 190);
+});
+
+test("a new result while taking the band down for a reload keeps the band (PR #13 review I2)", async () => {
+  const h = withBands();
+  await shown(h);
+  // The "새 결과" band is on screen.
+  h.bands.set("newResult", true);
   h.sent.at(-1)!.resolve();
   await h.settle();
-  h.loop.afterHidden(() => { h.state.bounds = { x: 900, y: 190, width: 500, height: 560 }; });
+  h.layOut();
   h.sent.at(-1)!.resolve();
   await h.settle();
-  h.loop.settled();
+  assert.equal(h.loop.accepted?.obscured, false);
+  // "다시 불러오기": the band is to go; main is slow to hide.
+  h.bands.set("newResult", false);
+  const hide = h.sent.at(-1)!;
+  assert.equal(hide.layout.obscured, true);
+  // Meanwhile the next run of the team ends: a new result.
+  h.bands.set("newResult", true);
+  hide.resolve();
+  await h.settle();
+  assert.deepEqual(h.renders.at(-1), { newResult: true, notice: false }, "never asked to take the band away");
+  assert.equal(h.renders.length, 1, "nothing to render: the band stays as it is");
+  assert.equal(h.bands.target.newResult, true);
+  // Nothing moved, so the view comes back at once, at the same place.
+  assert.equal(h.sent.at(-1)!.layout.obscured, false);
+  assert.equal(h.sent.at(-1)!.layout.bounds.y, 190);
+});
+
+test("a band change that would change nothing hides nothing (ADE V check: 다시 불러오기 with no band)", async () => {
+  const h = withBands();
+  await shown(h);
   const count = h.sent.length;
-  h.fire(500);
-  await h.settle();
-  assert.equal(h.sent.length, count, "the cleared limit sends nothing");
+  h.bands.set("newResult", false);
+  h.bands.set("notice", false);
+  assert.equal(h.sent.length, count, "no hide for nothing");
+  assert.equal(h.loop.holding, false);
 });

@@ -80,6 +80,8 @@ export function AgentOutputPanel({ runs, definitions, posted = [] }: {
   const [historyPage, setHistoryPage] = useState<OutputPage | null>(null);
   const [historyState, setHistoryState] = useState<"loading" | "ready" | "failed">("ready");
   const outputRef = useRef<HTMLDivElement>(null);
+  /** Runs whose own activity has been shown once: they never "start" again (a retry empties the view). */
+  const activeSeen = useRef(new Set<string>());
   const followLatest = useRef(true);
   const revealLatest = useRef(false);
   const followConversation = useRef(false);
@@ -217,7 +219,11 @@ export function AgentOutputPanel({ runs, definitions, posted = [] }: {
   // A member just started: until its first activity arrives (often 10–20 s
   // while the agent starts and reads its task), say what it is doing rather
   // than "loading" (ADE 1차 완료 기준 2: never 10 s without a sentence).
-  const starting = startingSentence(run!.state, view?.binding.runId === binding.runId ? view.rows : null);
+  const rows = view?.binding.runId === binding.runId ? view.rows : null;
+  if (rows?.some(row => row.channel === "activity")) activeSeen.current.add(binding.runId);
+  // Not while the output failed to load (its own message says so), nor for a
+  // run that already showed what it did (PR #13 review M2).
+  const starting = state !== "failed" && !activeSeen.current.has(binding.runId) && startingSentence(run!.state, rows);
   const historyActive = historyRequest?.binding.runId === binding.runId;
   const visibleHistory = historyActive && historyPage?.request === historyRequest ? historyPage : null;
   return <section className="m5-durable-output" data-run-id={run!.runId} aria-label={t("m5.output.title")}>
