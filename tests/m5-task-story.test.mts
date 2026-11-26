@@ -66,3 +66,31 @@ test("a role keeps one colour everywhere; named roles get a stable hashed colour
   assert.equal(roleInitial("qa"), "Q");
   assert.equal(roleInitial(""), "?");
 });
+
+import { storyItems } from "../src/m5/task-story-model.ts";
+
+test("a run and the report it posted become one card; nothing shows twice", () => {
+  const at = (s: number) => new Date(Date.UTC(2026, 10, 26, 10, 0, s)).toISOString();
+  const messages = [
+    { messageId: "m1", kind: "user", runId: null, createdAt: at(1) },
+    { messageId: "m2", kind: "role", runId: "r1", createdAt: at(50) },
+    { messageId: "m3", kind: "status", runId: null, createdAt: at(55) },
+    { messageId: "m4", kind: "role", runId: "r2", createdAt: at(120) },
+    { messageId: "m5", kind: "role", runId: "orphan", createdAt: at(130) },
+    { messageId: "m6", kind: "user", runId: "r2", createdAt: at(140) },
+  ];
+  const runs = [{ runId: "r2", createdAt: at(60) }, { runId: "r1", createdAt: at(2) }];
+  const items = storyItems(messages, runs);
+  assert.deepEqual(items.map(item => item.key), ["message:m1", "run:r1", "message:m3", "run:r2", "message:m5", "message:m6"]);
+  const r1 = items[1]!;
+  assert.ok(r1.kind === "run" && r1.reports.map(report => report.messageId).join() === "m2");
+  const r2 = items[3]!;
+  assert.ok(r2.kind === "run" && r2.reports.map(report => report.messageId).join() === "m4");
+  assert.equal(items.find(item => item.key === "message:m5")?.kind, "message", "a report of a run not in this task stays on its own");
+  assert.equal(items.find(item => item.key === "message:m6")?.kind, "user", "the person's message is never folded into a run");
+  const shown = items.flatMap(item => item.kind === "run" ? item.reports.map(report => report.messageId) : [item.message.messageId]);
+  assert.equal(new Set(shown).size, shown.length);
+  assert.equal(shown.length, messages.length);
+  // A run with no report yet is still a card.
+  assert.deepEqual(storyItems([], [{ runId: "r9", createdAt: at(1) }]).map(item => item.kind), ["run"]);
+});

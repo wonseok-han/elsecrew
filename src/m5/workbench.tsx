@@ -642,6 +642,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const [rightWidthPreference, setRightWidthPreference] = useState<number | null>(() => { try { return parseRightWidth(localStorage.getItem(RIGHT_WIDTH_KEY)); } catch { return null; } });
   const rightWidth = clampRightWidth(rightWidthPreference ?? bandSizes(layoutBandNow).right, viewportWidth);
   const [sheetOpen, setSheetOpen] = useState(false);
+  // Permission requests pin above the composer, whatever the scroll (L4b).
+  const [pinnedSlot, setPinnedSlot] = useState<HTMLDivElement | null>(null);
   const sheetMode: SheetMode = allChanges || snapshot.diffVisible ? "changes" : "editor";
   const closeSheet = () => { setSheetOpen(false); setAllChanges(null); };
   const selectSheetMode = (mode: SheetMode) => {
@@ -845,7 +847,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
               {chat.nextChatCursor !== null && <button className="m5-secondary" type="button" disabled={!admissionReady || chat.loadingMoreChats || removing} onClick={() => void chatController.loadMoreChats()}>{chat.loadingMoreChats ? t("m5.navigation.loadingChats") : t("m5.navigation.moreChats")}</button>}
             </div>} />
         </>}
-        story={chat.activeChat ? <div className="m5-conversation"><div className="m5-conversation-scroll"><TeamTimeline onCoordinatorChat={() => { setGoal(chat.activeChat?.goal ?? ""); setNewChatOpen(true); }} controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} phase={activePhase} phaseKind={activeKind} onApprovalsWaiting={onApprovalsWaiting} />{resultView && <section className={`m5-result-bar${resultView.loading ? " m5-result-loading" : ""}`} data-task-phase={resultView.loading ? "loading" : resultView.phase} aria-label={t("m5.result.title")} aria-busy={resultView.loading}>
+        story={chat.activeChat ? <div className="m5-conversation"><div className="m5-conversation-scroll"><TeamTimeline onCoordinatorChat={() => { setGoal(chat.activeChat?.goal ?? ""); setNewChatOpen(true); }} controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} phase={activePhase} phaseKind={activeKind} onApprovalsWaiting={onApprovalsWaiting} pinnedSlot={pinnedSlot} />{resultView && <section className={`m5-result-bar${resultView.loading ? " m5-result-loading" : ""}`} data-task-phase={resultView.loading ? "loading" : resultView.phase} aria-label={t("m5.result.title")} aria-busy={resultView.loading}>
         <span className="m5-result-mark" aria-hidden="true">✓</span>
         <span className="m5-result-text"><strong>{t("m5.result.title")}</strong>
           {/* Until the task's own standing is read, a placeholder: never a value or button of the task shown before. */}
@@ -869,7 +871,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       }} />
           </span>
         </span>
-      </section>}</div>{chat.activeChat.schemaVersion !== 1 && <FollowupComposer controller={chatController} chat={chat} admissionReady={admissionReady} />}</div> : <section className="m5-first-chat" aria-label={t("m5.firstChat.title")}>
+      </section>}</div><div className="m5-pinned-slot" data-testid="pinned-approval" ref={setPinnedSlot} />{chat.activeChat.schemaVersion !== 1 && <FollowupComposer controller={chatController} chat={chat} admissionReady={admissionReady} />}</div> : <section className="m5-first-chat" aria-label={t("m5.firstChat.title")}>
         <h2>{t("m5.firstChat.title")}</h2><p>{t("m5.firstChat.help")}</p>
         <button type="button" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching} onClick={() => setNewChatOpen(true)}>{t("m5.navigation.newChat")}</button>
         <div className="m5-goal-examples">{(["explain", "plan", "readme"] as const).map(example => <button key={example} type="button" className="m5-secondary" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching || goal.trim().length > 0} onClick={() => { setGoal(t(`m5.firstChat.${example}`)); setNewChatOpen(true); }}>

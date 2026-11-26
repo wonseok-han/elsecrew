@@ -1138,4 +1138,9 @@ export const en: Record<MessageKey, string> = {
   "m5.stage.status.canceled": "canceled",
   "m5.stage.status.recovery": "needs a check",
   "m5.story.started": "Started {time}",
+  "m5.card.now": "Working now",
+  "m5.card.roleGone": "This role is no longer in the project's team",
+  "m5.story.reviewHint": "The team is done. Check the result on the right.",
+  "m5.story.inFolder": "✓ It is in your folder",
+  "m5.story.composerBusy": "A note for the team (you can send it when this step ends)",
 };

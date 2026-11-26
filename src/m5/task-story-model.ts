@@ -52,3 +52,39 @@ export function stageCells(runs: readonly AgentRunRecordV1[], input: { working: 
 export function stageNow(cells: readonly StageCell[]): StageCell | null {
   return cells.find(cell => (cell.kind === "run" && cell.status === "now") || cell.kind === "planning" || cell.kind === "between") ?? null;
 }
+
+/**
+ * One card per run (ADE 1차-나 L4b): a run's posted reports (same `runId`)
+ * join its card instead of showing again as separate messages. The
+ * person's own messages become bubbles; messages with no run (status lines,
+ * a report whose run is not in this task's run list) stay single items.
+ * Everything is ordered by time, the runs by their start.
+ */
+export interface StoryMessage { messageId: string; kind: string; runId: string | null; createdAt: string }
+export interface StoryRun { runId: string; createdAt: string }
+export type StoryItem<M extends StoryMessage, R extends StoryRun> =
+  | { kind: "run"; key: string; run: R; reports: M[] }
+  | { kind: "user"; key: string; message: M }
+  | { kind: "message"; key: string; message: M };
+
+export function storyItems<M extends StoryMessage, R extends StoryRun>(messages: readonly M[], runs: readonly R[]): StoryItem<M, R>[] {
+  const reports = new Map<string, M[]>();
+  const known = new Set(runs.map(run => run.runId));
+  const items: { at: number; order: number; item: StoryItem<M, R> }[] = [];
+  let order = 0;
+  for (const message of messages) {
+    if (message.runId && known.has(message.runId) && message.kind !== "user") {
+      const list = reports.get(message.runId) ?? [];
+      list.push(message);
+      reports.set(message.runId, list);
+      continue;
+    }
+    const item: StoryItem<M, R> = message.kind === "user"
+      ? { kind: "user", key: `message:${message.messageId}`, message }
+      : { kind: "message", key: `message:${message.messageId}`, message };
+    items.push({ at: Date.parse(message.createdAt), order: order++, item });
+  }
+  for (const run of runs) items.push({ at: Date.parse(run.createdAt), order: order++, item: { kind: "run", key: `run:${run.runId}`, run, reports: reports.get(run.runId) ?? [] } });
+  const time = (value: number) => Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
+  return items.sort((a, b) => time(a.at) - time(b.at) || a.order - b.order).map(entry => entry.item);
+}

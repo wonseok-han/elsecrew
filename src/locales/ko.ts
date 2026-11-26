@@ -1136,6 +1136,11 @@ export const ko = {
   "m5.stage.status.canceled": "중단됨",
   "m5.stage.status.recovery": "확인 필요",
   "m5.story.started": "시작 {time}",
+  "m5.card.now": "지금 하는 일",
+  "m5.card.roleGone": "이 역할은 지금 프로젝트 팀에 없어요",
+  "m5.story.reviewHint": "팀 작업이 끝났어요. 결과를 오른쪽에서 확인해 주세요.",
+  "m5.story.inFolder": "✓ 내 폴더에 들어갔어요",
+  "m5.story.composerBusy": "팀에게 전할 말 (지금 단계가 끝나면 보낼 수 있어요)",
 } as const;
 
 export type MessageKey = keyof typeof ko;
