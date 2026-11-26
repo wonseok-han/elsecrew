@@ -505,7 +505,7 @@ export const ko = {
   "m5.merge.blocked.noBaseBranch": "이 작업을 시작할 때 내 폴더가 브랜치에 있지 않아 합칠 곳을 알 수 없어요.",
   "m5.merge.blocked.baseBranchMissing": "{base} 브랜치를 찾을 수 없어요.",
   "m5.merge.blocked.nothingToMerge": "{base}에 합칠 새 변경이 없어요.",
-  "m5.merge.blocked.changedSinceReview": "확인한 뒤에 작업이나 {base}가 바뀌었어요. 다시 눌러 최신 상태로 합쳐 주세요.",
+  "m5.merge.blocked.changedSinceReview": "확인한 뒤에 작업이나 {base}의 내용이 바뀌었어요. 바뀐 내용을 보고 다시 눌러 합쳐 주세요.",
   "m5.merge.blocked.userChangesOverlap": "내 폴더에서 수정 중인 파일이나 Git이 무시하는 파일(.env 같은)과 겹쳐서 합치지 않았어요. 그 파일을 저장(커밋)하거나 되돌리거나 옮긴 뒤 다시 시도해 주세요.",
   "m5.merge.blocked.folderChangesTooLarge": "내 폴더에서 바뀐 파일이 너무 많거나 커서(2만 개 또는 1GB 넘음) 앱이 먼저 기록할 수 없어 합치지 않았어요. 필요 없는 큰 파일을 폴더 밖으로 옮긴 뒤 다시 시도해 주세요.",
   "m5.merge.blocked.folderHasRepository": "내 폴더 안에 다른 Git 저장소(.git 폴더가 있는 폴더)가 생겨서 앱이 먼저 기록할 수 없어 합치지 않았어요. 그 폴더를 프로젝트 폴더 밖으로 옮긴 뒤 다시 시도해 주세요.",
