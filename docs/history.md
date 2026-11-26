@@ -2,6 +2,17 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #8 독립 검토(차단 0, 중요 4, 경미 2) 반영
+검토서: `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr8.md`(대상 34b3d17a). 리뷰 재현은 `tests/m5-pr8-review.test.mts`로 막았다.
+
+- **I1 화면상 같은 이름**: 이름 비교를 화면 표시 기준으로 바꿨다. 키는 NFC 정규화 → 공백 제거 → 소문자이고, 시드 이름 그대로인 기본 역할은 번역 이름(ko·en)도 키로 가진다. Rust(`unicode-normalization =0.1.25`를 protocol에 직접 의존으로 추가, sidecar와 같은 버전)·TS가 같은 표(`role-names-v3.json`에 `legacyLabels`와 5개 사례 추가)로 시험한다. `uniqueRoleName`도 같은 키를 피해 영어 화면에서 기획 템플릿을 한 번 더 넣으면 "Planning 2"가 된다. 실행 출력 선택기에 총괄 ★(ID 기준)과 FSI/PDI 격리를 넣었다.
+- **I2 삭제 취소 누락**: `undoLastRemoval`은 같은 ID 역할이 이미 있거나(템플릿으로 되살린 기본 역할) 팀이 가득 차면 팀·기록을 그대로 두고 이유를 돌려준다. 화면은 이유를 알리고 버튼을 남긴다.
+- **I3 앱 기본값 불러오기**: 미저장 변경이 있으면 기존 폐기 확인을 거친다(`appDefaultsLoadStep`, "변경 버리고 앱 기본값 불러오기").
+- **I4 두 범위 저장**: 순서를 프로젝트 → 앱 기본값으로 바꾸고(`saveProjectThenAppDefaults`), `ChatUiController.updateSettings`·앱 기본값 저장이 성공 여부를 돌려준다. 프로젝트 실패면 앱 기본값을 건드리지 않고, 둘 다 됐을 때만 "앱 기본값에도 저장했어요", 프로젝트만 됐으면 "앱 기본값은 저장하지 못했어요"를 작업대가 보여 준다.
+- **경미**: 새 ID는 불러온 작업 목록의 팀 스냅샷 ID도 피한다(발급 기록 영속 저장은 하지 않음 — 목록 첫 페이지 밖의 옛 작업 ID는 여전히 6자리 난수에 의존). 메뉴 Esc는 메뉴를 연 요소(끼워 넣기 선 포함)로 초점을 돌린다.
+- **함께 고침**: 팀에 없는 역할로 위임한 총괄 응답을 원문 JSON 대신 "총괄이 팀에 없는 담당(…)을 골라 다시 정하게 했어요"로 보인다(`orchestratorMisdirected`, 역할 문자열은 32자로 자르고 FSI 격리).
+- **테스트**: `tests/m5-pr8-review.test.mts` 8개(I1 두 개, I2, I3, I4, m1, m2, 원문 JSON), `m5-g5-chat-ui-state`의 저장 실패/성공 반환값, `m5-team-editing`의 공용 표 시험(번역 이름이 locale과 같은지 포함). `npm test` 869·`pnpm build` 통과. `cargo test -p elsecrew-protocol` 75(공용 표 시험 포함), `cargo test -p elsecrew-sidecar --lib -- custom_roles app_role orchestration` 37 통과. Cargo.lock은 protocol 의존 한 줄만 바뀜.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 팀 역할 편집 R0·R1·R2·R4 구현과 실제 앱 확인 (`orca/ade-roles`, 기준 feature/ade 12961d04)
 설계: `docs/proposals/m5-custom-roles-plan.md` 3.1절·2장, 4장 Q1~Q8은 추천안대로 결정(조정자 위임). 커밋 c56e4314(R0 기계적 이동) → c90e85de(R1·R2·R4) → bd3cd323(실제 앱 확인 중 수정).
 
@@ -102,7 +113,7 @@ PR #5 보고에 남긴 `tests/m5-renderer-mount-smoke.mts` 실패를 고쳤다. 
 
 - **팀 역할 편집의 규칙(2026-11-26, custom roles R0·R1·R2·R4)**: 화면 `role-settings.tsx`, 순수 함수 `team-draft.ts`(insert/move/duplicate/restore/teamChanges/uniqueRoleName/newMemberId), 템플릿 `role-templates.ts`(TS에만). 현행 설명은 architecture "팀 역할 편집".
   - 목록 순서는 보기 순서다. 실행 순서는 총괄이 정한다(Q1). 새 팀원 ID는 무작위 `member-xxxxxx`이고 지운 기본 역할은 원래 ID로 되살린다.
-  - 이름 규칙(서식 문자 Cf·총괄 이름·중복)은 **저장 요청에만** 적용하고 저장된 기록 읽기에는 적용하지 않는다. Rust·TS가 `tests/fixtures/m5/role-names-v3.json` 한 표를 함께 읽는다. 새 규칙을 더할 때 이 표에 줄을 넣는다.
+  - 이름 규칙(서식 문자 Cf·총괄 이름·중복)은 **저장 요청에만** 적용하고 저장된 기록 읽기에는 적용하지 않는다. 이름은 화면에 보이는 대로 비교한다(NFC, 시드 이름 그대로인 기본 역할의 번역 이름 포함). 번역 이름을 바꾸면 `G5_LEGACY_ROLE_LABELS_V3`(Rust·TS)와 공용 표도 바꾼다. Rust·TS가 `tests/fixtures/m5/role-names-v3.json` 한 표를 함께 읽는다. 새 규칙을 더할 때 이 표에 줄을 넣는다.
   - 총괄이 팀에 없는 역할로 위임하면 한 번 바로잡는다. "총괄 단계의 instruction이 비어 있지 않음 = 바로잡기 뒤"라는 표시로 쓰므로, 총괄 단계에 다른 지시를 넣게 되면 이 판단을 바꿔야 한다(`orchestration.rs` `finish`).
   - 함정: 프로젝트 설정을 저장하면 `RoleSettings`가 revision 키로 다시 마운트돼 컴포넌트 안 상태(안내 문구 등)가 사라진다. 저장 뒤에도 보여야 할 안내는 작업대(`workbench.tsx`)가 들고 있어야 한다.
   - 함정: sidecar 통합 시험(`orchestration_dispatch`)의 fake 에이전트는 `target/debug/elsecrew-sidecar` 실행 파일을 띄운다. `cargo test --lib`만 돌리면 "fake agent control launcher failed: No such file"로 15개가 실패하니 `cargo build -p elsecrew-sidecar`를 먼저 한다.

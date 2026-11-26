@@ -41,31 +41,67 @@ pub fn has_format_character(text: &str) -> bool {
     })
 }
 
-/// Comparison key: whitespace removed, then lowercased (TS `roleNameKey`).
+/// What the screen shows for a starting role while its stored name is still
+/// the seed name (ko, en labels). Names are compared as shown (review PR #8
+/// I1). Must equal TS `G5_LEGACY_ROLE_LABELS_V3` and the locales.
+pub const G5_LEGACY_ROLE_LABELS_V3: &[(&str, &[&str])] = &[
+    ("coordinator", &["총괄", "Coordinator"]),
+    ("planning", &["기획", "Planning"]),
+    ("design", &["디자인", "Design"]),
+    ("coding", &["개발", "Development"]),
+    ("review", &["검증", "Verification"]),
+];
+
+/// Comparison key: NFC, whitespace removed, then lowercased (TS `roleNameKey`).
 pub fn role_name_key(name: &str) -> String {
-    name.chars().filter(|c| !c.is_whitespace()).collect::<String>().to_lowercase()
+    use unicode_normalization::UnicodeNormalization;
+    name.nfc().filter(|c| !c.is_whitespace()).collect::<String>().to_lowercase()
+}
+
+/// Every key a role can be shown as: its stored name, plus the translated
+/// labels of an untouched starting role (TS `roleShownNameKeysV3`).
+pub fn role_shown_name_keys_v3(role_id: &str, name: &str) -> Vec<String> {
+    let mut keys = vec![role_name_key(name)];
+    let untouched = G5_DEFAULT_ROLE_DEFINITIONS_V3.iter().any(|(id, seed, _)| *id == role_id && *seed == name);
+    if untouched {
+        for (_, labels) in G5_LEGACY_ROLE_LABELS_V3.iter().filter(|(id, _)| *id == role_id) {
+            for label in labels.iter() {
+                let key = role_name_key(label);
+                if !keys.contains(&key) {
+                    keys.push(key);
+                }
+            }
+        }
+    }
+    keys
 }
 
 /// Problems a saved name would have, one per role (None = fine): "format",
-/// "coordinatorName" or "duplicate". Applied when settings are saved, never
-/// when a stored record is read, so an older name still opens.
-pub fn role_name_problems_v3(names: &[&str]) -> Vec<Option<&'static str>> {
-    let keys: Vec<String> = names.iter().map(|name| role_name_key(name)).collect();
-    names
+/// "coordinatorName" or "duplicate", comparing names as shown. Applied when
+/// settings are saved, never when a stored record is read, so an older name
+/// still opens. `roles` is (roleId, name) in order.
+pub fn role_name_problems_v3(roles: &[(&str, &str)]) -> Vec<Option<&'static str>> {
+    let keys: Vec<Vec<String>> = roles.iter().map(|(id, name)| role_shown_name_keys_v3(id, name)).collect();
+    let mut coordinator: Vec<String> = keys.first().cloned().unwrap_or_default();
+    coordinator.extend(G5_COORDINATOR_NAME_KEYS_V3.iter().map(|key| key.to_string()));
+    roles
         .iter()
         .enumerate()
-        .map(|(index, name)| {
+        .map(|(index, (_, name))| {
             if has_format_character(name) {
                 return Some("format");
             }
             if index == 0 {
                 return None;
             }
-            if keys[index] == keys[0] || G5_COORDINATOR_NAME_KEYS_V3.contains(&keys[index].as_str()) {
+            if keys[index].iter().any(|key| coordinator.contains(key)) {
                 return Some("coordinatorName");
             }
-            let duplicate = keys.iter().enumerate().any(|(other, key)| {
-                other != index && other != 0 && *key == keys[index] && !has_format_character(names[other])
+            let duplicate = keys.iter().enumerate().any(|(other, other_keys)| {
+                other != index
+                    && other != 0
+                    && !has_format_character(roles[other].1)
+                    && other_keys.iter().any(|key| keys[index].contains(key))
             });
             duplicate.then_some("duplicate")
         })
@@ -468,11 +504,11 @@ fn validate_project_role_settings_update(value: &Value) -> Result<(), G5Contract
     if object.contains_key("roleDefinitions") {
         validate_role_set_v3(object, "roles", true)?;
         // Saving only: stored records keep opening (see role_name_problems_v3).
-        let names: Vec<&str> = array(object.get("roleDefinitions"), "roleDefinitions", G5_ROLES_MAX_V3)?
+        let named: Vec<(&str, &str)> = array(object.get("roleDefinitions"), "roleDefinitions", G5_ROLES_MAX_V3)?
             .iter()
-            .map(|definition| definition["name"].as_str().unwrap_or_default())
+            .map(|definition| (definition["roleId"].as_str().unwrap_or_default(), definition["name"].as_str().unwrap_or_default()))
             .collect();
-        if role_name_problems_v3(&names).iter().any(Option::is_some) {
+        if role_name_problems_v3(&named).iter().any(Option::is_some) {
             return fail("role names must be plain, unique and distinct from the coordinator");
         }
         Ok(())

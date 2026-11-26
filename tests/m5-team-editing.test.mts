@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  G5_DEFAULT_ROLE_DEFINITIONS_V3, G5_FORMAT_CHAR_RANGES_V3, G5_ROLE_ID_PATTERN_V3, G5_ROLE_NAME_MAX_BYTES_V3, G5_ROLE_RESPONSIBILITY_MAX_BYTES_V3,
+  G5_DEFAULT_ROLE_DEFINITIONS_V3, G5_FORMAT_CHAR_RANGES_V3, G5_LEGACY_ROLE_LABELS_V3, G5_ROLE_ID_PATTERN_V3, G5_ROLE_NAME_MAX_BYTES_V3, G5_ROLE_RESPONSIBILITY_MAX_BYTES_V3,
   roleNameProblemsV3, roleSettingsAsV3, utf8ByteLength, validateChatRecordV1, validateProjectRoleSettingsUpdateRequestV1, validateProjectRoleSettingsV1,
   type RoleProfileV1,
 } from "../src/m5/contracts/run-recovery-v1.ts";
@@ -133,7 +133,7 @@ test("template text is bounded, plain and written in both languages", () => {
     const { name, responsibility } = templateText(key, lang);
     assert.ok(utf8ByteLength(name) <= G5_ROLE_NAME_MAX_BYTES_V3 && utf8ByteLength(responsibility) <= G5_ROLE_RESPONSIBILITY_MAX_BYTES_V3, `${key}/${lang}`);
     assert.ok(responsibility.length > 100, `${key}/${lang}`);
-    assert.equal(roleNameProblemsV3(["총괄", name])[1], null, `${key}/${lang}`);
+    assert.equal(roleNameProblemsV3([{ roleId: "coordinator", name: "총괄" }, { roleId: "member-aaaaaa", name }])[1], null, `${key}/${lang}`);
     assert.ok(!looksLikeSecret(responsibility));
     assert.ok(ko[`m5.roles.template.${key}`] && en[`m5.roles.template.${key}`], key);
   }
@@ -157,11 +157,17 @@ test("the coordinator's defaults are the seed", () => {
 });
 
 test("name rules follow the table Rust reads; saving refuses, reading still opens", () => {
-  const table = JSON.parse(readFileSync(new URL("./fixtures/m5/role-names-v3.json", import.meta.url), "utf8")) as { formatRanges: [number, number][]; cases: { note: string; names: string[]; problems: (string | null)[] }[] };
+  const table = JSON.parse(readFileSync(new URL("./fixtures/m5/role-names-v3.json", import.meta.url), "utf8")) as { formatRanges: [number, number][]; legacyLabels: [string, string[]][]; cases: { note: string; roleIds?: string[]; names: string[]; problems: (string | null)[] }[] };
   assert.deepEqual(G5_FORMAT_CHAR_RANGES_V3, table.formatRanges);
-  for (const { note, names, problems } of table.cases) {
-    assert.deepEqual(roleNameProblemsV3(names), problems, note);
-    const roleIds = names.map((_, index) => index === 0 ? "coordinator" : `member-${index}`);
+  assert.deepEqual(G5_LEGACY_ROLE_LABELS_V3, table.legacyLabels);
+  // The labels are what the screen shows (role-names.ts translates these IDs).
+  for (const [roleId, [koLabel, enLabel]] of table.legacyLabels) {
+    assert.equal((ko as Record<string, string>)[`m5.roles.${roleId}`], koLabel);
+    assert.equal((en as Record<string, string>)[`m5.roles.${roleId}`], enLabel);
+  }
+  for (const { note, roleIds: listed, names, problems } of table.cases) {
+    const roleIds = listed ?? names.map((_, index) => index === 0 ? "coordinator" : `member-${index}`);
+    assert.deepEqual(roleNameProblemsV3(roleIds.map((roleId, index) => ({ roleId, name: names[index]! }))), problems, note);
     const roles = roleIds.map(id => profile(id));
     const roleDefinitions = roleIds.map((roleId, index) => ({ roleId, name: names[index]!, responsibility: "" }));
     const ok = problems.every(problem => problem === null);

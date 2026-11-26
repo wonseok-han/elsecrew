@@ -9,8 +9,9 @@ import { roleColorIndex, roleInitial } from "./role-colors.ts";
 import { isLegacyRoleId, roleLabel } from "./role-names.ts";
 import { insertTemplate, ROLE_TEMPLATE_KEYS, templateInTeam, templatePermission, templateText, type RoleTemplateKey } from "./role-templates.ts";
 import { looksLikeSecret } from "./secret-shape.ts";
+import { appDefaultsLoadStep, saveProjectThenAppDefaults, undoLastRemoval, type CombinedSaveOutcome, type UndoConflict } from "./role-editor-actions.ts";
 import { correctSettingsDraft, editSettingsDraft, loadSettingsDraft, settingsDraftDirty, settingsDraftSavable } from "./settings-draft.ts";
-import { canAddWorker, canRemoveWorker, coordinatorDefaults, duplicateWorker, insertWorker, isValidTeamDraft, moveWorker, newMemberId, removedWorker, removeWorker, restoreWorker, sameTeam, teamChanges, teamDraftFrom, uniqueRoleName, updateDefinition, updateProfile, type RemovedWorker, type TeamDraft } from "./team-draft.ts";
+import { canAddWorker, canRemoveWorker, coordinatorDefaults, duplicateWorker, insertWorker, isValidTeamDraft, moveWorker, newMemberId, removedWorker, removeWorker, sameTeam, teamChanges, teamDraftFrom, uniqueRoleName, updateDefinition, updateProfile, type RemovedWorker, type TeamDraft } from "./team-draft.ts";
 
 /** Project team roles (dialog) and the app defaults (settings page). Moved from workbench.tsx (custom roles R0). */
 export type RoleNavigationGuard = { current: ((next: () => void) => void) | null };
@@ -33,15 +34,16 @@ export function AppRoleDefaultsEditor({ disabled, onClose, navigationGuard, acti
     } catch (error) { if (mounted.current && generation.current === epoch) { setError(true); setErrorDetail(error instanceof Error ? error.message : "defaults request failed"); } }
   }, []);
   useEffect(() => { mounted.current = true; if (!disabled) void load(); return () => { mounted.current = false; generation.current++; }; }, [disabled, load]);
-  const save = async (roles: readonly RoleProfileV1[], roleDefinitions: readonly RoleDefinitionV3[]) => {
-    if (!settings) return;
+  const save = async (roles: readonly RoleProfileV1[], roleDefinitions: readonly RoleDefinitionV3[]): Promise<boolean> => {
+    if (!settings) return false;
     const epoch = ++generation.current;
     setError(false); setSaved(false);
     try {
       const request = { action: "updateAppRoleDefaults" as const, expectedRevision: settings.revision, roles, roleDefinitions };
       const result = validateProjectCatalogResult(await window.m5Projects!.request(request), request);
       if (mounted.current && generation.current === epoch && result.action === request.action) { setSettings({ ...result.settings, projectId: "app_defaults" }); setSaved(true); }
-    } catch (error) { if (mounted.current && generation.current === epoch) { setError(true); setErrorDetail(error instanceof Error ? error.message : "defaults request failed"); } }
+      return true;
+    } catch (error) { if (mounted.current && generation.current === epoch) { setError(true); setErrorDetail(error instanceof Error ? error.message : "defaults request failed"); } return false; }
   };
   if (!settings) return <section className="m5-notice" role="status">
     <p>{t(error ? "m5.roles.appDefaultsError" : "m5.roles.busy")}</p>
@@ -67,7 +69,7 @@ async function readAppDefaults(): Promise<{ team: TeamDraft; revision: number } 
   return result.action === request.action ? { team: teamDraftFrom(result.settings), revision: result.settings.revision } : null;
 }
 
-export function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, onReload, onClose, returnToDraft = false, projectName, scope = "project", activeTasks = 0, onAppDefaultsSaved }: { navigationGuard?: RoleNavigationGuard; scope?: "project" | "app"; settings: NonNullable<ReturnType<ChatUiController["snapshot"]>["settings"]>; activeChat: ReturnType<ChatUiController["snapshot"]>["activeChat"]; disabled: boolean; feedback: ReactNode; onSave: (roles: readonly RoleProfileV1[], roleDefinitions: readonly RoleDefinitionV3[]) => Promise<void>; onReload: () => Promise<void>; onClose: () => void; returnToDraft?: boolean; projectName: string; activeTasks?: number; onAppDefaultsSaved?: () => void }) {
+export function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, onReload, onClose, returnToDraft = false, projectName, scope = "project", activeTasks = 0, onAppDefaultsResult, knownRoleIds = [] }: { navigationGuard?: RoleNavigationGuard; scope?: "project" | "app"; settings: NonNullable<ReturnType<ChatUiController["snapshot"]>["settings"]>; activeChat: ReturnType<ChatUiController["snapshot"]>["activeChat"]; disabled: boolean; feedback: ReactNode; onSave: (roles: readonly RoleProfileV1[], roleDefinitions: readonly RoleDefinitionV3[]) => Promise<boolean>; onReload: () => Promise<void>; onClose: () => void; returnToDraft?: boolean; projectName: string; activeTasks?: number; onAppDefaultsResult?: (outcome: CombinedSaveOutcome) => void; knownRoleIds?: readonly string[] }) {
   const { t, lang } = useI18n();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const initial = useMemo(() => teamDraftFrom(settings), [settings]);
@@ -80,7 +82,8 @@ export function RoleSettings({ navigationGuard, settings, disabled, feedback, on
   const roles = team.roles;
   const [selectedRole, setSelectedRole] = useState<RoleProfileV1["roleId"]>("coordinator");
   const [busy, setBusy] = useState(false);
-  const [discardAction, setDiscardAction] = useState<"close" | "reload" | null>(null);
+  const [discardAction, setDiscardAction] = useState<"close" | "reload" | "appDefaults" | null>(null);
+  const [undoConflict, setUndoConflict] = useState<UndoConflict | null>(null);
   // Role IDs are user-visible opaque strings; a Map avoids prototype keys such as `constructor`.
   const [choices, setChoices] = useState<ReadonlyMap<string, ModelChoicesResult["models"]>>(() => new Map());
   const [choicesError, setChoicesError] = useState(false);
@@ -94,14 +97,19 @@ export function RoleSettings({ navigationGuard, settings, disabled, feedback, on
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [focusTarget, setFocusTarget] = useState<{ roleId: string; part: "row" | "name" } | null>(null);
-  const [appDefaults, setAppDefaults] = useState<"loaded" | "saved" | "error" | null>(null);
+  const [appDefaults, setAppDefaults] = useState<"loaded" | "error" | null>(null);
   // Every ID the team had while this screen was open: a new member never takes one (R2).
   const taken = useRef(new Set<string>());
   const rowButtons = useRef(new Map<string, HTMLButtonElement>());
   const menuButtons = useRef(new Map<string, HTMLButtonElement>());
   const nameInput = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  // The element that opened the current menu; Escape returns the focus there (review m2).
+  const menuOpener = useRef<HTMLElement | null>(null);
+  const openMenu = (next: MenuState, opener: HTMLElement | null) => { menuOpener.current = opener; setMenu(next); };
   for (const role of roles) taken.current.add(role.roleId);
+  // Roles of this project's tasks keep report files under their IDs: a new member never takes one (review m1).
+  for (const roleId of knownRoleIds) taken.current.add(roleId);
   useEffect(() => {
     choiceEpoch.current += 1;
     setChoices(new Map()); setChoicesError(false);
@@ -192,7 +200,7 @@ export function RoleSettings({ navigationGuard, settings, disabled, feedback, on
   const define = (roleId: string, field: "name" | "responsibility", value: string) => setTeam(old => updateDefinition(old, roleId, { [field]: value }));
   const valid = isValidTeamDraft(team);
   const editing = disabled || busy || discardAction !== null;
-  const run = async (action: () => Promise<void>) => { setBusy(true); try { await action(); } finally { setBusy(false); } };
+  const run = async (action: () => Promise<unknown>) => { setBusy(true); try { await action(); } finally { setBusy(false); } };
   const pendingNavigation = useRef<(() => void) | null>(null);
   const finishClose = () => { const next = pendingNavigation.current; pendingNavigation.current = null; if (next) next(); else onClose(); };
   useLayoutEffect(() => {
@@ -258,11 +266,11 @@ export function RoleSettings({ navigationGuard, settings, disabled, feedback, on
   };
   const undoRemove = () => {
     const entry = removed[removed.length - 1];
-    if (!entry || full) return;
-    const next = restoreWorker(team, entry);
-    setRemoved(old => old.slice(0, -1));
-    if (next === team) return;
-    setTeam(next); setSelectedRole(entry.profile.roleId); setFocusTarget({ roleId: entry.profile.roleId, part: "row" });
+    const result = undoLastRemoval(team, removed);
+    setUndoConflict(result.conflict);
+    if (!entry || result.conflict) return;
+    setTeam(result.team); setRemoved(result.removed);
+    setSelectedRole(entry.profile.roleId); setFocusTarget({ roleId: entry.profile.roleId, part: "row" });
   };
   const templateLabel = (key: RoleTemplateKey) => key === "planning" || key === "design" || key === "coding" || key === "review" ? t(`m5.roles.${key}`) : templateText(key, lang).name;
   const rowKeys = (event: KeyboardEvent<HTMLButtonElement>, roleId: string) => {
@@ -283,7 +291,7 @@ export function RoleSettings({ navigationGuard, settings, disabled, feedback, on
   const menuKeys = (event: KeyboardEvent<HTMLDivElement>, returnTo: () => HTMLElement | null | undefined) => {
     const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
     const current = items.indexOf(document.activeElement as HTMLButtonElement);
-    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setMenu(null); returnTo()?.focus(); }
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setMenu(null); (menuOpener.current?.isConnected ? menuOpener.current : returnTo())?.focus(); }
     else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       items[(current + (event.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
@@ -309,7 +317,8 @@ export function RoleSettings({ navigationGuard, settings, disabled, feedback, on
     }
     setDragging(null); setDropIndex(null);
   };
-  const nameProblems = roleNameProblemsV3(team.roleDefinitions.map(item => item.name));
+  useEffect(() => { setUndoConflict(null); }, [team]);
+  const nameProblems = roleNameProblemsV3(team.roleDefinitions);
   const problemOf = (roleId: string) => nameProblems[position(roleId)] ?? null;
   const changes = teamChanges(draft.baseline, team);
   const changeParts = [
@@ -320,6 +329,7 @@ export function RoleSettings({ navigationGuard, settings, disabled, feedback, on
   ].filter(Boolean).join(", ");
   const noWriter = !roles.some(role => role.permission === "workspaceWrite");
   const blankResponsibility = team.roleDefinitions.some(item => item.roleId !== "coordinator" && isBlankText(item.responsibility));
+  const requestAppDefaults = () => { if (appDefaultsLoadStep(dirty) === "confirm") setDiscardAction("appDefaults"); else void run(loadAppDefaults); };
   const loadAppDefaults = async () => {
     setAppDefaults(null);
     try {
@@ -328,18 +338,18 @@ export function RoleSettings({ navigationGuard, settings, disabled, feedback, on
       setTeam(defaults.team); setRemoved([]); setSelectedRole("coordinator"); setAppDefaults("loaded");
     } catch { setAppDefaults("error"); }
   };
-  // The app defaults first: if they cannot be saved, the project's team is not saved either.
+  // The project's team first, then the app defaults (role-editor-actions.ts).
+  // Saving the project remounts this screen, so the workbench shows the outcome.
   const saveWithAppDefaults = async () => {
     setAppDefaults(null);
-    try {
+    const saved = team;
+    const outcome = await saveProjectThenAppDefaults(() => onSave(saved.roles, saved.roleDefinitions), async () => {
       const defaults = await readAppDefaults();
-      if (!defaults || !window.m5Projects) { setAppDefaults("error"); return; }
-      const request = { action: "updateAppRoleDefaults" as const, expectedRevision: defaults.revision, roles: team.roles, roleDefinitions: team.roleDefinitions };
+      if (!defaults || !window.m5Projects) throw new Error("app defaults unavailable");
+      const request = { action: "updateAppRoleDefaults" as const, expectedRevision: defaults.revision, roles: saved.roles, roleDefinitions: saved.roleDefinitions };
       validateProjectCatalogResult(await window.m5Projects.request(request), request);
-      // Saving the project remounts this screen: the workbench keeps the notice.
-      setAppDefaults("saved"); onAppDefaultsSaved?.();
-    } catch { setAppDefaults("error"); return; }
-    await onSave(team.roles, team.roleDefinitions);
+    });
+    onAppDefaultsResult?.(outcome);
   };
   const selected = roles.find(role => role.roleId === selectedRole) ?? roles[0]!;
   const selectedDefinition = team.roleDefinitions.find(item => item.roleId === selected.roleId);
@@ -369,7 +379,7 @@ export function RoleSettings({ navigationGuard, settings, disabled, feedback, on
     </div>;
   };
   const insertLine = (index: number) => <button type="button" tabIndex={-1} className="m5-team-insert" data-drop={dropIndex === index ? "true" : undefined} aria-label={t("m5.roles.insertHere")} title={t("m5.roles.insertHere")} disabled={editing || full}
-    onClick={() => setMenu({ kind: "add", index, anchor: roles[index - 1]?.roleId ?? null })}><span aria-hidden="true">+</span></button>;
+    onClick={event => openMenu({ kind: "add", index, anchor: roles[index - 1]?.roleId ?? null }, event.currentTarget)}><span aria-hidden="true">+</span></button>;
   const responsibilityBytes = nameBytes(selectedDefinition?.responsibility ?? "");
   const selectedName = selectedDefinition?.name ?? "";
   const selectedProblem = problemOf(selected.roleId);
@@ -381,13 +391,12 @@ export function RoleSettings({ navigationGuard, settings, disabled, feedback, on
     {scope !== "app" && activeTasks > 0 && <p className="m5-team-running" role="status">{t("m5.roles.runningTasks", { count: activeTasks })}</p>}
     {feedback}
     {appDefaults === "loaded" && <p role="status">{t("m5.roles.appDefaultsLoaded")}</p>}
-    {appDefaults === "saved" && <p role="status">{t("m5.roles.appDefaultsAlsoSaved")}</p>}
     {appDefaults === "error" && <p role="alert">{t("m5.roles.appDefaultsError")}</p>}
     {!dirty && savable && <p className="m5-settings-filled">{t("m5.roles.filledNotSaved")}</p>}
     {discardAction && <section role="alertdialog" aria-label={t("m5.roles.discardLabel")}>
-      <p>{t("m5.roles.discardQuestion")}</p>
+      <p>{t(discardAction === "appDefaults" ? "m5.roles.discardQuestionApp" : "m5.roles.discardQuestion")}</p>
       <button type="button" onClick={() => setDiscardAction(null)}>{t("m5.roles.keep")}</button>
-      <button type="button" disabled={disabled || busy} onClick={() => { const action = discardAction; setDiscardAction(null); if (action === "close") finishClose(); else void run(onReload); }}>{t(discardAction === "close" ? "m5.roles.discardClose" : "m5.roles.discardReload")}</button>
+      <button type="button" disabled={disabled || busy} onClick={() => { const action = discardAction; setDiscardAction(null); if (action === "close") finishClose(); else if (action === "appDefaults") void run(loadAppDefaults); else void run(onReload); }}>{t(discardAction === "close" ? "m5.roles.discardClose" : discardAction === "appDefaults" ? "m5.roles.discardLoadApp" : "m5.roles.discardReload")}</button>
     </section>}
     <details className="m5-settings-help"><summary>{t("m5.roles.how")}</summary><p>{t("m5.roles.help")}</p><p>{t("m5.roles.teamHelp")}</p></details>
     {choicesError && <p role="alert">{t("m5.roles.choicesError")}</p>}
@@ -415,7 +424,7 @@ export function RoleSettings({ navigationGuard, settings, disabled, feedback, on
             <span className="m5-team-badge" data-permission={role.permission}>{t(role.permission === "readOnly" ? "m5.roles.readOnlyBadge" : "m5.roles.writeBadge")}</span>
             <button type="button" className="m5-team-more" disabled={editing} aria-haspopup="menu" aria-expanded={menu?.kind === "row" && menu.roleId === role.roleId}
               aria-label={t("m5.roles.menu", { name })} ref={element => { if (element) menuButtons.current.set(role.roleId, element); else menuButtons.current.delete(role.roleId); }}
-              onClick={() => setMenu(old => old?.kind === "row" && old.roleId === role.roleId ? null : { kind: "row", roleId: role.roleId })}>⋯</button>
+              onClick={event => openMenu(menu?.kind === "row" && menu.roleId === role.roleId ? null : { kind: "row", roleId: role.roleId }, event.currentTarget)}>⋯</button>
             {menu?.kind === "row" && menu.roleId === role.roleId && rowMenu(role, index)}
             {menu?.kind === "add" && menu.anchor === role.roleId && addMenu(menu.index, role.roleId)}
           </li>;
@@ -424,7 +433,7 @@ export function RoleSettings({ navigationGuard, settings, disabled, feedback, on
       </ol>
       <div className="m5-team-foot">
         <button type="button" className="m5-secondary m5-team-add-button" disabled={editing} aria-haspopup="menu" aria-expanded={menu?.kind === "add" && menu.anchor === null}
-          onClick={() => setMenu(old => old?.kind === "add" && old.anchor === null ? null : { kind: "add", index: roles.length, anchor: null })}>{t("m5.roles.addMenu")} ▾</button>
+          onClick={event => openMenu(menu?.kind === "add" && menu.anchor === null ? null : { kind: "add", index: roles.length, anchor: null }, event.currentTarget)}>{t("m5.roles.addMenu")} ▾</button>
         <small>{t("m5.roles.moveHint")}</small>
         {menu?.kind === "add" && menu.anchor === null && addMenu(menu.index, null)}
       </div>
@@ -489,8 +498,9 @@ export function RoleSettings({ navigationGuard, settings, disabled, feedback, on
     </div>
     <footer className="m5-settings-actions m5-team-actions">
     <p className="m5-team-unsaved" role="status">{dirty ? t("m5.roles.unsaved", { parts: changeParts || t("m5.roles.changeEdited", { count: 0 }) }) : ""}</p>
-    {removed.length > 0 && <button type="button" className="m5-secondary" disabled={editing || full} onClick={undoRemove}>{t("m5.roles.undoRemove", { name: roleLabel(removed[removed.length - 1]!.profile.roleId, [removed[removed.length - 1]!.definition], t) })}</button>}
-    {scope !== "app" && <button type="button" className="m5-secondary" disabled={editing || !window.m5Projects} onClick={() => void run(loadAppDefaults)}>{t("m5.roles.loadApp")}</button>}
+    {undoConflict && removed.length > 0 && <p className="m5-team-undo-conflict" role="alert">{t(undoConflict === "sameId" ? "m5.roles.undoConflictSameId" : "m5.roles.undoConflictFull", { name: roleLabel(removed[removed.length - 1]!.profile.roleId, [removed[removed.length - 1]!.definition], t) })}</p>}
+    {removed.length > 0 && <button type="button" className="m5-secondary" disabled={editing} onClick={undoRemove}>{t("m5.roles.undoRemove", { name: roleLabel(removed[removed.length - 1]!.profile.roleId, [removed[removed.length - 1]!.definition], t) })}</button>}
+    {scope !== "app" && <button type="button" className="m5-secondary" disabled={editing || !window.m5Projects} onClick={requestAppDefaults}>{t("m5.roles.loadApp")}</button>}
     {scope !== "app" && <button type="button" className="m5-secondary" disabled={editing || !valid || !window.m5Projects} onClick={() => void run(saveWithAppDefaults)}>{t("m5.roles.saveWithApp")}</button>}
     <button className="m5-secondary" type="button" title={t("m5.roles.reloadHelp")} disabled={editing} onClick={() => dirty ? setDiscardAction("reload") : void run(onReload)}>{t("m5.roles.reload")}</button>
     <button type="button" className="m5-team-save" disabled={editing || !valid || !savable} onClick={() => void run(() => onSave(team.roles, team.roleDefinitions))}>{t(busy ? "m5.roles.busy" : scope === "app" ? "m5.roles.appSave" : "m5.roles.save")}</button>

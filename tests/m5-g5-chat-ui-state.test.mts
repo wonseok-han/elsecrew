@@ -375,8 +375,10 @@ test("settings save failure and explicit reload preserve the active chat and set
   await controller.commitPrepared("chat_a", true);
   const before = controller.snapshot();
   assert.equal(before.activeChat?.chatId, "chat_a");
+  const working = bridge.updateProjectRoleSettings;
   bridge.updateProjectRoleSettings = async () => { throw new Error("offline"); };
-  await controller.updateSettings(roles);
+  // The caller learns the save failed (review PR #8 I4: no "also saved" notice after a failed project save).
+  assert.equal(await controller.updateSettings(roles), false);
   assert.equal(controller.snapshot().error?.messageKey, "m5.chatError.settingsSave");
   assert.equal(controller.snapshot().error?.detail, "offline");
   assert.equal(controller.snapshot().settings, before.settings);
@@ -385,6 +387,7 @@ test("settings save failure and explicit reload preserve the active chat and set
   bridge.revision = 2;
   await controller.reloadSettings();
   assert.equal(controller.snapshot().settings?.revision, 2);
+  bridge.updateProjectRoleSettings = working;
   assert.equal(controller.snapshot().noticeKey, "m5.chatNotice.settingsLoaded");
   assert.equal(controller.snapshot().notice, "저장된 역할과 모델을 다시 불러왔어요.");
   assert.equal(controller.snapshot().activeChat, before.activeChat);
@@ -393,6 +396,8 @@ test("settings save failure and explicit reload preserve the active chat and set
   bridge.getProjectRoleSettings = async () => { throw new Error("offline"); };
   await controller.reloadSettings();
   assert.equal(controller.snapshot().settings, loaded);
+  assert.equal(await controller.updateSettings(roles), true, "a saved team reports success");
+  assert.equal(controller.snapshot().settings?.revision, 3);
   controller.dispose();
 });
 

@@ -276,6 +276,121 @@
     null,
     "format"
    ]
+  },
+  {
+   "note": "review PR #8 I1: an untouched starting role is shown translated, so 'Planning' meets '기획'",
+   "roleIds": [
+    "coordinator",
+    "planning",
+    "member-a7k2q9"
+   ],
+   "names": [
+    "총괄",
+    "기획",
+    "Planning"
+   ],
+   "problems": [
+    null,
+    "duplicate",
+    "duplicate"
+   ]
+  },
+  {
+   "note": "a renamed starting role is shown as stored",
+   "roleIds": [
+    "coordinator",
+    "planning",
+    "member-a7k2q9"
+   ],
+   "names": [
+    "총괄",
+    "리서치",
+    "Planning"
+   ],
+   "problems": [
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "note": "the English label of another starting role",
+   "roleIds": [
+    "coordinator",
+    "coding",
+    "member-a7k2q9"
+   ],
+   "names": [
+    "총괄",
+    "개발",
+    "development"
+   ],
+   "problems": [
+    null,
+    "duplicate",
+    "duplicate"
+   ]
+  },
+  {
+   "note": "canonically equal spellings (NFD Hangul) are the same name",
+   "names": [
+    "총괄",
+    "기획",
+    "기획"
+   ],
+   "problems": [
+    null,
+    "duplicate",
+    "duplicate"
+   ]
+  },
+  {
+   "note": "an NFD coordinator name is still the coordinator",
+   "names": [
+    "총괄",
+    "총괄"
+   ],
+   "problems": [
+    null,
+    "coordinatorName"
+   ]
   }
+ ],
+ "legacyLabels": [
+  [
+   "coordinator",
+   [
+    "총괄",
+    "Coordinator"
+   ]
+  ],
+  [
+   "planning",
+   [
+    "기획",
+    "Planning"
+   ]
+  ],
+  [
+   "design",
+   [
+    "디자인",
+    "Design"
+   ]
+  ],
+  [
+   "coding",
+   [
+    "개발",
+    "Development"
+   ]
+  ],
+  [
+   "review",
+   [
+    "검증",
+    "Verification"
+   ]
+  ]
  ]
 }

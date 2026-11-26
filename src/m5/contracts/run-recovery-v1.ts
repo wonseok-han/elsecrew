@@ -59,24 +59,47 @@ export function hasFormatCharacter(text: string): boolean {
   return false;
 }
 
-/** Comparison key: every White_Space character removed, then lowercased (Rust: `char::is_whitespace`, `to_lowercase`). */
+/**
+ * What the screen shows for a starting role while its stored name is still
+ * the seed name: the translated labels (ko, en; `m5.roles.<id>`). Names are
+ * compared as shown, so these count too (review PR #8 I1). Must equal Rust
+ * `G5_LEGACY_ROLE_LABELS_V3` and the locales.
+ */
+export const G5_LEGACY_ROLE_LABELS_V3: readonly (readonly [string, readonly string[]])[] = [
+  ["coordinator", ["총괄", "Coordinator"]], ["planning", ["기획", "Planning"]], ["design", ["디자인", "Design"]],
+  ["coding", ["개발", "Development"]], ["review", ["검증", "Verification"]],
+];
+
+/**
+ * Comparison key: NFC (canonically equal spellings meet), every White_Space
+ * character removed, then lowercased (Rust: `nfc`, `char::is_whitespace`, `to_lowercase`).
+ */
 export function roleNameKey(name: string): string {
-  return name.replace(/\p{White_Space}/gu, "").toLowerCase();
+  return name.normalize("NFC").replace(/\p{White_Space}/gu, "").toLowerCase();
+}
+
+/** Every key a role can be shown as: its stored name, plus the translated labels of an untouched starting role. */
+export function roleShownNameKeysV3(roleId: string, name: string): readonly string[] {
+  const keys = new Set([roleNameKey(name)]);
+  const seed = G5_DEFAULT_ROLE_DEFINITIONS_V3.find(definition => definition.roleId === roleId);
+  if (seed && seed.name === name) for (const label of G5_LEGACY_ROLE_LABELS_V3.find(([id]) => id === roleId)?.[1] ?? []) keys.add(roleNameKey(label));
+  return [...keys];
 }
 
 /**
  * Problems a saved name would have, one per role in order (null = fine).
+ * Names are compared as the screen shows them (`roleShownNameKeysV3`).
  * Applied when settings are saved, never when a stored record is read, so an
  * older name that breaks a rule still opens and the screen asks to rename it.
  */
-export function roleNameProblemsV3(names: readonly string[]): readonly (RoleNameProblemV3 | null)[] {
-  const keys = names.map(roleNameKey);
-  const coordinator = new Set([keys[0], ...G5_COORDINATOR_NAME_KEYS_V3]);
-  return names.map((name, index) => {
-    if (hasFormatCharacter(name)) return "format";
+export function roleNameProblemsV3(definitions: readonly Pick<RoleDefinitionV3, "roleId" | "name">[]): readonly (RoleNameProblemV3 | null)[] {
+  const keys = definitions.map(definition => roleShownNameKeysV3(definition.roleId, definition.name));
+  const coordinator = new Set([...(keys[0] ?? []), ...G5_COORDINATOR_NAME_KEYS_V3]);
+  return definitions.map((definition, index) => {
+    if (hasFormatCharacter(definition.name)) return "format";
     if (index === 0) return null;
-    if (coordinator.has(keys[index])) return "coordinatorName";
-    const duplicate = keys.some((key, other) => other !== index && other !== 0 && key === keys[index] && !hasFormatCharacter(names[other]));
+    if (keys[index]!.some(key => coordinator.has(key))) return "coordinatorName";
+    const duplicate = keys.some((other, at) => at !== index && at !== 0 && !hasFormatCharacter(definitions[at]!.name) && other.some(key => keys[index]!.includes(key)));
     return duplicate ? "duplicate" : null;
   });
 }
@@ -448,7 +471,7 @@ export function validateProjectRoleSettingsUpdateRequestV1(value: unknown): Proj
   if (v3) {
     validateRoleSetV3(object.roles, object.roleDefinitions, "roles", true);
     // Saving only: stored records keep opening (see roleNameProblemsV3).
-    if (roleNameProblemsV3((object.roleDefinitions as readonly RoleDefinitionV3[]).map(definition => definition.name)).some(Boolean)) fail("role names must be plain, unique and distinct from the coordinator");
+    if (roleNameProblemsV3(object.roleDefinitions as readonly RoleDefinitionV3[]).some(Boolean)) fail("role names must be plain, unique and distinct from the coordinator");
   } else validateRoleSet(object.roles, "roles");
   return object as unknown as ProjectRoleSettingsUpdateRequestV1;
 }

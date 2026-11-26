@@ -1,5 +1,5 @@
 import {
-  G5_COORDINATOR_ROLE_ID, G5_DEFAULT_ROLE_DEFINITIONS_V3, G5_ROLE_NAME_MAX_BYTES_V3, G5_ROLES_MAX_V3, roleNameKey, roleSettingsAsV3, sameJsonValue,
+  G5_COORDINATOR_NAME_KEYS_V3, G5_COORDINATOR_ROLE_ID, G5_DEFAULT_ROLE_DEFINITIONS_V3, G5_ROLE_NAME_MAX_BYTES_V3, G5_ROLES_MAX_V3, roleNameKey, roleSettingsAsV3, roleShownNameKeysV3, sameJsonValue,
   utf8ByteLength, validateProjectRoleSettingsUpdateRequestV1,
   type ProjectRoleSettingsV1, type RoleDefinitionV3, type RoleProfileV1,
 } from "./contracts/run-recovery-v1.ts";
@@ -136,11 +136,13 @@ export function coordinatorDefaults(): Pick<RoleDefinitionV3, "name" | "responsi
 }
 
 /**
- * `base` if no role is called that (ignoring spaces and case), else
+ * `base` if no role is shown under that name (ignoring spaces, case and
+ * Unicode spelling), else
  * `base 2`, `base 3` … — shortened so the name stays within 64 bytes.
  */
 export function uniqueRoleName(draft: TeamDraft, base: string, reserved: readonly string[] = []): string {
-  const used = new Set([...draft.roleDefinitions.map(item => item.name), ...reserved].map(roleNameKey));
+  // Compared as shown: an untouched starting role also counts as its translated labels (review PR #8 I1).
+  const used = new Set([...draft.roleDefinitions.flatMap(item => roleShownNameKeysV3(item.roleId, item.name)), ...reserved.map(roleNameKey), ...G5_COORDINATOR_NAME_KEYS_V3]);
   const fit = (text: string, suffix: string) => {
     let chars = Array.from(text);
     while (chars.length > 1 && utf8ByteLength(chars.join("") + suffix) > G5_ROLE_NAME_MAX_BYTES_V3) chars = chars.slice(0, -1);
