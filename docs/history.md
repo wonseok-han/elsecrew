@@ -2,6 +2,116 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #18 3차 확인(B1 두 점) 반영 (`orca/ade-multiproject-a`)
+3차 확인 `~/Documents/elsecrew-ade-multiproject-2026-11-26/REVIEW-pr18-3.md`(대상 6859a030). B2는 해결로 확인됐다.
+
+- **원본 겹침도 첫 쓰기 전에**: 새 작업 폴더를 만들기 전의 `refuse_new_task_folder`가 기존 작업 공간뿐 아니라 그 프로젝트 자신·앱 데이터·다른 저장된 프로젝트와의 겹침도 본다. 이전에는 `~/elsecrew` 프로젝트에 `~/elsecrew/workspaces`를 쓰면 `workspaces/elsecrew`를 만든 뒤 거절했다.
+  - 시험: `a_task_folder_inside_the_project_itself_is_refused_before_anything_is_made`(프로젝트 안, 앱 데이터 안, 다른 프로젝트 안 → 거절되고 폴더에 아무것도 없음)
+- **Windows 경로 비교**: 경로를 구성 요소로 비교하는 순수 함수 `path_key_components`로 바꿨다. 구분자, `\\?\`·UNC 접두사, 드라이브 문자, 대소문자를 처리한다. 기록된 작업 공간 경로를 풀 수 없을 때는 폴더가 없는 경우만 기록 그대로 비교하고, 그 밖의 오류는 거절한다.
+  - 시험: `elsecrew-core` `path_key::tests::windows_paths_compare_by_components_case_prefix_and_separator`, `unix_paths_compare_by_components`. 함수를 `elsecrew-core::path_key`로 옮겨 macOS·Windows CI의 기준선 하네스(`cargo test -p elsecrew-core`)에서 돈다. sidecar CI는 sidecar 시험을 돌리지 않는다.
+- **검증**
+  - `cargo test -p elsecrew-sidecar`: 941 통과, 1 실패(`a_sign_in_hold_survives_a_device_renumbering_only_with_the_same_inodes`). 이 시험은 단독으로 3회 연속 통과했고, 직전 전체 실행(939)에서도 통과했다. 이번 변경은 로그인 잠금 코드를 건드리지 않아 병렬 실행 중 간헐 실패로 본다. 원인은 확인하지 않았다.
+  - 관련 시험 10개 통과.
+  - CI(041d91ef) macOS·Windows·website·GitGuardian 통과. Windows 기준선 하네스 기록에서 `path_key::tests` 두 시험이 통과한 것을 확인했다.
+
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #18 재확인(B1·B2 부분 해결) 반영 (`orca/ade-multiproject-a`)
+재확인 `~/Documents/elsecrew-ade-multiproject-2026-11-26/REVIEW-pr18-2.md`(대상 13081fd3).
+
+- **B1**
+  - 겹침 검사를 모든 초기화보다 앞으로 옮겼다. `project.open`은 빈 폴더 Git 기록이나 일반 폴더 링크를 만들기 전에 `refuse_workspace_overlap`을 한다. 새 작업 폴더는 `create_dir_all` 전에 `refuse_new_task_folder`를 한다.
+  - 선택 폴더는 실제 경로로 풀리지 않으면 거절한다. 비교는 구성 요소 단위이고, macOS에서는 대소문자를 무시한다.
+  - `.git/commondir`가 있는 저장소는 등록에서 거절한다. 쓰기 범위의 git 폴더는 `commondir`을 따라간다.
+  - 시험
+    - `nothing_is_written_before_an_overlapping_folder_is_refused`(빈 폴더·일반 폴더·작업 공간 안을 가리키는 옛 작업 공간 폴더 설정 → 폴더에 아무것도 생기지 않음)
+    - `a_shared_common_git_folder_is_refused_and_case_does_not_split_a_folder`
+  - 실행 중 링크·디렉터리 신원이 바뀌는 경합(같은 사용자가 의도적으로 바꾸는 경우)은 기존 위협 모형처럼 보장 범위 밖이다. 저장·합치기의 하위 경로는 링크를 따라가지 않는 열기·핸들 검사를 그대로 쓴다.
+- **B2**: 저장을 전부 아니면 무변경으로 바꿨다. 새 초안이 통째로 들어가지 않으면 다른 작업의 초안도, 이 작업 공간의 이전 초안(여러 파일)도 그대로다.
+  - 시험
+    - "a save over the bound leaves this workspace's earlier drafts of several files whole"
+    - 속성 시험 "property: whatever the order, a draft store only ever changes by a whole save or a forget"(무작위 40판 × 80단계: 저장·잊기·떠나기·한도 초과·쓰기 거절)
+    - 보관소 한도 시험 갱신
+- **검증**
+  - `cargo test -p elsecrew-sidecar` 단위 939, 통합 16 통과.
+  - `npm test` 1008/1008, build, 렌더러 스모크 69/69.
+  - CI(d9fc2071) macOS·Windows·website·GitGuardian 모두 통과.
+
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #18 독립 검토(차단 2·중요 3·경미 1) 반영 (`orca/ade-multiproject-a`)
+검토 `~/Documents/elsecrew-ade-multiproject-2026-11-26/REVIEW-pr18.md`(대상 82284ace). PR-B(`orca/ade-multiproject-b`, 로컬 WIP 커밋)는 이 수정이 머지될 때까지 멈췄다.
+
+- **B1 경로 겹침**
+  - 차단 판단을 작업 ID에서 실제 쓰기 경로로 바꿨다(`project/write_scope.rs` `WriteScope`: 작업 공간·프로젝트 폴더·저장소 git 폴더, 링크 해석). git 폴더가 같거나 폴더가 서로 안에 있으면 같은 잠금이다. 같은 저장소의 작업끼리는 이제 서로 기다린다. 경로를 구하지 못하면 fail closed.
+  - 등록에서도 거절한다: 작업 공간 안이나 작업 공간을 담은 프로젝트, 작업 공간 안의 작업 공간 폴더, 기존 작업 공간과 겹치는 새 작업 폴더.
+  - 시험
+    - `a_project_or_workspace_folder_overlapping_a_tasks_workspace_is_refused`
+    - `write_scopes_meet_on_a_shared_repository_or_nested_folders`
+    - 경합 시험을 고침: 같은 저장소 C는 거절. 다른 저장소 B는 실제 저장(시작·조각·확정)과 합치기, D는 실제 버리기. A의 쓰기 회차가 그 사이에 늘었음을 확인한다.
+- **B2 초안 유실**: 보관소가 다른 작업의 초안을 지우지 않고, 읽을 수 없는 옛 항목을 그대로 두며, 쓰기 거절 때 있던 것을 지우지 않게 바꿨다. 같은 작업의 다른 작업 공간 항목도 덮지 않는다. 못 넣는 새 초안은 보관하지 않고 `save`가 false를 돌려준다.
+  - 시험: "kept drafts survive other saves: …", "leaving keeps another task's earlier draft; when the store is full the view stays …", 보관소 한도 시험 갱신.
+- **I1**: 초안 보관 확인을 `releaseView` 앞으로 옮겼다(`prepareLeaveKeepingDrafts`). 실패하면 감시를 떼지 않고 그대로 머물러 이유를 보인다. 시험 "the switch keeps drafts before it lets go; …"
+- **I2**: 작업 읽기에 실패한 승인 요청은 다음 목록에서 다시 다룬다. 질문 알림은 몇 번 다시 읽는다. 시험 "an approval whose task read failed once is announced on the next list"
+- **I3**: 엔진 `workStatus`(모든 프로젝트의 바쁜 작업)로 업데이트 다시 시작과 배너를 판단한다. 읽지 못하면 일하는 중으로 본다.
+- **M1**: 카드가 지금 대화 페이지에 없으면 그 페이지를 열고 카드로 간다(`revealStage`).
+- **실제 앱(네이티브 스모크)**: 앱을 닫고 다시 여는 단계를 더했다. 두 프로젝트가 일하는 중에 닫고 같은 앱 데이터로 열면, 두 실행 모두 `canceled`로 정리되고 두 작업을 오갈 수 있었다. 두 단계 모두 PASS.
+  - 발견: 다시 열 때 main이 엔진에 `--storage-seal`을 넘긴다. fixture 스모크의 spawn 대체가 이를 그대로 넘겨야 한다.
+- **검증**
+  - `npm test` 1000/1000, build.
+  - 렌더러 스모크 69/69. 가짜 bridge에 `workStatus` 답을 추가했다. 없으면 '일하는 중'으로 판단해 업데이트 준비 검사가 실패한다.
+  - `cargo test -p elsecrew-sidecar` 단위 928 통과(무시 45), 통합 16 통과.
+  - feature/ade(PR #17 병합 f2d50132)를 병합했다(history 맨 위 엔트리 충돌만 있었고 양쪽 모두 남김, `m5:check:history` 누락 0). 병합 뒤 관련 sidecar 31개와 `npm test` 1006/1006을 다시 돌려 통과했다. CI(12f8d429) macOS·Windows·website·GitGuardian 모두 통과.
+
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 여러 프로젝트 동시 작업 PR-A: 단계 막대 전체 보기·실행 중 전환·작업 단위 쓰기 차단 (`orca/ade-multiproject-a`, 기준 feature/ade 331a206d)
+계획·조사 `~/Documents/elsecrew-ade-multiproject-2026-11-26/PLAN.md`(본문 + 부록 "Orca 방식과 비교"). 현행 설명은 architecture "여러 프로젝트 동시 작업".
+
+- **조사 결과(코드 변경 전, 같은 날 두 차례)**
+  - 실행은 이미 화면과 무관하게 sidecar에서 돌았다. 프로젝트를 바꾸려면 멈춰야 했던 것은 renderer 규칙(`canLeaveProjectView`가 실행 중이면 거짓) 때문이었다.
+  - sidecar의 진짜 제약은 둘이었다.
+    - 공급자 잠금 파일이 공급자당 하나(`*-login.pending`)라 앱 전체에서 Codex 1·Claude 1개만 돈다.
+    - 어느 팀이든 일하면 모든 프로젝트의 저장·합치기·버리기가 막혔다.
+  - 둘 다 설계 선택이었다. 설치본 Claude Code 2.1.328은 같은 설정 폴더의 프로세스끼리 `.oauth_refresh.lock`(+ `.owner`, 죽은 소유자 인수)으로 토큰 갱신을 잠그고, Codex 0.167.2는 `auth.lock`·"guarded reload"를 쓴다(실행 파일 문자열 근거, 실제 동시 시험은 PR-B). 실행과 겹치면 안 되는 것은 연결 확인 때 sidecar가 직접 하는 Claude 갱신(`provider_claude_refresh.rs` `refresh_if_expired`)과 로그인·설치뿐이다.
+- **단계 막대 전체 보기**(`stage-bar.tsx`)
+  - '+N'은 버튼이다. 누르면 모든 단계를 가로로 스크롤되는 한 줄(`.m5-stage-bar-all`, 칸 148px)로 펼치고 가장 최근 단계에서 끝난다.
+  - 펼친 단계를 누르면 그 팀원 카드로 이동한다. '접기'로 되돌리고, 다른 작업은 접힌 채 시작한다.
+  - 예전 `m5.stage.hidden` 키는 `showAll`·`fold`·`jump`로 바꿨다.
+- **P1 실행 중 전환**
+  - `canLeaveProjectView`는 오는 중인 요청만 보고, 팀이 일하는지는 새 `isTeamWorking`이 답한다. 업데이트 다시 시작·업데이트 배너·작업 버리기 버튼은 `isTeamWorking`을 쓴다.
+  - 저장하지 않은 편집은 `leaveProjectView(false, true)`가 초안 보관소에 넣고, 읽어 확인한 뒤에만 떠난다. 다시 열면 되살린다.
+  - 전환 이유 문구를 `m5.switch.busy`·`unsavedHeld`로 바꾸고 `m5.switch.teamWorking`은 지웠다.
+- **배지**
+  - `project-activity.ts`가 실행 상태 알림으로 프로젝트별 '작업 중'을 셈한다(실행 종료 뒤 20초는 다음 담당을 고르는 중으로 봄, 프로젝트를 열 때 목록으로 맞춤).
+  - 전환 팝오버·홈 줄에 '확인 필요 N'·'작업 중', 전환 단추에 다른 프로젝트 상태 점을 단다. 알림 패널(U6)·다른 프로젝트 알림 열기(PR #14 I4)는 그대로 재사용한다.
+- **P2′ 작업 단위 쓰기 차단**(`work_scope.rs`)
+  - 저장·합치기·버리기·정리·내용 삭제는 그 작업만 기다린다. 사본을 사용자 폴더에 넣는 6개 동작과 `application_running` 슬롯은 전역 그대로다.
+  - 작업에 묶을 수 없는 일이 있으면 전역 규칙으로 돌아간다. 거절 코드는 예전 그대로다.
+  - `AgentRuntime::run_chats`(`discovery_cleanup`이 있으면 `None`), `G5Manager::active_chat_ids`, `ProjectManager::pending_save_target`을 더했다. 안 쓰게 된 `runs_in_flight`는 지웠다.
+  - fake 시나리오 `busy-writer`(작업 공간에 15ms 간격 200번 쓰기)를 더했다.
+- **시험**
+  - 경합 시험 3개(`orchestration_dispatch.rs`):
+    - `other_tasks_save_merge_and_discard_while_a_team_writes_its_own_workspace`: A가 쓰는 동안 같은 저장소 C·다른 프로젝트 B를 실제로 합침. A 자신의 것과 B의 사본 반영은 거절. 끝난 뒤 `git fsck`·깨끗한 상태·자기 파일만.
+    - `work_in_flight_without_a_task_blocks_every_task`
+    - `a_save_to_a_project_view_waits_only_for_that_projects_tasks`
+  - 단위:
+    - `tests/m5-multiproject.test.mts`(5)
+    - chat-state "the project view can be left while the open task's team works…"
+    - editor "leaving a project keeps the open task's unsaved text…", "text that cannot be kept holds the project…"
+  - 렌더러 스모크 지점 33(접힌 단계)·34(펼친 단계)을 더하고, 25(전환 팝오버)에 다른 프로젝트 '작업 중' 배지와 상태 점 검사를 더했다.
+  - 네이티브 스모크 `pnpm m5:smoke:multiproject`(`scripts/m5-multiproject-ui-run.mjs` → `m5-multiproject-ui-smoke.cjs`): 실제 sidecar, 임시 앱 데이터, fixture `cancel-clean`(30초 동안 일함).
+    - A 작업의 에이전트가 일하는 중에 한 번에 B로 바꿨다. A 줄에 '작업 중', 전환 단추에 점이 보였다.
+    - B도 실행을 시작했고, 엔진 기록에서 두 실행이 동시에 `running`이었다.
+    - A로 돌아오니 그 작업이 진행 중 그대로 보였다. 검사 19개 PASS.
+    - 이 시험이 찾아 고친 것: 작업 화면의 '일하는 중'(`teamWorking`)은 막 만든 초안(draft)도 포함한다. 그래서 시작하지 않은 B 작업이 배지에서 '작업 중'으로 보였다. 목록 배지는 `listedWorking`(preparing·running·stopping·applying)을 쓴다.
+    - 함정: fixture 엔진의 저장소는 첫 역할 구성(총괄·V3 역할 없음)이라 새 작업 창과 팀 진행은 여기서 못 돈다. 작업·실행은 bridge로 만들고, 팀 진행은 sidecar 경합 시험이 다룬다.
+- **검증**
+  - `cargo test -p elsecrew-sidecar`: 924 통과, 실패 2. 두 실패는 같은 작업 버리기 거절의 오류 설명 문구가 바뀌어서였고, 문구에 기존 표현("idle native execution")을 남겨 고친 뒤 두 시험만 다시 돌려 통과했다.
+  - `npm test` 988 → 새 시험 포함 통과, `pnpm build`.
+  - `pnpm m5:test:editor` 69/69(다크·라이트, 렌더 대비 라이트 1479곳 실패 0).
+  - 캡처는 `~/Documents/elsecrew-ade-multiproject-2026-11-26/pr-a/`에 있다(렌더러 `dark/`, 네이티브 `native/`).
+- **PR**: https://github.com/wonseok-han/elsecrew/pull/18 (`--base feature/ade`). 본문 캡처는 39cccc59에 올리고 2a42e728에서 지웠다. CI(2a42e728) macOS·Windows(기준선 하네스 포함)·website·GitGuardian 모두 통과.
+- **남은 것(PR-B)**
+  - P5 공급자 병렬 실행: 실행별 잠금 파일, 로그인·설치만 배타, 실행 중 sidecar Claude 갱신 생략.
+  - P3′ 상한과 '차례 기다리는 중', P4 전체 수신함(다시 불러오기 전에 시작된 다른 프로젝트 실행도 잡기).
+  - 실제 계정 동시 실행 시험.
+  - history.md가 500줄을 넘었지만 엔트리가 모두 같은 날짜이고 고정 절만 약 400줄이라, 날짜를 쪼개지 않는 규칙으로는 300줄 이하로 롤오버할 수 없어 두었다.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #17 재확인(B1 해소, 새 중요 1건) 반영: 큰 줄 자리 기한 (`orca/ade-stability`)
 재확인 `~/Documents/elsecrew-ade-stability-2026-11-26/REVIEW-pr17-2.md`: B1 해소. 새 중요: 끝나지 않는 줄 두 개가 큰 줄 자리 2개를 기한 없이 잡으면 다른 실행도 막힐 수 있다.
 
@@ -190,6 +300,12 @@
 - 위저드 6단계: 에이전트 선택 → 진단 → 설치 → 로그인 → 첫 프로젝트 → 졸업식
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+- **여러 프로젝트 동시 작업의 경계(2026-11-26, multi-project PR-A)**
+  - 화면은 한 프로젝트만 보여 주고 실행은 sidecar에서 계속된다. 프로젝트를 떠나도 실행을 멈추지 않는다(`canLeaveProjectView`는 오는 중인 요청만, 팀이 일하는지는 `isTeamWorking`).
+  - 쓰기 차단은 실제 쓰기 경로 단위다(`work_scope.rs` `write_refusal` + `project/write_scope.rs`, PR #18 검토 B1). 작업 ID가 아니라 경로로 본다. 같은 저장소 git 폴더이거나 폴더가 서로 안에 있으면 같은 잠금이고, 경로를 못 구하면 fail closed다. 근거는 두 가지다. 에이전트는 자기 작업 공간에만 쓰고, 앱의 git 쓰기는 단일 dispatcher 스레드에서 차례로 일어난다. 그래서 git 쓰기를 dispatcher 밖(작업자 스레드)으로 옮기면 이 근거가 깨지니 이 차단을 다시 봐야 한다. 사본을 사용자 폴더에 넣는 동작만 전역이다. 작업에 묶을 수 없는 진행 중인 일은 전역 차단으로 돌아간다. 작업 공간과 겹치는 프로젝트·작업 공간 폴더는 등록에서 거절한다.
+  - 초안 보관소(`editor-drafts.ts`)는 이미 보관한 것을 지우지 않는다(PR #18 검토 B2·재확인). 저장은 전부 아니면 무변경이고, 속성 시험이 이를 지킨다. 새 초안이 못 들어가면 그 초안을 보관하지 않고 알린다. 예전의 "오래된 작업부터 지움" 규칙으로 되돌리지 않는다.
+  - 폴더 겹침 검사는 그 폴더에 무엇이든 쓰기 전 첫 단계다(빈 폴더·일반 폴더 초기화, 새 작업 폴더). `.git/commondir` 저장소는 등록하지 않는다.
+  - 공급자 동시 실행(PR-B): CLI는 같은 설정 폴더의 프로세스끼리 토큰 갱신을 스스로 잠근다(Claude 2.1.328 `.oauth_refresh.lock`, Codex 0.167.2 `auth.lock`, 문자열 근거). sidecar가 직접 하는 Claude 갱신은 그 잠금을 잡지 않으므로, 실행이 살아 있을 때는 하지 않아야 한다.
 - **실제 앱 시험의 함정(2026-11-26, ADE V)**
   - 앱 전용 로그인은 프로필 안에 있다(Codex `…/m5/codex-profile-v1/auth.json`, Claude는 설정 폴더 경로 해시로 구분된 Keychain 항목). 그래서 임시 `--user-data-dir`로는 실제 실행이 안 된다.
   - 개발 앱 창이 다른 창에 완전히 가려지면 macOS Electron이 `hide`를 보내 미리보기가 숨고, rAF도 멈춘다. CDP 측정 중 "뷰가 안 보임"은 이것부터 의심한다(창을 앞으로 가져오면 다시 보인다).

@@ -71,6 +71,11 @@ impl G5Manager {
         self.active.keys().cloned().collect()
     }
 
+    /// Tasks with a fixture run in flight.
+    pub(crate) fn active_chat_ids(&self) -> Vec<String> {
+        self.active.values().map(|run| run.chat_id.clone()).collect()
+    }
+
     pub(crate) fn cleanup_blocked(&self) -> bool { self.preparing_to_quit || !self.active.is_empty() }
     pub fn recover_unclean_runs(
         &self,

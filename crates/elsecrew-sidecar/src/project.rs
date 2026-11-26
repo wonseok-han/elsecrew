@@ -15,6 +15,10 @@ mod preview;
 pub(crate) use preview::set_preview_test_hook;
 mod latest_apply;
 mod app_connections;
+mod write_scope;
+pub(crate) use write_scope::WriteScope;
+#[cfg(test)]
+pub(crate) use write_scope::path_within as write_scope_path_within;
 mod empty_project;
 mod git_worktree;
 mod git_merge;
@@ -695,6 +699,11 @@ impl ProjectManager {
         #[cfg(not(any(target_os = "macos", windows)))]
         { let _ = (storage, project, application_id, fingerprint, request); Err(ProjectFailure::recovery("restoration unavailable on this platform")) }
     }
+    /// The project and task a save in progress writes to.
+    pub(crate) fn pending_save_target(&self, save_id: &str) -> Option<(String, Option<String>)> {
+        self.pending_saves.get(save_id).map(|save| (save.project_id.clone(), save.chat_id.clone()))
+    }
+
     pub(crate) fn application_running(&self) -> bool {
         #[cfg(any(target_os = "macos", windows))]
         { self.application_job.is_some() }
@@ -1225,6 +1234,10 @@ impl ProjectManager {
                 "picker-approved path is outside the capability-held Git root",
             ));
         }
+        // A project inside a task's workspace, or holding one, would let a
+        // merge into it and that task's agent write the same files (PR #18
+        // review B1).
+        self.refuse_workspace_overlap(storage, &source.canonical_root, "the project folder")?;
         let canonical_text = canonical_protocol_path(&source.canonical_root)?;
         let selected_text = canonical_protocol_path(selected)?;
         // A folder that belonged to a deleted project starts over under a new
@@ -4597,6 +4610,12 @@ impl ProjectManager {
             match root.symlink_metadata(".git") {
                 Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
                     let git_dir = open_real_child_dir(&root, ".git")?;
+                    // Its objects and refs live in another repository's Git
+                    // folder (`commondir`): not a repository of its own, and
+                    // two projects would share one (PR #18 re-review B1).
+                    if git_dir.symlink_metadata("commondir").is_ok() {
+                        return Err(ProjectFailure::manifest("source repository must own a real .git directory; one that shares another repository's (commondir) is unsupported"));
+                    }
                     break (path.to_path_buf(), root, git_dir);
                 }
                 // A plain folder this app gave a shadow history (link file).

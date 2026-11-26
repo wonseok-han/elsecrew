@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import type { ProjectEditorController } from "./editor-state.ts";
 import { validateProjectCatalogResult, type ProjectCatalogEntry } from "./contracts/project-catalog-v1.ts";
 import { byRecency, openedAgo, projectMark, projectName, type OpenedAt } from "./project-recency.ts";
+import type { ProjectActivity } from "./project-activity.ts";
 
 // Keep menus in the browser top layer so scrollable project lists cannot clip them.
 function ProjectMenu({ label, children }: { label: string; children: ReactNode }) {
@@ -69,7 +70,7 @@ export type CatalogListState = "projects" | "empty" | "failed";
 /** Pages the home and the switcher read before ordering by recency (50 projects each). */
 const RECENCY_PAGES = 10;
 
-export function ProjectCatalog({ onCloseProject, closeDisabled, onRoles, rolesDisabled, controller, disabled, currentId, ready = true, home = false, switcher = false, management = false, onManage, onRemove, removeDisabled, refreshKey = 0, onListState, onAdd, onSwitch, switchBlockedReason, addBlockedReason, openedAt = {} }: {
+export function ProjectCatalog({ onCloseProject, closeDisabled, onRoles, rolesDisabled, controller, disabled, currentId, ready = true, home = false, switcher = false, management = false, onManage, onRemove, removeDisabled, refreshKey = 0, onListState, onAdd, onSwitch, switchBlockedReason, addBlockedReason, openedAt = {}, activity }: {
   onCloseProject?: () => void; closeDisabled?: boolean; onRoles?: () => void; rolesDisabled?: boolean;
   onRemove?: (entry: ProjectCatalogEntry) => void; removeDisabled?: boolean; refreshKey?: number;
   onManage?: (entry: ProjectCatalogEntry) => void; controller: ProjectEditorController; disabled: boolean; currentId?: string; ready?: boolean; home?: boolean; switcher?: boolean; management?: boolean;
@@ -82,6 +83,8 @@ export function ProjectCatalog({ onCloseProject, closeDisabled, onRoles, rolesDi
   /** switcher: why a folder cannot be added from here now (an open task, unsaved edits), or null (PR #12 review I2). */
   addBlockedReason?: string | null;
   openedAt?: OpenedAt;
+  /** home, switcher: a project's team at work and its requests waiting (ADE multi-project). */
+  activity?: (projectId: string) => ProjectActivity;
 }) {
   const { t, lang } = useI18n();
   const [entries, setEntries] = useState<ProjectCatalogEntry[]>([]);
@@ -172,7 +175,7 @@ export function ProjectCatalog({ onCloseProject, closeDisabled, onRoles, rolesDi
           return <li key={entry.projectId} data-path={entry.canonicalPath} className={`${hero ? "m5-home-hero" : ""}${current ? " m5-project-open" : ""}`.trim() || undefined}>
             <button type="button" className="m5-project-row" aria-current={current ? "true" : undefined} title={entry.canonicalPath} disabled={disabled || busy || blocked || (!management && current)} onClick={open}>
               <ProjectMark name={name} large={home} />
-              <span className="m5-project-row-text"><strong>{name}</strong><small className={current ? "m5-project-current" : undefined}>{sub(entry)}</small></span>
+              <span className="m5-project-row-text"><strong>{name}</strong><small className={current ? "m5-project-current" : undefined}>{sub(entry)}</small>{activity && <ActivityBadges activity={activity(entry.projectId)} />}</span>
             </button>
             {hero && <button type="button" className="m5-btn-primary m5-home-continue" aria-label={t("m5.home.continueNamed", { name })} disabled={disabled || busy} onClick={open}>{t("m5.home.continueAction")}</button>}
             {!management && menu(entry, name)}
@@ -184,4 +187,14 @@ export function ProjectCatalog({ onCloseProject, closeDisabled, onRoles, rolesDi
       {switcher && <div className="m5-switcher-footer">{add}</div>}
     </div>
   </section>;
+}
+
+/** A project's team at work and its requests waiting (ADE multi-project). */
+function ActivityBadges({ activity }: { activity: ProjectActivity }) {
+  const { t } = useI18n();
+  if (!activity.working && activity.attention === 0) return null;
+  return <span className="m5-project-activity">
+    {activity.attention > 0 && <span className="m5-badge m5-badge-attention">{t("m5.catalog.attention", { count: activity.attention })}</span>}
+    {activity.working && <span className="m5-badge m5-badge-running">{t("m5.catalog.working")}</span>}
+  </span>;
 }

@@ -22,9 +22,11 @@ const APPROVAL_POLL_MS = 2000;
  * (done), a question or pending approval (attention), and failed or paused
  * work (stopped). Returns a stop function.
  */
-export function startNotificationFeed(bridge: NotificationFeedBridge, center: NotificationCenter, approvals: ApprovalBridge | undefined, onAdded: (id: string) => void): () => void {
+export function startNotificationFeed(bridge: NotificationFeedBridge, center: NotificationCenter, approvals: ApprovalBridge | undefined, onAdded: (id: string) => void, retryDelayMs = 2000): () => void {
   const running = new Map<string, RunIdentity>();
   const seenApprovals = new Set<string>();
+  /** Approvals whose task is being read now. */
+  const resolving = new Set<string>();
   /** Requests still open per run, so the bell settles them once they go away. */
   const openApprovals = new Map<string, Set<string>>();
   const settle = (runId: string, still: ReadonlySet<string> = new Set()) => {
@@ -39,6 +41,14 @@ export function startNotificationFeed(bridge: NotificationFeedBridge, center: No
       const detail = await bridge.getChat?.({ chatId, afterEventSequence: 0, cursor: null, limit: 1 }) as ChatDetail | undefined;
       return detail?.chat ?? null;
     } catch { return null; }
+  };
+  const chatWithRetry = async (chatId: string, tries = 4): Promise<ChatDetail["chat"] | null> => {
+    for (let attempt = 0; attempt < tries && !disposed; attempt++) {
+      const chat = await chatOf(chatId);
+      if (chat) return chat;
+      await new Promise(resolve => setTimeout(resolve, retryDelayMs));
+    }
+    return null;
   };
   const add = (id: string, kind: NotificationKind, chat: ChatDetail["chat"], text = "") => {
     if (!disposed && center.add({ id, kind, projectId: chat.projectId, chatId: chat.chatId, goal: chat.goal, text, at: new Date().toISOString() })) onAdded(id);
@@ -74,7 +84,8 @@ export function startNotificationFeed(bridge: NotificationFeedBridge, center: No
       if (event.kind === "status") void whenState(event.chatId, `msg:${event.messageId}`, "stopped", event.text);
     }),
     bridge.onAgentPublicEvent?.(event => {
-      if (event.kind === "question") void chatOf(event.chatId).then(chat => { if (chat) add(`question:${event.eventId}`, "attention", chat, event.text); });
+      // A question comes once: its task is read again a few times if the first read fails (PR #18 review I2).
+      if (event.kind === "question") void chatWithRetry(event.chatId).then(chat => { if (chat) add(`question:${event.eventId}`, "attention", chat, event.text); });
     }),
   ];
   // Approvals are listed per run; only runs this session saw start are polled.
@@ -98,9 +109,15 @@ export function startNotificationFeed(bridge: NotificationFeedBridge, center: No
         settle(runId, ids);
         if (pending.length) openApprovals.set(runId, new Set([...(openApprovals.get(runId) ?? []), ...ids]));
         for (const approvalId of ids) {
-          if (seenApprovals.has(approvalId)) continue;
-          seenApprovals.add(approvalId);
-          void chatOf(chatId).then(chat => { if (chat && stillWaiting(runId, approvalId)) add(`approval:${approvalId}`, "attention", chat); });
+          // Announced once; a task that could not be read yet is asked for
+          // again on the next list while the request still waits (PR #18
+          // review I2), never dropped after one failed read.
+          if (seenApprovals.has(approvalId) || resolving.has(approvalId)) continue;
+          resolving.add(approvalId);
+          void chatOf(chatId).then(chat => {
+            if (chat && stillWaiting(runId, approvalId)) { seenApprovals.add(approvalId); add(`approval:${approvalId}`, "attention", chat); }
+            else if (!stillWaiting(runId, approvalId)) seenApprovals.add(approvalId);
+          }).finally(() => { resolving.delete(approvalId); });
         }
       }).catch(() => undefined).finally(() => { listing.delete(runId); });
     }

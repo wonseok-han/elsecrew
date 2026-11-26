@@ -69,6 +69,7 @@ export type ProjectCatalogRequest =
   | { action: "deleteProject"; projectId: string; confirmed: true }
   | { action: "deleteChat"; projectId: string; chatId: string; confirmed: true }
   | { action: "finishDeletions" }
+  | { action: "workStatus" }
   | { action: "list"; cursor: string | null } | { action: "reopen"; projectId: string } | { action: "releaseView"; projectId: string }
   | { action: "applicationCapabilities" }
   | { action: "inspectApplicationRetirement"; projectId: string; applicationId: string }
@@ -175,6 +176,7 @@ export type ProjectCatalogResult =
   | { schemaVersion: 1; action: "deleteProject"; projectId: string }
   | { schemaVersion: 1; action: "deleteChat"; projectId: string; chatId: string; projectClosed: boolean }
   | { schemaVersion: 1; action: "finishDeletions"; pending: number }
+  | { schemaVersion: 1; action: "workStatus"; working: boolean }
   | { schemaVersion: 1; action: "releaseView"; projectId: string }
   | { schemaVersion: 1; action: "reopen"; project: ProjectIdentityV1 };
 
@@ -313,7 +315,7 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
   } else if (request.action === "deleteChat") {
     keys(request, ["action", "projectId", "chatId", "confirmed"]); id(request.projectId); id(request.chatId);
     if (request.confirmed !== true) throw new Error("deletion requires confirmation");
-  } else if (request.action === "finishDeletions") {
+  } else if (request.action === "finishDeletions" || request.action === "workStatus") {
     keys(request, ["action"]);
   } else if (request.action === "reopen" || request.action === "releaseView" || request.action === "inspectPreparation" || request.action === "applicationStatus" || request.action === "applicationHistory") {
     keys(request, ["action", "projectId"]); id(request.projectId);
@@ -567,6 +569,9 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   } else if (request.action === "deleteChat") {
     keys(result, ["schemaVersion", "action", "projectId", "chatId", "projectClosed"]);
     if (id(result.projectId) !== request.projectId || id(result.chatId) !== request.chatId || typeof result.projectClosed !== "boolean") throw new Error("deletion identity mismatch");
+  } else if (request.action === "workStatus") {
+    keys(result, ["schemaVersion", "action", "working"]);
+    if (typeof result.working !== "boolean") throw new Error("invalid work status");
   } else if (request.action === "finishDeletions") {
     keys(result, ["schemaVersion", "action", "pending"]);
     if (!Number.isSafeInteger(result.pending) || (result.pending as number) < 0) throw new Error("invalid pending deletions");
