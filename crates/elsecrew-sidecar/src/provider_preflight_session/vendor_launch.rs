@@ -47,8 +47,27 @@ impl CodexCommand {
         >,
         permission: ExpectedPermission,
     ) -> Result<Self, SidecarError> {
-        let executable = PinnedExecutable::open_codex_signed(executable, false)?;
-        let helper = PinnedExecutable::open_codex_signed(helper, true)?;
+        Self::with_pins(
+            PinnedExecutable::open_codex_signed(executable, false)?,
+            PinnedExecutable::open_codex_signed(helper, true)?,
+            home, workspace, expected, permission,
+        )
+    }
+
+    /// The same command from both executables pinned (signatures checked)
+    /// ahead, off the engine's loop (ADE stabilization A). Arguments and
+    /// environment are composed here, from the files as they are now (PR #25
+    /// review I2).
+    pub(crate) fn with_pins(
+        executable: PinnedExecutable,
+        helper: PinnedExecutable,
+        home: &Path,
+        workspace: &Path,
+        expected: &elsecrew_core::provider::vendor_observation::codex_preflight::ExpectedProfile<
+            '_,
+        >,
+        permission: ExpectedPermission,
+    ) -> Result<Self, SidecarError> {
         let mut args = super::named_discovery_arguments(home, workspace, expected, permission)
             .map_err(|_| failure())?;
         args.push("--strict-config".into());

@@ -7,14 +7,17 @@
 //!
 //! Stages of one start:
 //! 1. `Discovering` — the provider check runs on its own worker (unchanged).
-//! 2. `Building` — the check is taken on the loop, the launch command's inputs
-//!    are read from durable state, and a worker builds the command: it pins
-//!    the signed executable(s), checks the publisher signature and composes
-//!    the arguments. Pure: no process is started, nothing is reserved or
-//!    written, no lock is taken.
+//! 2. `Building` — the check is taken on the loop and a worker pins the
+//!    signed executable(s) and checks the publisher signature (the slow part).
+//!    Pure: no process is started, nothing is reserved or written, no lock is
+//!    taken.
 //! 3. `Ready` — on the loop, in one step exactly as before: reserve the run,
-//!    take its lock, launch, record. The launch re-reads its inputs and uses
-//!    the built command only when they are equal; otherwise it is refused.
+//!    take its lock, launch, record. The command's arguments and environment
+//!    are composed there from the files as they are then (PR #25 review I2);
+//!    the pins are used only for the very executable paths the check named.
+//!    Right before, `ready_check` refuses a start that was stopped (its team
+//!    canceled, the app quitting) and checks the provider again, at most
+//!    twice, when the check got too old while the start waited (review I3).
 //!
 //! Concurrency boundary (docs/architecture.md "엔진 루프와 실행 시작"):
 //! storage writes, provider locks (fences), process ownership and run state
@@ -53,6 +56,28 @@ pub(crate) enum StartEvidence {
 pub(crate) enum PreparedLaunch {
     Claude(agent_runtime::preparation::PreparedClaudeLaunch),
     Codex(agent_runtime::preparation::PreparedCodexLaunch),
+}
+
+/// How old a provider check may be when the start reserves on it: its
+/// validity is 30 s and the reserve-and-launch step itself needs a few.
+pub(crate) const START_CHECK_MAX_AGE: Duration = Duration::from_secs(25);
+/// How many times one start checks the provider again because its check got
+/// too old while it waited.
+pub(crate) const START_RECHECKS: u8 = 2;
+
+pub(crate) enum ReadyCheck {
+    Proceed,
+    CheckAgain,
+    Refuse(SidecarError),
+}
+
+impl StartEvidence {
+    fn age(&self) -> Duration {
+        match self {
+            Self::Claude(observed) => observed.evidence.age(),
+            Self::Codex(observed) => observed.evidence.observation.age(),
+        }
+    }
 }
 
 /// Whether a start's turn used the loop for real work (counts against the
@@ -122,7 +147,21 @@ impl Sidecar {
                         pending.stage = StartStage::Ready(evidence, prepared);
                         return Turn::Waiting;
                     }
-                    pending.result = Some(self.reserve_and_launch(id, pending, evidence, prepared));
+                    match self.ready_check(id, pending.rediscoveries, evidence.age()) {
+                        ReadyCheck::Proceed => pending.result = Some(self.reserve_and_launch(id, pending, evidence, prepared)),
+                        ReadyCheck::Refuse(error) => pending.result = Some(Err(error)),
+                        ReadyCheck::CheckAgain => {
+                            // Too old to reserve on (PR #25 review I3): check the
+                            // provider again rather than fail; a stale check is
+                            // never used.
+                            drop((evidence, prepared));
+                            pending.rediscoveries += 1;
+                            match self.agent_runtime.begin_scoped_start(&self.storage, &self.projects, &pending.input, id) {
+                                Ok(_) => pending.stage = StartStage::Discovering,
+                                Err(error) => pending.result = Some(Err(error)),
+                            }
+                        }
+                    }
                     return Turn::Worked;
                 }
                 #[cfg(test)]
@@ -130,6 +169,10 @@ impl Sidecar {
                     if worked {
                         pending.stage = StartStage::TestLoopStep(cost, result);
                         return Turn::Waiting;
+                    }
+                    if let Err(error) = self.start_gate(id) {
+                        pending.result = Some(Err(error));
+                        return Turn::Worked;
                     }
                     thread::sleep(cost);
                     pending.result = result.or_else(|| Some(Err(SidecarError::new("agentLaunchRejected", "test start"))));
@@ -149,24 +192,61 @@ impl Sidecar {
         }
     }
 
+    /// Whether a start may still go on (PR #25 review, cancel during
+    /// preparation): not while the app prepares to quit, and not a team
+    /// step whose team was stopped meanwhile.
+    pub(crate) fn start_gate(&self, id: &str) -> Result<(), SidecarError> {
+        if self.prepared_to_quit {
+            return Err(SidecarError::new("agentLaunchRejected", "the app is quitting; the run was not started"));
+        }
+        if let Some((chat, kind)) = self.workflow_requests.get(id) {
+            if kind == "start" && !self.workflow_chats.contains(chat) {
+                return Err(SidecarError::new("agentLaunchRejected", "the team task was stopped before its run started"));
+            }
+        }
+        Ok(())
+    }
+
+    /// Right before reserving: go on, refuse, or check the provider again
+    /// because the check got too old while the start waited (PR #25 review
+    /// I3; at most `START_RECHECKS` times, never for a stopped start).
+    pub(crate) fn ready_check(&self, id: &str, rechecked: u8, age: Duration) -> ReadyCheck {
+        if let Err(error) = self.start_gate(id) {
+            return ReadyCheck::Refuse(error);
+        }
+        if age <= START_CHECK_MAX_AGE {
+            return ReadyCheck::Proceed;
+        }
+        if rechecked < START_RECHECKS {
+            ReadyCheck::CheckAgain
+        } else {
+            ReadyCheck::Refuse(SidecarError::new("agentInputChanged", "the provider check stayed too old while the start waited"))
+        }
+    }
+
     /// Takes a finished provider check and starts building the launch command
     /// on a worker. `None` while the check still runs.
     fn take_start_check(&mut self, id: &str, pending: &PendingAgentStart) -> Option<Result<StartStage, SidecarError>> {
         if pending.runtime == "claude-code" {
             let observed = self.agent_runtime.take_claude_discovery(&self.storage, &self.projects, id)?;
+            // Stopped or quitting meanwhile: the check is dropped, nothing is
+            // built or reserved (PR #25 review).
             Some(observed.and_then(|observed| {
-                let inputs = latency_log::step("start.claude.inputs", || self.agent_runtime.claude_start_launch_inputs(&self.storage, &self.projects, &pending.input, &observed))?;
+                self.start_gate(id)?;
+                let executable = observed.evidence.executable.revalidate()?.to_owned();
                 let worker = thread::Builder::new().name("start-claude-build".into())
-                    .spawn(move || latency_log::step("start.claude.build", || agent_runtime::preparation::PreparedClaudeLaunch::build(inputs).map(PreparedLaunch::Claude)))
+                    .spawn(move || latency_log::step("start.claude.build", || agent_runtime::preparation::PreparedClaudeLaunch::build(executable).map(PreparedLaunch::Claude)))
                     .map_err(|_| SidecarError::new("agentLaunchRejected", "launch preparation unavailable"))?;
                 Ok(StartStage::Building(StartEvidence::Claude(observed), worker))
             }))
         } else {
             let observed = self.agent_runtime.take_scoped_discovery(&self.storage, &self.projects, id)?;
             Some(observed.and_then(|observed| {
-                let inputs = latency_log::step("start.codex.inputs", || self.agent_runtime.codex_start_launch_inputs(&self.storage, &self.projects, &pending.input, &observed))?;
+                self.start_gate(id)?;
+                let executable = observed.evidence.executable.revalidate()?.to_owned();
+                let helper = observed.evidence.helper.revalidate()?.to_owned();
                 let worker = thread::Builder::new().name("start-codex-build".into())
-                    .spawn(move || latency_log::step("start.codex.build", || agent_runtime::preparation::PreparedCodexLaunch::build(inputs).map(PreparedLaunch::Codex)))
+                    .spawn(move || latency_log::step("start.codex.build", || agent_runtime::preparation::PreparedCodexLaunch::build(executable, helper).map(PreparedLaunch::Codex)))
                     .map_err(|_| SidecarError::new("agentLaunchRejected", "launch preparation unavailable"))?;
                 Ok(StartStage::Building(StartEvidence::Codex(observed), worker))
             }))

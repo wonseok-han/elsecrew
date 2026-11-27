@@ -18,6 +18,7 @@ const cp = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { createSampler } = require('./m5-latency-sampler.cjs');
 
 const repoRoot = path.resolve(__dirname, '..');
 const root = process.env.LATENCY_ROOT || fs.mkdtempSync(path.join(os.tmpdir(), 'elsecrew-latency-starting-'));
@@ -131,7 +132,7 @@ async function run(window) {
     const start = chat => `${startFn}(${JSON.stringify(chat)})`;
 
     // The warm run: one Claude run working while the others start.
-    const warm = await task('claude', 'Warm run: as your final answer, write the numbers from one to two thousand in English words, separated by commas. Do not delegate, do not read files.');
+    const warm = await task('claude', 'Warm run: as your final answer, write the numbers from one to four thousand in English words, separated by commas. Do not delegate, do not read files.');
     const warmStart = await page(start(warm));
     if (warmStart.error) throw new Error('warm start: ' + warmStart.error);
     const identity = Object.fromEntries(['chatId', 'taskId', 'projectId', 'worktreeId', 'workspaceIdentity', 'runId'].map(key => [key, warmStart.accepted[key]]));
@@ -145,31 +146,18 @@ async function run(window) {
     // the engine then shows as every read sent during it waiting, not as one
     // slow sample (a closed loop would hide it).
     const read = `window.m5.readWorkspaceFile({ chatId: ${JSON.stringify(identity.chatId)}, projectId: ${JSON.stringify(identity.projectId)}, worktreeId: ${JSON.stringify(identity.worktreeId)}, workspaceIdentity: ${JSON.stringify(identity.workspaceIdentity)}, path: 'README.md' })`;
-    await page(`void (window.__sampler = (() => {
-      const s = { measurements: [], ticks: {}, condition: null, outstanding: 0 };
-      const now = () => performance.timeOrigin + performance.now();
-      const startsPending = () => Boolean(window.__starting && window.__starting.pending > 0);
-      const fire = (label, call) => {
-        const condition = s.condition, t0 = now(), before = startsPending();
-        s.outstanding++;
-        call().then(() => null, e => String(e && e.message || e).slice(0, 160)).then(error => {
-          const t1 = now();
-          s.outstanding--;
-          s.measurements.push({ label, condition, t0, t1, ok: error === null, error, totalMs: t1 - t0, startsBefore: before, startsAfter: startsPending() });
-        });
-      };
-      const tick = () => {
-        if (!s.condition) return;
-        s.ticks[s.condition] = (s.ticks[s.condition] ?? 0) + 1;
-        fire('getChat', () => window.m5.getChat({ chatId: ${JSON.stringify(identity.chatId)}, afterEventSequence: 0, cursor: null, limit: 50 }));
-        fire('approval:list', () => window.m5Approval.request({ action: 'list', identity: ${JSON.stringify(identity)} }));
-        fire('file:read', () => ${read});
-        setTimeout(tick, ${TICK_MS});
-      };
-      s.begin = condition => { const was = s.condition; s.condition = condition; if (!was) tick(); };
-      s.end = () => { s.condition = null; };
-      return s;
-    })())`);
+    await page(`void (window.__sampler = (${createSampler.toString()})({
+      now: () => performance.timeOrigin + performance.now(),
+      setTimeout: (fn, ms) => setTimeout(fn, ms),
+      clearTimeout: id => clearTimeout(id),
+      startsPending: () => Boolean(window.__starting && window.__starting.pending > 0),
+      tickMs: ${TICK_MS},
+      reads: {
+        getChat: () => window.m5.getChat({ chatId: ${JSON.stringify(identity.chatId)}, afterEventSequence: 0, cursor: null, limit: 50 }),
+        'approval:list': () => window.m5Approval.request({ action: 'list', identity: ${JSON.stringify(identity)} }),
+        'file:read': () => ${read},
+      },
+    }))`);
     const settle = () => wait(`window.__sampler.outstanding === 0`, 'reads settled', 180_000);
 
     // Control: the warm run alone.

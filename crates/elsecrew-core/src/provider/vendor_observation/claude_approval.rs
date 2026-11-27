@@ -234,6 +234,17 @@ impl Permissions {
             return Ok(Observation::Cancelled);
         }
         let request = wire.request.ok_or_else(invalid)?;
+        if input.withheld() {
+            let hook = request.subtype == "hook_callback";
+            let field = |name: &str| request.input.get(name).and_then(Value::as_str);
+            let tool_name = if hook { field("tool_name") } else { request.tool_name.as_deref() };
+            if hook && field("tool_use_id").is_some_and(|inner| Some(inner) != request.tool_use_id.as_deref()) {
+                return Err(invalid());
+            }
+            let agent = request.agent_id.is_some() || (hook && request.input.get("agent_id").is_some_and(|agent| !agent.is_null()));
+            return self.observe_withheld_parts(&wire.kind, wire.request_id.clone(), &request.subtype, request.callback_id.as_deref(),
+                tool_name, request.tool_use_id.as_deref(), agent);
+        }
         let hook = request.subtype == "hook_callback";
         let (tool_name, tool_use_id, target, tool_input) = if hook {
             #[derive(Deserialize)]
@@ -321,6 +332,39 @@ impl Permissions {
         } else {
             Observation::Requested(request)
         })
+    }
+
+    /// A permission request streamed past the session line bound (PR #25
+    /// review I4): it can only be declined, so nothing of its input is
+    /// interpreted (no target, no hook scope, whose long values were left
+    /// out). Only what a refusal needs is checked: its id (once per session),
+    /// the kind of request, the tool's name and use id, and for a hook our own
+    /// callback. A forged one can only make the app say no.
+    fn observe_withheld_parts(&mut self, kind: &str, request_id: String, subtype: &str, callback_id: Option<&str>,
+        tool_name: Option<&str>, tool_use_id: Option<&str>, agent_id: bool) -> Result<Observation, ProviderError> {
+        let hook = subtype == "hook_callback";
+        let tool_name = tool_name.ok_or_else(invalid)?.to_owned();
+        if kind != "control_request"
+            || !(hook || subtype == "can_use_tool")
+            || (hook && callback_id != Some(PRE_TOOL_CALLBACK))
+            || agent_id
+            || !valid_id(&tool_name)
+            || tool_use_id.is_some_and(|id| !valid_id(id))
+            || self.seen.len() >= MAX_SESSION_REQUESTS
+            || !self.seen.insert(request_id.clone())
+        {
+            return Err(invalid());
+        }
+        let tool_use_id = tool_use_id.map(str::to_owned);
+        let token = Arc::new(());
+        self.pending.insert(request_id.clone(), Pending {
+            hook, token: token.clone(), tool_name: tool_name.clone(), tool_use_id: tool_use_id.clone(), withheld: true,
+        });
+        let request = Request {
+            request_id, tool_name, tool_use_id, target: ToolTarget::Unsupported,
+            tool_input: String::new(), token, withheld: true, hold: std::sync::Mutex::new(None),
+        };
+        Ok(if hook { Observation::ToolCheck(request) } else { Observation::Requested(request) })
     }
 
     /// Consumes exactly one outstanding request. No permission update or allow path.
@@ -654,6 +698,46 @@ mod tests {
             // The same frame read whole (not withheld) by an ordinary parser is
             // not this path: only the stream marks a request withheld.
             assert!(!BoundedObservation::new(b"{}\n".to_vec()).unwrap().withheld());
+        }
+    }
+
+    /// PR #25 review I4: two requests past the session bound that used to end
+    /// the session before any refusal — many kept-size strings (a large
+    /// MultiEdit), and a long but valid path whose text was left out — both
+    /// arrive withheld and are declined; their input is never interpreted.
+    #[test]
+    fn streamed_requests_with_many_strings_or_a_long_path_reach_their_refusal() {
+        use crate::provider::oversized_line::{OversizedLinePolicy, OversizedLineStream, PROVIDER_SESSION_LINE_RAW_MAX_BYTES};
+        let long_path = format!("/snapshot/{}/a.txt", "d".repeat(8 * 1024));
+        let edits: Vec<_> = (0..3000).map(|n| json!({"old_string": format!("{n}{}", "o".repeat(1500)), "new_string": format!("{n}{}", "n".repeat(1500))})).collect();
+        for (label, hook, tool, input) in [
+            ("many strings", false, "MultiEdit", json!({"file_path":"/snapshot/a.txt","edits":edits})),
+            ("many strings, hook", true, "MultiEdit", json!({"file_path":"/snapshot/a.txt","edits":edits})),
+            ("long path", false, "Write", json!({"file_path":long_path,"content":"w".repeat(9 * 1024 * 1024)})),
+            ("long path, hook", true, "Write", json!({"file_path":long_path,"content":"w".repeat(9 * 1024 * 1024)})),
+        ] {
+            let value = if hook {
+                json!({"type":"control_request","request_id":"r7","request":{"subtype":"hook_callback","callback_id":PRE_TOOL_CALLBACK,"tool_use_id":"t_r7",
+                    "input":{"session_id":"s","cwd":"/snapshot","hook_event_name":"PreToolUse","tool_name":tool,"tool_use_id":"t_r7","tool_input":input}}})
+            } else {
+                json!({"type":"control_request","request_id":"r7","request":{"subtype":"can_use_tool","tool_name":tool,"input":input,"tool_use_id":"t_r7"}})
+            };
+            let raw = value.to_string().into_bytes();
+            assert!(raw.len() > PROVIDER_SESSION_LINE_RAW_MAX_BYTES, "{label}");
+            let mut stream = OversizedLineStream::new(OversizedLinePolicy::ClaudeStreamJson);
+            for piece in raw.chunks(64 * 1024) { stream.feed(piece).unwrap(); }
+            let observed = stream.finish().unwrap_or_else(|refusal| panic!("{label}: {refusal:?}"));
+            assert!(observed.withheld(), "{label}");
+            let mut permissions = Permissions::default();
+            permissions.bind_hook_scope("s", "/snapshot");
+            let request = match permissions.observe(&observed).unwrap_or_else(|error| panic!("{label}: {error:?}")) {
+                Observation::Requested(request) | Observation::ToolCheck(request) => request,
+                _ => panic!("{label}: expected a request"),
+            };
+            assert_eq!(request.tool_name, tool, "{label}");
+            assert!(request.withheld() && matches!(request.target(), ToolTarget::Unsupported), "{label}");
+            assert!(permissions.allow_once(&request).is_err(), "{label}");
+            assert!(permissions.deny("r7", false).unwrap().as_str().contains("too large for this application to review"), "{label}");
         }
     }
 }

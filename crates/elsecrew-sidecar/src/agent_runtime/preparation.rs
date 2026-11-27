@@ -17,40 +17,26 @@ pub(crate) use claude::ClaudeToolAdmission;
 #[cfg(target_os = "macos")]
 pub(crate) use claude::ClaudeStart;
 #[cfg(target_os = "macos")]
-pub(crate) use claude::{ClaudeLaunchInputs, PreparedClaudeLaunch};
+pub(crate) use claude::PreparedClaudeLaunch;
 
-/// What a named-tools Codex launch command is built from: read before the
-/// run is reserved (`AgentRuntime::codex_start_launch_inputs`) and again by
-/// the launch itself, which uses a command built ahead only when both agree.
-#[derive(Clone, PartialEq)]
-pub(crate) struct CodexLaunchInputs {
-    pub(crate) executable: std::path::PathBuf,
-    pub(crate) helper: std::path::PathBuf,
-    pub(crate) home: std::path::PathBuf,
-    pub(crate) workspace: std::path::PathBuf,
-    pub(crate) model: String,
-    pub(crate) effort: String,
-    pub(crate) approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy,
-    pub(crate) permission: ExpectedPermission,
-}
-
-/// A Codex launch command built ahead, off the engine's loop (ADE
-/// stabilization A): both signed executables pinned and checked, arguments
-/// composed. Nothing is started or written while building.
+/// The slow part of a named-tools Codex launch done ahead, off the engine's
+/// loop (ADE stabilization A): both signed executables pinned and checked.
+/// Arguments and environment are composed at launch from the files as they
+/// are then (PR #25 review I2). Nothing is started or written.
 pub(crate) struct PreparedCodexLaunch {
-    pub(crate) inputs: CodexLaunchInputs,
-    pub(crate) command: crate::provider_preflight_session::vendor_launch::CodexCommand,
+    /// The paths they were pinned from: used only for the same paths.
+    executable: std::path::PathBuf,
+    helper: std::path::PathBuf,
+    pins: (crate::provider_executable::PinnedExecutable, crate::provider_executable::PinnedExecutable),
 }
 
 impl PreparedCodexLaunch {
-    pub(crate) fn build(inputs: CodexLaunchInputs) -> Result<Self, SidecarError> {
-        let expected = elsecrew_core::provider::vendor_observation::codex_preflight::ExpectedProfile {
-            model: &inputs.model, reasoning_effort: &inputs.effort, approval: inputs.approval,
-        };
-        let command = crate::provider_preflight_session::vendor_launch::CodexCommand::new(
-            &inputs.executable, &inputs.helper, &inputs.home, &inputs.workspace, &expected, inputs.permission,
-        )?;
-        Ok(Self { inputs, command })
+    pub(crate) fn build(executable: std::path::PathBuf, helper: std::path::PathBuf) -> Result<Self, SidecarError> {
+        let pins = (
+            crate::provider_executable::PinnedExecutable::open_codex_signed(&executable, false)?,
+            crate::provider_executable::PinnedExecutable::open_codex_signed(&helper, true)?,
+        );
+        Ok(Self { executable, helper, pins })
     }
 }
 
@@ -618,17 +604,15 @@ impl RunReservation {
         }
         if mode == CodexLaunchMode::NamedTools {
             let command = match prepared {
-                // Built ahead off the loop: used only for the very inputs read now.
+                // Pinned ahead off the loop: only for these very paths;
+                // arguments and environment come from now (PR #25 review I2).
                 Some(prepared) => {
-                    let now = CodexLaunchInputs {
-                        executable: executable.revalidate()?.to_owned(),
-                        helper: helper.revalidate()?.to_owned(),
-                        home: home.clone(), workspace: workspace.to_owned(),
-                        model: expected.model.to_owned(), effort: expected.reasoning_effort.to_owned(),
-                        approval: expected.approval, permission,
-                    };
-                    if prepared.inputs != now { return Err(failure()); }
-                    prepared.command
+                    if prepared.executable.as_path() != executable.revalidate()? || prepared.helper.as_path() != helper.revalidate()? {
+                        return Err(failure());
+                    }
+                    crate::provider_preflight_session::vendor_launch::CodexCommand::with_pins(
+                        prepared.pins.0, prepared.pins.1, &home, workspace, &expected, permission,
+                    )?
                 }
                 None => crate::provider_preflight_session::vendor_launch::CodexCommand::new(
                     executable.revalidate()?,

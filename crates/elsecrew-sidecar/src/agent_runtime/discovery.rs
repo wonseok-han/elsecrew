@@ -493,63 +493,6 @@ impl AgentRuntime {
         Ok(())
     }
 
-    /// The inputs of this start's Claude launch command, read before the run
-    /// is reserved so the command (the slow publisher-signature check) can be
-    /// built off the engine's loop (ADE stabilization A). Building it grants
-    /// nothing: the reservation and launch re-check everything and use the
-    /// command only when their own reading of these inputs is equal.
-    #[cfg(target_os = "macos")]
-    pub(crate) fn claude_start_launch_inputs(
-        &self, storage: &Storage, projects: &ProjectManager,
-        request: &AgentRunStartRequestV1, observed: &ScopedClaudeEvidence,
-    ) -> Result<preparation::ClaudeLaunchInputs, SidecarError> {
-        use crate::provider_claude_session::ToolAccess;
-        use crate::provider_profile::LoginProfile;
-        let failure = || SidecarError::new("agentInputChanged", "Claude start input differs");
-        let preparation = preparation::RunPreparation::resolve(storage, projects, request).map_err(|_| failure())?;
-        if observed.profile != preparation.profile { return Err(failure()); }
-        let access = match preparation.profile.permission.as_str() {
-            "readOnly" => ToolAccess::ReadOnly,
-            "workspaceWrite" => ToolAccess::Edit,
-            _ => return Err(failure()),
-        };
-        Ok(preparation::ClaudeLaunchInputs {
-            executable: observed.evidence.executable.revalidate()?.to_owned(),
-            home: crate::provider_claude_profile::ClaudeProfileBinding::from_storage(storage)?.revalidate()?,
-            workspace: PathBuf::from(preparation.manifest["worktreePath"].as_str().ok_or_else(failure)?),
-            source: PathBuf::from(elsecrew_protocol::project_v1::manifest_source_root(&preparation.manifest).ok_or_else(failure)?),
-            model: preparation.profile.model_selector.clone(),
-            effort: preparation.profile.reasoning_effort.clone(),
-            access,
-        })
-    }
-
-    /// The Codex counterpart of `claude_start_launch_inputs`.
-    #[cfg(target_os = "macos")]
-    pub(crate) fn codex_start_launch_inputs(
-        &self, storage: &Storage, projects: &ProjectManager,
-        request: &AgentRunStartRequestV1, observed: &ScopedEvidence,
-    ) -> Result<preparation::CodexLaunchInputs, SidecarError> {
-        let failure = || SidecarError::new("agentInputChanged", "start input is unavailable");
-        let preparation = preparation::RunPreparation::resolve(storage, projects, request).map_err(|_| failure())?;
-        if observed.profile != preparation.profile { return Err(failure()); }
-        let permission = match preparation.profile.permission.as_str() {
-            "readOnly" => ExpectedPermission::ReadOnly,
-            "workspaceWrite" => ExpectedPermission::WorkspaceWrite,
-            _ => return Err(failure()),
-        };
-        Ok(preparation::CodexLaunchInputs {
-            executable: observed.evidence.executable.revalidate()?.to_owned(),
-            helper: observed.evidence.helper.revalidate()?.to_owned(),
-            home: crate::provider_profile::CodexProfileBinding::from_storage(storage)?.revalidate()?,
-            workspace: PathBuf::from(preparation.manifest["worktreePath"].as_str().ok_or_else(failure)?),
-            model: preparation.profile.model_selector.clone(),
-            effort: preparation.profile.reasoning_effort.clone().ok_or_else(failure)?,
-            approval: preparation::codex_approval_policy(storage, projects, preparation.chat["projectId"].as_str().ok_or_else(failure)?)?,
-            permission,
-        })
-    }
-
     pub(crate) fn begin_scoped_discovery(
         &mut self,
         storage: &Storage,

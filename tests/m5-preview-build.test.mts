@@ -106,7 +106,7 @@ test("a build output's paths and a single-page app's routes", () => {
 });
 
 test("the sidecar's plan and the IPC are strict: the page names no folder or command", () => {
-  assert.deepEqual([...PREVIEW_METHODS_V1], ["preview.resolve", "preview.readAsset", "preview.buildPlan", "preview.buildReserve", "preview.buildRelease"]);
+  assert.deepEqual([...PREVIEW_METHODS_V1], ["preview.resolve", "preview.readAsset", "preview.buildPlan", "preview.buildReserve", "preview.buildRelease", "preview.buildHolds"]);
   const request = { projectId: "p", chatId: "c" };
   const plan = { chatId: "c", projectId: "p", worktreeId: "w", workspaceIdentity: "i", refusal: null, workspacePath: "/Users/me/ws", packageManager: "npm", lockfile: true, buildScript: "vite build",
     buildHooks: [{ name: "prebuild", script: "x" }], dependencies: ["react"], dependencyCount: 1, yarnBerry: false, outputDir: "dist", needsInstall: false, fingerprint: "f".repeat(64),
@@ -160,7 +160,9 @@ function runner(overrides: Partial<PreviewBuildOptionsV1> = {}, planOverrides: P
   const holds: string[] = [];
   const released: string[] = [];
   const temps: string[] = [];
-  let reserve: "ok" | "busy" = "ok";
+  let reserve: "ok" | "busy" | "lost" = "ok";
+  const syncs: { holds: { holdId: string; chatId: string }[]; leftoversSettled: boolean }[] = [];
+  let engineBlocks = false;
   let records: unknown = null;
   /** Processes "alive" now, by pid → start time (the fake process table). */
   const table = new Map<number, { ppid: number; pgid: number; started: string }>();
@@ -173,8 +175,15 @@ function runner(overrides: Partial<PreviewBuildOptionsV1> = {}, planOverrides: P
     enabled: true,
     sidecar: () => engine === "down" ? undefined : ({
       previewBuildPlan: async ({ chatId }) => ({ ...plan, chatId }),
-      previewBuildReserve: async () => { if (reserve === "busy") return { holdId: null, refusal: "busy" as const }; const id = `pbh_${String(holds.length).padStart(32, "0")}`; holds.push(id); return { holdId: id, refusal: null }; },
+      previewBuildReserve: async ({ holdId }) => {
+        if (reserve === "busy") return { holdId: null, refusal: "busy" as const };
+        holds.push(holdId);
+        // Held and written, then the engine stops before answering (PR #25 review B1).
+        if (reserve === "lost") throw new Error("sidecar exited");
+        return { holdId, refusal: null };
+      },
       previewBuildRelease: async ({ holdId }) => { if (engine === "failing") throw new Error("sidecar exited"); released.push(holdId); return { holdId, released: true }; },
+      previewBuildHolds: async (input) => { if (engine === "failing") throw new Error("sidecar exited"); syncs.push(input); return { held: input.holds.length, blocking: !input.leftoversSettled && engineBlocks }; },
     }),
     confirm: async (consent) => { confirms.push(consent); return typeof answer === "function" ? (answer as () => Promise<boolean>)() : answer; },
     findTools: () => tools,
@@ -213,8 +222,9 @@ function runner(overrides: Partial<PreviewBuildOptionsV1> = {}, planOverrides: P
   const ask = (action: "start" | "cancel" | "status" | "plan", chatId = "c1", extra: Record<string, unknown> = {}) =>
     manager.request({ action, projectId: "p", chatId, ...extra } as never) as Promise<{ outcome?: string; job: PreviewBuildJobViewV1; plan?: unknown }>;
   return {
-    manager, spawns, children, kills, logs, confirms, ask, table, killed, running, holds, released, temps,
-    setReserve(value: "ok" | "busy") { reserve = value; },
+    manager, spawns, children, kills, logs, confirms, ask, table, killed, running, holds, released, temps, syncs,
+    setReserve(value: "ok" | "busy" | "lost") { reserve = value; },
+    setEngineBlocks(value: boolean) { engineBlocks = value; },
     setRecords(value: unknown) { records = value; },
     setAnswer(value: boolean | (() => Promise<boolean>)) { answer = value as boolean; },
     setPlan(next: Partial<PreviewBuildPlanResultV1>) { plan = { ...plan, ...next }; },
@@ -509,7 +519,7 @@ test("PR #22 review B4: what a real build prints reaches neither the page nor th
       folderIdentity: "1:2", inputs: [{ name: "package.json", sha256: "b".repeat(64) }] };
     const manager = new PreviewBuildManagerV1({
       enabled: true, confirm: async () => true,
-      sidecar: () => ({ previewBuildPlan: async () => plan, previewBuildReserve: async () => ({ holdId: `pbh_${"0".repeat(32)}`, refusal: null }), previewBuildRelease: async ({ holdId }) => ({ holdId, released: true }) }),
+      sidecar: () => ({ previewBuildPlan: async () => plan, previewBuildReserve: async ({ holdId }) => ({ holdId, refusal: null }), previewBuildRelease: async ({ holdId }) => ({ holdId, released: true }), previewBuildHolds: async ({ holds }) => ({ held: holds.length, blocking: false }) }),
       findTools: () => ({ program: process.execPath, pathDirs: [], identity: "node", userConfigs: [] }), isWorkspaceFolder: () => true,
       places: () => ({ caches: [], hidden: [] }), makeTemp: () => dir, removeTemp: () => undefined,
       // The real program, not npm: node printing the secrets.
@@ -747,7 +757,7 @@ test("PR #22 re-review B4: a real process's long begin line and the body after i
       folderIdentity: "1:2", inputs: [{ name: "package.json", sha256: "b".repeat(64) }] };
     const manager = new PreviewBuildManagerV1({
       enabled: true, confirm: async () => true,
-      sidecar: () => ({ previewBuildPlan: async () => plan, previewBuildReserve: async () => ({ holdId: `pbh_${"0".repeat(32)}`, refusal: null }), previewBuildRelease: async ({ holdId }) => ({ holdId, released: true }) }),
+      sidecar: () => ({ previewBuildPlan: async () => plan, previewBuildReserve: async ({ holdId }) => ({ holdId, refusal: null }), previewBuildRelease: async ({ holdId }) => ({ holdId, released: true }), previewBuildHolds: async ({ holds }) => ({ held: holds.length, blocking: false }) }),
       findTools: () => ({ program: process.execPath, pathDirs: [], identity: "node", userConfigs: [] }), isWorkspaceFolder: () => true,
       places: () => ({ caches: [], hidden: [] }), makeTemp: () => dir, removeTemp: () => undefined,
       confine: () => ({ program: process.execPath, args: [script] }),
@@ -804,3 +814,59 @@ test("ADE stabilization A: a release the engine never got (stopped or restarting
   assert.deepEqual(r.released, r.holds, "the retry sent it");
   assert.deepEqual(r.manager.unreleasedHolds, []);
 });
+
+test("PR #25 review B1: a reserve whose answer was lost is released by the name main gave it", async () => {
+  const r = runner();
+  r.setReserve("lost");
+  assert.equal((await r.ask("start", "c1", { step: "build" })).outcome, "busy");
+  assert.equal(r.spawns.length, 0, "nothing ran");
+  assert.equal(r.holds.length, 1);
+  assert.match(r.holds[0]!, /^pbh_[0-9a-f]{32}$/, "main named it");
+  await wait(5);
+  assert.deepEqual(r.released, r.holds, "released by that name at once");
+  assert.deepEqual(r.manager.heldHolds, []);
+  // The engine was down for the release too: it goes out once one is ready.
+  const down = runner();
+  down.setReserve("lost");
+  down.setEngine("failing");
+  await down.ask("start", "c1", { step: "build" });
+  await wait(5);
+  assert.deepEqual(down.manager.unreleasedHolds, down.holds);
+  down.setEngine("up");
+  down.manager.engineReady();
+  await wait(5);
+  assert.deepEqual(down.syncs.at(-1)!.holds, [], "the new engine learns main holds nothing");
+  assert.deepEqual(down.released, down.holds);
+});
+
+test("PR #25 review B2: each new engine learns main's holds, and leftovers count as settled only once checked and gone", async () => {
+  const r = runner();
+  assert.equal((await r.ask("start", "c1", { step: "build" })).outcome, "started");
+  const hold = r.holds[0]!;
+  // Before the app has looked at an earlier run's leftovers: not settled.
+  r.manager.engineReady();
+  await wait(5);
+  assert.deepEqual(r.syncs.at(-1), { holds: [{ holdId: hold, chatId: "c1" }], leftoversSettled: false });
+  // Looked, an earlier run's process still alive: still not settled, and
+  // the engine keeps blocking; main looks again later.
+  r.table.set(900, { ppid: 1, pgid: 900, started: "immortal" });
+  r.setRecords([{ leader: 900, leaderStarted: "immortal", processes: [{ pid: 900, started: "immortal" }] }]);
+  r.setEngineBlocks(true);
+  r.manager.recoverLeftovers();
+  await wait(5);
+  assert.equal(r.syncs.at(-1)!.leftoversSettled, false);
+  assert.equal(r.manager.engineBlocking, true);
+  // Gone: settled, and the engine lets go.
+  r.table.delete(900);
+  r.manager.engineReady();
+  await wait(5);
+  assert.deepEqual(r.syncs.at(-1), { holds: [{ holdId: hold, chatId: "c1" }], leftoversSettled: true });
+  assert.equal(r.manager.engineBlocking, false);
+  // The job ends: the hold leaves main's list.
+  r.children[0]!.emit("close", 0);
+  await settle();
+  r.manager.engineReady();
+  await wait(5);
+  assert.deepEqual(r.syncs.at(-1)!.holds, []);
+});
+

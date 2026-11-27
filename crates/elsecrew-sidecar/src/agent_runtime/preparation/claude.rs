@@ -63,35 +63,20 @@ struct ClaudePending {
     accepted: bool,
 }
 
-/// What a Claude launch command is built from: read before the run is
-/// reserved (`AgentRuntime::claude_start_launch_inputs`) and again by the
-/// launch itself, which uses a command built ahead only when both agree.
-#[derive(Clone, PartialEq)]
-pub(crate) struct ClaudeLaunchInputs {
-    pub(crate) executable: PathBuf,
-    pub(crate) home: PathBuf,
-    pub(crate) workspace: PathBuf,
-    pub(crate) source: PathBuf,
-    pub(crate) model: String,
-    pub(crate) effort: Option<String>,
-    pub(crate) access: crate::provider_claude_session::ToolAccess,
-}
-
-/// A Claude launch command built ahead, off the engine's loop, with the
-/// inputs it was built from. Building is pure: it pins and checks the signed
-/// executable and composes arguments; nothing is started or written.
+/// The slow part of a Claude launch done ahead, off the engine's loop (ADE
+/// stabilization A): the executable pinned and its publisher signature
+/// checked. Arguments and environment are composed at launch from the files
+/// as they are then (PR #25 review I2). Nothing is started or written.
 pub(crate) struct PreparedClaudeLaunch {
-    pub(crate) inputs: ClaudeLaunchInputs,
-    pub(crate) command: crate::provider_claude_session::launch::ClaudeCommand,
+    /// The path it was pinned from: the launch uses it only for the same path.
+    executable: PathBuf,
+    pin: crate::provider_executable::PinnedExecutable,
 }
 
 impl PreparedClaudeLaunch {
-    pub(crate) fn build(inputs: ClaudeLaunchInputs) -> Result<Self, SidecarError> {
-        let command = crate::provider_claude_session::launch::ClaudeCommand::new(
-            &inputs.executable, &inputs.home, &inputs.workspace, &inputs.source,
-            &inputs.model, inputs.effort.as_deref(), inputs.access,
-        )?;
-        Ok(Self { inputs, command })
+    pub(crate) fn build(executable: PathBuf) -> Result<Self, SidecarError> {
+        let pin = crate::provider_executable::PinnedExecutable::open_claude_signed(&executable)?;
+        Ok(Self { executable, pin })
     }
 }
 
@@ -611,10 +596,8 @@ impl RunReservation {
         self.launch_claude_prepared(storage, projects, process, executable, cancel, admit, None)
     }
 
-    /// `prepared`: a command built ahead from `ClaudeLaunchInputs` (the slow
-    /// part: the publisher signature check and hashing of the executable).
-    /// Every check below runs as before; the command is used only when the
-    /// inputs read here are equal to those it was built from.
+    /// `prepared`: the executable pinned ahead (the slow part: the publisher
+    /// signature check and hashing). Every check below runs as before.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn launch_claude_prepared(
         &self,
@@ -654,14 +637,11 @@ impl RunReservation {
             { return Err(failure()); }
         }
         let command = match prepared {
+            // Pinned ahead: only for this very executable path; arguments
+            // and environment come from now.
             Some(prepared) => {
-                let now = ClaudeLaunchInputs {
-                    executable: executable.revalidate()?.to_owned(), home: home.clone(),
-                    workspace: workspace.to_owned(), source: source.to_owned(),
-                    model: model.to_owned(), effort: effort.map(str::to_owned), access,
-                };
-                if prepared.inputs != now { return Err(failure()); }
-                prepared.command
+                if prepared.executable.as_path() != executable.revalidate()? { return Err(failure()); }
+                ClaudeCommand::with_pin(prepared.pin, &home, workspace, source, model, effort, access)?
             }
             None => crate::latency_log::step("launch.claude.command", || ClaudeCommand::new(executable.revalidate()?, &home, workspace, source, model, effort, access))?,
         };

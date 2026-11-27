@@ -287,6 +287,7 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
   const protocolHandlers = new Map<string, (request: { url: string }) => Promise<Response>>();
   const netFetches: string[] = [];
   const sidecarCalls: string[] = [];
+  const holdSyncs: unknown[] = [];
   const providerConnections: Record<"claude-code" | "codex", boolean> = {"claude-code": true, codex: true};
   const privilegedSchemes: { scheme: string; privileges: Record<string, unknown> }[] = [];
   const partitions: string[] = [];
@@ -377,9 +378,14 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
       sidecarCalls.push("getSystemStatus");
       return { state: "ready" };
     }
-    async previewBuildReserve(input: { projectId: string; chatId: string }) {
+    async previewBuildReserve(input: { projectId: string; chatId: string; holdId: string }) {
       sidecarCalls.push(`previewBuildReserve:${JSON.stringify(input)}`);
-      return { holdId: `pbh_${"1".repeat(32)}`, refusal: null };
+      return { holdId: input.holdId, refusal: null };
+    }
+    async previewBuildHolds(input: { holds: { holdId: string; chatId: string }[]; leftoversSettled: boolean }) {
+      // Each engine start's background hold list (PR #25 review B2), not a page request.
+      holdSyncs.push(input);
+      return { held: input.holds.length, blocking: false };
     }
     async previewBuildRelease(input: { holdId: string }) {
       sidecarCalls.push(`previewBuildRelease:${input.holdId}`);

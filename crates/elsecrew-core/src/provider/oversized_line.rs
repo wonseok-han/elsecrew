@@ -311,11 +311,21 @@ fn shorten(value: &mut Value, longs: &Longs) {
 /// The most a single line may stream through `OversizedLineStream` (ADE
 /// stabilization A). It is read, not held: memory stays at the skeleton.
 pub const PROVIDER_SESSION_LINE_STREAM_MAX_BYTES: usize = 64 * 1024 * 1024;
-/// The most a streamed line's skeleton (its structure and short strings) may
-/// hold: the same as a line read whole.
-const SKELETON_MAX_BYTES: usize = PROVIDER_SESSION_LINE_RAW_MAX_BYTES;
+/// The most a streamed line's skeleton (its structure and kept strings) may
+/// hold. Past `LEAN_FROM_BYTES` only strings of up to `LEAN_KEEP_BYTES` raw
+/// bytes are kept (keys, ids, names), so even `PROVIDER_SESSION_LINE_MAX_VALUES`
+/// of them fit and a permission request still reaches its refusal (PR #25
+/// review I4): 1 MiB + 64K × (130 + separators) < 10 MiB.
+const SKELETON_MAX_BYTES: usize = 10 * 1024 * 1024;
+const LEAN_FROM_BYTES: usize = 1024 * 1024;
+const LEAN_KEEP_BYTES: usize = 128;
 /// Bytes of a left-out string kept for its shortened text.
 const LONG_PREFIX_BYTES: usize = KEPT_PREFIX_BYTES + 4;
+/// How many left-out strings of one line keep their prefix; later ones are
+/// shortened to their size alone. Bounds the summaries' memory (PR #25 review
+/// M1): such a line cannot fit the observation bound anyway unless they are
+/// dropped (a permission request).
+const LONG_PREFIXES_MAX: usize = 4096;
 /// Starts every placeholder; a per-line random nonce follows.
 const LONG_MARK: char = '\u{F8FF}';
 
@@ -331,7 +341,11 @@ struct LongString {
     newlines: u64,
     last: u8,
     /// The head of the current line (up to five bytes), for diff counts.
-    head: Vec<u8>,
+    head: [u8; 5],
+    head_len: u8,
+    /// Whether this string keeps a prefix (only the first
+    /// `LONG_PREFIXES_MAX` of a line do, which bounds their memory).
+    keeps_prefix: bool,
     /// Whether the text starts like a unified diff (decided on its head).
     unified: Option<bool>,
     in_hunk: bool,
@@ -341,21 +355,27 @@ struct LongString {
 
 impl LongString {
     fn push(&mut self, byte: u8) {
-        if self.prefix.len() < LONG_PREFIX_BYTES { self.prefix.push(byte); }
+        if self.keeps_prefix && self.prefix.len() < LONG_PREFIX_BYTES { self.prefix.push(byte); }
         self.len += 1;
         self.last = byte;
         if byte == b'\n' {
             self.newlines += 1;
             self.end_line();
-        } else if self.head.len() < 5 {
-            self.head.push(byte);
-            if self.unified.is_none() && self.head.len() == 5 { self.decide_unified(); }
+        } else if self.head_len < 5 {
+            self.head[usize::from(self.head_len)] = byte;
+            self.head_len += 1;
+            if self.unified.is_none() && self.head_len == 5 { self.decide_unified(); }
         }
+    }
+
+    fn head(&self) -> &[u8] {
+        &self.head[..usize::from(self.head_len)]
     }
 
     fn decide_unified(&mut self) {
         if self.unified.is_some() { return; }
-        let unified = self.head.starts_with(b"@@") || self.head.starts_with(b"---") || self.head.starts_with(b"diff ");
+        let head = self.head();
+        let unified = head.starts_with(b"@@") || head.starts_with(b"---") || head.starts_with(b"diff ");
         self.unified = Some(unified);
         self.in_hunk = !unified;
     }
@@ -363,7 +383,8 @@ impl LongString {
     /// One line of `diff_counts`, judged on its head.
     fn end_line(&mut self) {
         self.decide_unified();
-        let head = std::mem::take(&mut self.head);
+        let head = self.head[..usize::from(self.head_len)].to_vec();
+        self.head_len = 0;
         if head.starts_with(b"diff ") { self.in_hunk = false; }
         else if head.starts_with(b"@@") { self.in_hunk = true; }
         else if self.in_hunk {
@@ -534,9 +555,12 @@ impl OversizedLineStream {
                 }
             }
             if self.values > PROVIDER_SESSION_LINE_MAX_VALUES { return Err(Refusal::TooManyValues); }
+            // Bounded before it grows (PR #25 review M1).
+            if self.skeleton.len() + end > SKELETON_MAX_BYTES { return Err(Refusal::StillOverBound); }
             self.skeleton.extend_from_slice(&rest[..end]);
             if end < rest.len() {
-                self.string = Some(StringScan { raw: vec![b'"'], stats: LongString::default(), escape: None, high: None, utf8: Vec::new() });
+                let stats = LongString { keeps_prefix: self.longs.strings.len() < LONG_PREFIXES_MAX, ..LongString::default() };
+                self.string = Some(StringScan { raw: vec![b'"'], stats, escape: None, high: None, utf8: Vec::new() });
                 start += end + 1;
             } else {
                 start = bytes.len();
@@ -591,18 +615,19 @@ impl OversizedLineStream {
                 b'"' => {
                     if !scan.utf8.is_empty() || scan.high.is_some() { return Err(Refusal::NotJson); }
                     let mut scan = self.string.take().expect("string in progress");
-                    if scan.stats.len <= KEEP_STRING_BYTES {
+                    let lean = self.skeleton.len() > LEAN_FROM_BYTES;
+                    let kept = if lean { scan.raw.len() <= LEAN_KEEP_BYTES + 2 && scan.stats.len <= LEAN_KEEP_BYTES } else { scan.stats.len <= KEEP_STRING_BYTES };
+                    let piece = if kept {
                         // Kept whole, exactly as written; parsed later with the rest.
-                        self.skeleton.extend_from_slice(&scan.raw);
+                        std::mem::take(&mut scan.raw)
                     } else {
                         scan.stats.finish();
-                        let placeholder = format!("{}{}", self.longs.mark, self.longs.strings.len());
+                        let placeholder = format!("\"{}{}\"", self.longs.mark, self.longs.strings.len());
                         self.longs.strings.push(scan.stats);
-                        self.skeleton.push(b'"');
-                        self.skeleton.extend_from_slice(placeholder.as_bytes());
-                        self.skeleton.push(b'"');
-                    }
-                    if self.skeleton.len() > SKELETON_MAX_BYTES { return Err(Refusal::StillOverBound); }
+                        placeholder.into_bytes()
+                    };
+                    if self.skeleton.len() + piece.len() > SKELETON_MAX_BYTES { return Err(Refusal::StillOverBound); }
+                    self.skeleton.extend_from_slice(&piece);
                     return Ok(used);
                 }
                 0x00..=0x1f => return Err(Refusal::NotJson),
@@ -629,8 +654,28 @@ impl OversizedLineStream {
         let mut root = unique_json::parse(&self.skeleton).map_err(|_| Refusal::NotJson)?;
         self.skeleton = Vec::new();
         if self.policy == OversizedLinePolicy::ClaudeStreamJson && is_claude_permission_request(&root) {
-            // Never approvable at this size: hand it on with nothing of the
-            // left-out text, marked withheld, so it can only be declined.
+            // Never approvable at this size: hand on only what a refusal
+            // needs (its id, kind, tool name and use id, and for a hook our
+            // callback and the event name), marked withheld, so it can only be
+            // declined. Nothing of the tool input is kept (PR #25 review I4).
+            let pick = |value: &Value, keys: &[&str]| -> Value {
+                let mut kept = Map::new();
+                if let Some(object) = value.as_object() {
+                    for key in keys {
+                        if let Some(field) = object.get(*key) { kept.insert((*key).to_owned(), field.clone()); }
+                    }
+                }
+                Value::Object(kept)
+            };
+            let request = root.get("request").cloned().unwrap_or(Value::Null);
+            let mut kept_request = pick(&request, &["subtype", "tool_name", "tool_use_id", "callback_id", "agent_id"]);
+            kept_request.as_object_mut().ok_or(Refusal::UnknownShape)?.insert("input".into(),
+                pick(request.get("input").unwrap_or(&Value::Null), &["hook_event_name", "tool_name", "tool_use_id", "agent_id"]));
+            root = Value::Object(Map::from_iter([
+                ("type".to_owned(), root["type"].clone()),
+                ("request_id".to_owned(), root.get("request_id").cloned().unwrap_or(Value::Null)),
+                ("request".to_owned(), kept_request),
+            ]));
             self.longs.drop_all(&mut root);
             if self.longs.remains_in(&root) { return Err(Refusal::LongStringKept); }
             let mut bytes = serde_json::to_vec(&root).map_err(|_| Refusal::NotJson)?;
@@ -1114,12 +1159,17 @@ mod tests {
         for _ in 0..=PROVIDER_SESSION_LINE_STREAM_MAX_BYTES / piece.len() { if let Err(refusal) = runaway.feed(&piece) { refused = Some(refusal); break; } }
         assert_eq!(refused, Some(OversizedLineRefusal::OverStreamBound));
         assert!(runaway.feed(b"x").is_err() && runaway.finish().is_err(), "a refusal is final");
+        // Many kept-size strings (PR #25 review I4): past 1 MiB the skeleton
+        // keeps only short ones, so it stays bounded while reading; such a
+        // frame then does not fit the observation bound and is refused at
+        // the end, not halfway.
         let mut many = OversizedLineStream::new(OversizedLinePolicy::ClaudeStreamJson);
         many.feed(br#"{"type":"user","items":["#).unwrap();
         let small = format!("\"{}\",", "s".repeat(4000));
-        let mut refused = None;
-        for _ in 0..4000 { if let Err(refusal) = many.feed(small.as_bytes()) { refused = Some(refusal); break; } }
-        assert_eq!(refused, Some(OversizedLineRefusal::StillOverBound));
+        for _ in 0..4000 { many.feed(small.as_bytes()).unwrap(); }
+        many.feed(br#""end"]}"#).unwrap();
+        assert!(many.len() > PROVIDER_SESSION_LINE_RAW_MAX_BYTES && many.skeleton.len() < 2 * LEAN_FROM_BYTES, "{}", many.skeleton.len());
+        assert_eq!(many.finish().unwrap_err(), OversizedLineRefusal::StillOverBound);
     }
 
     /// Malformed text inside a left-out string is refused like any malformed

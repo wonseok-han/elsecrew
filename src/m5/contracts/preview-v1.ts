@@ -12,7 +12,7 @@
  */
 import { exactKeys, fail, requireObject } from "./project-v1.ts";
 
-export const PREVIEW_METHODS_V1 = ["preview.resolve", "preview.readAsset", "preview.buildPlan", "preview.buildReserve", "preview.buildRelease"] as const;
+export const PREVIEW_METHODS_V1 = ["preview.resolve", "preview.readAsset", "preview.buildPlan", "preview.buildReserve", "preview.buildRelease", "preview.buildHolds"] as const;
 export const PREVIEW_ASSET_MAX_BYTES_V1 = 5 * 1024 * 1024;
 export const PREVIEW_ASSET_CHUNK_BYTES_V1 = 512 * 1024;
 export const PREVIEW_PATH_MAX_BYTES_V1 = 1024;
@@ -430,15 +430,41 @@ export interface PreviewBuildPlanResultV1 extends PreviewWorkspaceRefV1 {
   inputs: { name: string; sha256: string }[] | null;
 }
 
-export interface PreviewBuildReserveRequestV1 { projectId: string; chatId: string }
+/** Main names the hold (PR #25 review B1): a reserve whose answer was lost
+ * can still be released by that name. */
+export interface PreviewBuildReserveRequestV1 { projectId: string; chatId: string; holdId: string }
 export interface PreviewBuildReserveResultV1 { holdId: string | null; refusal: "busy" | null }
 export interface PreviewBuildReleaseRequestV1 { holdId: string }
 export interface PreviewBuildReleaseResultV1 { holdId: string; released: boolean }
 const HOLD_ID = /^pbh_[0-9a-f]{32}$/;
 export function validatePreviewBuildReserveRequestV1(value: unknown): PreviewBuildReserveRequestV1 {
   const object = requireObject(value, "preview build reserve request");
-  exactKeys(object, ["projectId", "chatId"]);
-  return { projectId: id(object.projectId, "projectId"), chatId: id(object.chatId, "chatId") };
+  exactKeys(object, ["projectId", "chatId", "holdId"]);
+  if (typeof object.holdId !== "string" || !HOLD_ID.test(object.holdId)) fail("holdId is invalid");
+  return { projectId: id(object.projectId, "projectId"), chatId: id(object.chatId, "chatId"), holdId: object.holdId as string };
+}
+/** Main's own holds after an engine start, and whether every process an
+ * earlier app run's build left has ended (PR #25 review B2). */
+export interface PreviewBuildHoldsRequestV1 { holds: { holdId: string; chatId: string }[]; leftoversSettled: boolean }
+export interface PreviewBuildHoldsResultV1 { held: number; blocking: boolean }
+export const PREVIEW_BUILD_HOLDS_MAX_V1 = 64;
+export function validatePreviewBuildHoldsRequestV1(value: unknown): PreviewBuildHoldsRequestV1 {
+  const object = requireObject(value, "preview build holds request");
+  exactKeys(object, ["holds", "leftoversSettled"]);
+  if (!Array.isArray(object.holds) || object.holds.length > PREVIEW_BUILD_HOLDS_MAX_V1 || typeof object.leftoversSettled !== "boolean") fail("build holds are invalid");
+  const holds = (object.holds as unknown[]).map(entry => {
+    const hold = requireObject(entry, "build hold");
+    exactKeys(hold, ["holdId", "chatId"]);
+    if (typeof hold.holdId !== "string" || !HOLD_ID.test(hold.holdId)) fail("holdId is invalid");
+    return { holdId: hold.holdId as string, chatId: id(hold.chatId, "chatId") };
+  });
+  return { holds, leftoversSettled: object.leftoversSettled as boolean };
+}
+export function validatePreviewBuildHoldsResultV1(value: unknown): PreviewBuildHoldsResultV1 {
+  const object = requireObject(value, "preview build holds result");
+  exactKeys(object, ["held", "blocking"]);
+  if (!Number.isSafeInteger(object.held) || (object.held as number) < 0 || (object.held as number) > PREVIEW_BUILD_HOLDS_MAX_V1 || typeof object.blocking !== "boolean") fail("build holds result is invalid");
+  return { held: object.held as number, blocking: object.blocking as boolean };
 }
 export function validatePreviewBuildReserveResultV1(value: unknown): PreviewBuildReserveResultV1 {
   const object = requireObject(value, "preview build reserve result");

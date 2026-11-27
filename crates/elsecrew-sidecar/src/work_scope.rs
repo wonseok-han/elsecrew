@@ -53,12 +53,18 @@ impl BusyChats {
 impl Sidecar {
     /// Tasks whose workspace something may be writing now.
     pub(crate) fn busy_chats(&self) -> BusyChats {
+        // A build hold this engine could not confirm after a restart: any
+        // task may be written (PR #25 review B2, preview_build_holds.rs).
+        if self.preview_build_holds.unknown {
+            return BusyChats::Unknown;
+        }
         let Some(mut chats) = self.agent_runtime.run_chats() else {
             return BusyChats::Unknown;
         };
         chats.extend(self.workflow_chats.iter().cloned());
-        // A build-then-preview job writes its task's workspace too (PR #22 re-review).
-        chats.extend(self.preview_build_holds.values().cloned());
+        // A build-then-preview job writes its task's workspace too (PR #22
+        // re-review), and so may one an earlier app run left (PR #25 review B2).
+        chats.extend(self.preview_build_holds.chats().cloned());
         chats.extend(self.g5.active_chat_ids());
         chats.extend(self.pending_agent_starts.values().map(|start| start.input.chat_id.clone()));
         chats.extend(self.pending_agent_cancels.values().map(|(_, identity)| identity.chat_id.clone()));
@@ -152,6 +158,10 @@ impl Sidecar {
         if !blocked {
             return None;
         }
+        // Possibly an unconfirmed build: say so, and how it is released.
+        if self.preview_build_holds.unconfirmed() {
+            return Some(("orchestrationBusy", preview_build_holds::BLOCKED_DETAIL));
+        }
         Some(match (request.method.as_str(), params.get("action").and_then(Value::as_str)) {
             (_, Some("inspectChatDiscard" | "discardChatWorkspace")) => ("requestBlocked", "workspace discard requires idle native execution of this task"),
             (_, Some("mergeChatWorkspace")) => ("requestBlocked", "merging requires this task's agents to be idle"),
@@ -174,28 +184,85 @@ impl Sidecar {
     /// run, a start or stop in flight, another build, or any busy task whose
     /// write scope meets it. Held, it keeps team runs and every write
     /// `write_refusal` knows away from that scope until main releases it.
-    pub(crate) fn preview_build_reserve(&mut self, project_id: &str, chat_id: &str) -> Result<project::ProjectAction, project::ProjectFailure> {
+    /// Main names the hold (PR #25 review B1): asked again with the same name
+    /// and task (its answer was lost), it answers the same; the hold is
+    /// written down before the answer, or refused.
+    pub(crate) fn preview_build_reserve(&mut self, project_id: &str, chat_id: &str, hold: &str) -> Result<project::ProjectAction, project::ProjectFailure> {
+        if !preview_build_holds::valid_hold(hold) || !preview_build_holds::valid_chat(chat_id) {
+            return Err(project::ProjectFailure::manifest("build hold name is invalid"));
+        }
         let address = self.chat_address(chat_id)
             .filter(|address| address.project_id == project_id)
             .ok_or_else(|| project::ProjectFailure::manifest("build hold names an unknown task"))?;
-        let busy = self.busy_chats();
-        let refused = busy.contains(chat_id)
-            || self.scope_busy(&busy, self.projects.task_write_scope(&self.storage, &address).ok());
+        let held = |hold: &str| serde_json::json!({"holdId": hold, "refusal": Value::Null});
+        let busy = serde_json::json!({"holdId": Value::Null, "refusal": "busy"});
+        match self.preview_build_holds.mine.get(hold) {
+            Some(chat) if chat == chat_id => return Ok(project::ProjectAction { result: held(hold), ..project::ProjectAction::default() }),
+            Some(_) => return Err(project::ProjectFailure::manifest("build hold name is taken")),
+            None if self.preview_build_holds.stale.contains_key(hold) => return Err(project::ProjectFailure::manifest("build hold name is taken")),
+            None => {}
+        }
+        let busy_chats = self.busy_chats();
+        let refused = busy_chats.contains(chat_id)
+            || self.scope_busy(&busy_chats, self.projects.task_write_scope(&self.storage, &address).ok())
+            || self.preview_build_holds.mine.len() >= 64;
         let result = if refused {
-            serde_json::json!({"holdId": Value::Null, "refusal": "busy"})
+            busy
         } else {
-            let hold = format!("pbh_{}", uuid::Uuid::new_v4().simple());
-            self.preview_build_holds.insert(hold.clone(), chat_id.to_owned());
+            let mut next = self.preview_build_holds.clone();
+            next.mine.insert(hold.to_owned(), chat_id.to_owned());
             // Written before main may start the build: an engine restart
             // must find it (preview_build_holds.rs). Unwritten, it is refused.
-            if self.build_hold_file.save(&self.preview_build_holds).is_err() {
-                self.preview_build_holds.remove(&hold);
-                serde_json::json!({"holdId": Value::Null, "refusal": "busy"})
+            if self.build_hold_file.save(&next).is_ok() {
+                self.preview_build_holds = next;
+                held(hold)
             } else {
-                serde_json::json!({"holdId": hold, "refusal": Value::Null})
+                busy
             }
         };
         Ok(project::ProjectAction { result, ..project::ProjectAction::default() })
+    }
+
+    /// Frees a hold only once that is written down (PR #25 review I1): an
+    /// unwritten release answers an error, and main sends it again.
+    pub(crate) fn preview_build_release(&mut self, hold: &str) -> Result<project::ProjectAction, project::ProjectFailure> {
+        if !preview_build_holds::valid_hold(hold) {
+            return Err(project::ProjectFailure::manifest("build hold name is invalid"));
+        }
+        let mut next = self.preview_build_holds.clone();
+        let released = next.mine.remove(hold).is_some();
+        if released {
+            self.build_hold_file.save(&next)
+                .map_err(|_| project::ProjectFailure::manifest("build hold release could not be recorded"))?;
+            self.preview_build_holds = next;
+        }
+        Ok(project::ProjectAction { result: serde_json::json!({"holdId": hold, "released": released}), ..project::ProjectAction::default() })
+    }
+
+    /// Main's own list after an engine start (PR #25 review B2): it replaces
+    /// this app's holds (one whose reserve answer was lost and that main
+    /// never used goes; one main still uses comes back even when the record
+    /// could not be read). Holds of an earlier app run and an unreadable
+    /// record stop blocking only once main says every process an earlier
+    /// build left is gone. Unwritten, nothing changes and an error answers.
+    pub(crate) fn preview_build_sync(&mut self, holds: std::collections::BTreeMap<String, String>, leftovers_settled: bool) -> Result<project::ProjectAction, project::ProjectFailure> {
+        if holds.len() > 64 || !holds.iter().all(|(hold, chat)| preview_build_holds::valid_hold(hold) && preview_build_holds::valid_chat(chat)) {
+            return Err(project::ProjectFailure::manifest("build hold list is invalid"));
+        }
+        let mut next = preview_build_holds::Holds { mine: holds, ..self.preview_build_holds.clone() };
+        if leftovers_settled {
+            next.stale.clear();
+            next.unknown = false;
+        } else {
+            next.stale.retain(|hold, _| !next.mine.contains_key(hold));
+        }
+        self.build_hold_file.save(&next)
+            .map_err(|_| project::ProjectFailure::manifest("build holds could not be recorded"))?;
+        self.preview_build_holds = next;
+        Ok(project::ProjectAction {
+            result: serde_json::json!({"held": self.preview_build_holds.mine.len(), "blocking": self.preview_build_holds.unconfirmed()}),
+            ..project::ProjectAction::default()
+        })
     }
 
     /// A check or start of a task whose workspace a build holds: answered
@@ -207,20 +274,24 @@ impl Sidecar {
         }
         let chat = request.params.get("chatId").and_then(Value::as_str)?;
         self.preview_build_blocks(chat).then(|| HandledRequest::response(error_response(request, "orchestrationBusy", "requestBlocked",
-            "a build of this task's workspace is running; wait for it or stop it first")))
+            if self.preview_build_holds.unconfirmed() { preview_build_holds::BLOCKED_DETAIL }
+            else { "a build of this task's workspace is running; wait for it or stop it first" })))
     }
 
     /// Whether a build holds this task's workspace or one its writes meet.
     /// A scope that cannot be resolved meets everything (fail closed).
     pub(crate) fn preview_build_blocks(&self, chat: &str) -> bool {
-        if self.preview_build_holds.is_empty() {
+        if self.preview_build_holds.unknown {
+            return true;
+        }
+        if self.preview_build_holds.chats().next().is_none() {
             return false;
         }
-        if self.preview_build_holds.values().any(|held| held == chat) {
+        if self.preview_build_holds.chats().any(|held| held == chat) {
             return true;
         }
         let scope = |chat: &str| self.chat_address(chat).and_then(|address| self.projects.task_write_scope(&self.storage, &address).ok());
         let Some(target) = scope(chat) else { return true };
-        self.preview_build_holds.values().any(|held| scope(held).map_or(true, |held| held.meets(&target)))
+        self.preview_build_holds.chats().any(|held| scope(held).map_or(true, |held| held.meets(&target)))
     }
 }

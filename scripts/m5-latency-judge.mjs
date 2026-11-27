@@ -16,7 +16,9 @@
 // Codex runs start at once beside a working Claude run ("warm" alone is the
 // control). The screen sends file read, approval list and getChat every
 // second without waiting (open loop), so a hold of the engine counts as every
-// read sent during it. Only reads sent inside the condition count
+// read sent during it (one timer at a time). The load must hold: two Claude
+// Code and two Codex starts accepted and the warm run alive through them.
+// Only reads sent inside the condition count
 // ("starting": a start still pending when sent — a read the starts hold until
 // they end counts with its full wait; "warm": the warm run running before and
 // after the round), at least
@@ -64,7 +66,15 @@ export function judgeLatency({ stages, exits, reports, samples, seedChats, seedR
       const open = OPEN_LOOP.has(condition);
       if (!open && round.samples !== samples) problems.push(`${condition}: ${round.samples} of ${samples} samples`);
       if (!open && LOADED.has(condition) && round.loadedSamples !== samples) problems.push(`${condition}: the load held in ${round.loadedSamples} of ${samples} samples`);
-      if (condition === "starting" && (report.starts ?? []).some(start => start.error)) problems.push("starting: a start failed");
+      if (condition === "starting") {
+        // The load itself (PR #25 review I5): two Claude Code and two Codex
+        // runs started and answered, beside a warm run alive to the end.
+        const starts = report.starts ?? [];
+        const accepted = runtime => starts.filter(start => start.runtime === runtime && !start.error && start.accepted).length;
+        if (starts.some(start => start.error)) problems.push("starting: a start failed");
+        if (starts.length !== 4 || accepted("claude-code") !== 2 || accepted("codex") !== 2) problems.push(`starting: ${accepted("claude-code")} Claude Code and ${accepted("codex")} Codex starts accepted of 2 + 2 (${starts.length} answered)`);
+        if (round.warmStillRunning !== true) problems.push("starting: the warm run did not live through the starts");
+      }
       if (condition === "warm" && round.warmHeld !== true) problems.push("warm: the warm run did not hold for the round");
       const measured = (report.measurements ?? []).filter(m => m.condition === condition);
       for (const m of measured) {

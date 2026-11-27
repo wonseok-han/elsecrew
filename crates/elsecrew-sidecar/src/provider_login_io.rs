@@ -28,8 +28,15 @@ use std::time::{Duration, Instant};
 /// `PROVIDER_SESSION_LINE_MAX_VALUES` values) and a 128 KiB result, so about
 /// 24 MiB per slot at worst, 48 MiB for both. Every other connection holds at
 /// most the 128 KiB bound plus one read (192 KiB) before it must wait.
-/// A line past 8 MiB streams instead (`OversizedLineStream`): its skeleton is
-/// bounded like a held line, and its long strings are counted, not held.
+/// A line past 8 MiB streams instead (`OversizedLineStream`). Computed bound
+/// per slot, not measured (PR #25 review M1): at the switch the held 8 MiB
+/// (and one read) is fed while the skeleton grows (≤ 10 MiB, checked before
+/// it grows), then dropped; long strings keep summaries (≤ 4,096 with a
+/// 260-byte prefix, the rest a few counters, ≤ 64K values); at the end the
+/// skeleton is parsed (its strings ≤ 10 MiB plus at most 64K values). So
+/// roughly 8 MiB passing plus 10 + 4 + 15 MiB, about 37 MiB per slot and
+/// 74 MiB for both; the raw line may be 64 MiB and the connection 256 MiB in
+/// all, but neither is held.
 pub(crate) const LARGE_LINE_SLOTS: usize = 2;
 static LARGE_LINES_HELD: AtomicUsize = AtomicUsize::new(0);
 #[cfg(test)]
@@ -681,6 +688,26 @@ impl LoginIo {
             let found = if self.streaming.is_some() { None } else { self.pending[self.scanned..].iter().position(|byte| *byte == b'\n') };
             if let Some(offset) = found {
                 let end = self.scanned + offset;
+                // One read can bring a line past the observation bound together
+                // with its end: it still needs a slot before it is processed
+                // (found while fixing PR #25: before, such a line skipped the
+                // slot, a timing-dependent gap in the bound).
+                if end > PROVIDER_OBSERVATION_LINE_MAX_BYTES && self.session_lines.is_some() && self.large_line.is_none() {
+                    match LargeLineSlot::try_take() {
+                        Some(slot) => {
+                            let now = Instant::now();
+                            self.slot_wait = None;
+                            self.large_line = Some(HeldLine { _slot: slot, since: now, progress: now, len: self.received });
+                        }
+                        None => {
+                            let since = *self.slot_wait.get_or_insert_with(Instant::now);
+                            if since.elapsed() > self.limits.wait {
+                                return Err(refuse_line(true, "waited too long for a large-line slot"));
+                            }
+                            return Ok(None);
+                        }
+                    }
+                }
                 self.scanned = 0;
                 if end == 0 {
                     return Err(refuse_line(self.session_lines.is_some(), "over the session line bound"));

@@ -409,7 +409,7 @@ fn g5d_shell_ready_precedes_storage_and_verifying_blocks_before_params_or_side_e
 
     let ready = sidecar.ready_event().expect("shell ready");
     let mut baseline = ready.payload.clone();
-    for preview in ["preview.buildRelease", "preview.buildReserve", "preview.buildPlan", "preview.readAsset", "preview.resolve"] {
+    for preview in ["preview.buildHolds", "preview.buildRelease", "preview.buildReserve", "preview.buildPlan", "preview.readAsset", "preview.resolve"] {
         assert_eq!(baseline["capabilities"].as_array_mut().unwrap().pop(), Some(json!(preview)));
     }
     assert_eq!(
@@ -1142,6 +1142,7 @@ fn review_discard_dispatcher_rejects_deferred_native_start_and_cancel() {
                     result: None,
                     stage: crate::agent_start::StartStage::Discovering,
                     arrival: 0,
+                    rediscoveries: 0,
                 },
             );
         } else {
@@ -1258,6 +1259,7 @@ fn test_start(instance: &str, id: &str, arrival: u64, stage: crate::agent_start:
         result: None,
         stage,
         arrival,
+        rediscoveries: 0,
     }
 }
 
@@ -1327,4 +1329,76 @@ fn starts_ready_together_take_one_loop_step_per_pass_oldest_first() {
     }
     assert_eq!(order, ["a", "b", "c", "d"]);
     assert!(sidecar.pending_agent_starts.is_empty());
+}
+
+/// PR #25 review (fault injection: cancel during preparation): a team
+/// step whose team is stopped while its start is prepared, or any start while
+/// the app prepares to quit, never takes its loop step (nothing is reserved
+/// or launched) and answers why. A start whose team goes on still runs.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_start_stopped_or_quitting_during_preparation_never_takes_its_step() {
+    let (_root, path) = database();
+    let instance = "start_gate";
+    let mut session = SidecarSession::new(instance.into(), agent_runtime::AgentRuntime::blocked());
+    session.start_admission(&path);
+    wait_until_admitted(&mut session);
+    let AdmissionState::Ready { sidecar, .. } = &mut session.admission else { panic!("not ready") };
+    let step = Duration::from_millis(400);
+    let mut poll_one = |sidecar: &mut Sidecar, id: &str| {
+        let started = Instant::now();
+        loop {
+            // The start machinery alone: a team step's answer would go on to
+            // the team loop, which needs a real task.
+            let (mut responses, mut events) = (Vec::new(), Vec::new());
+            sidecar.advance_agent_starts(&mut responses, &mut events);
+            if let Some(response) = responses.into_iter().find(|response| response.request_id == id) { return (response, started.elapsed()); }
+            assert!(started.elapsed() < Duration::from_secs(5));
+        }
+    };
+    // A team step whose team was stopped while the start waited (its task
+    // is no longer a working team), and a start nothing stopped.
+    for (id, stop) in [("stopped", true), ("going_on", false)] {
+        if stop { sidecar.workflow_requests.insert(id.into(), (format!("chat_{id}"), "start".into())); }
+        sidecar.pending_agent_starts.insert(id.into(), test_start(instance, id, 1, crate::agent_start::StartStage::TestLoopStep(step, None)));
+        let (response, took) = poll_one(sidecar, id);
+        let error = response.error.unwrap();
+        if stop {
+            assert!(took < step, "the step never ran ({took:?})");
+            assert!(error.detail.contains("stopped before its run started"), "{error:?}");
+        } else {
+            assert!(took >= step, "a team that goes on still runs its step");
+        }
+        sidecar.workflow_requests.remove(id);
+    }
+    // The app prepares to quit while a start waits.
+    sidecar.pending_agent_starts.insert("quit".into(), test_start(instance, "quit", 1, crate::agent_start::StartStage::TestLoopStep(step, None)));
+    sidecar.prepared_to_quit = true;
+    let (response, took) = poll_one(sidecar, "quit");
+    assert!(took < step && response.error.unwrap().detail.contains("quitting"));
+    sidecar.prepared_to_quit = false;
+}
+
+/// PR #25 review I3: right before reserving, a provider check that got too
+/// old while the start waited is checked again (at most twice), never used;
+/// a stopped start is refused even with a fresh check.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_check_too_old_to_reserve_on_is_checked_again_never_used() {
+    use crate::agent_start::{ReadyCheck, START_CHECK_MAX_AGE, START_RECHECKS};
+    let (_root, path) = database();
+    let instance = "ready_check";
+    let mut session = SidecarSession::new(instance.into(), agent_runtime::AgentRuntime::blocked());
+    session.start_admission(&path);
+    wait_until_admitted(&mut session);
+    let AdmissionState::Ready { sidecar, .. } = &mut session.admission else { panic!("not ready") };
+    let fresh = START_CHECK_MAX_AGE - Duration::from_secs(1);
+    let old = START_CHECK_MAX_AGE + Duration::from_secs(1);
+    assert!(matches!(sidecar.ready_check("s", 0, fresh), ReadyCheck::Proceed));
+    assert!(matches!(sidecar.ready_check("s", 0, old), ReadyCheck::CheckAgain));
+    assert!(matches!(sidecar.ready_check("s", START_RECHECKS - 1, old), ReadyCheck::CheckAgain));
+    assert!(matches!(sidecar.ready_check("s", START_RECHECKS, old), ReadyCheck::Refuse(error) if error.kind() == "agentInputChanged"));
+    sidecar.workflow_requests.insert("s".into(), ("chat_s".into(), "start".into()));
+    assert!(matches!(sidecar.ready_check("s", 0, fresh), ReadyCheck::Refuse(_)), "a stopped team step is refused");
+    assert!(matches!(sidecar.ready_check("s", 0, old), ReadyCheck::Refuse(_)), "and never checked again");
 }

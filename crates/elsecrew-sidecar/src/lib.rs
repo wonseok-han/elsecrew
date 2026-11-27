@@ -712,7 +712,7 @@ struct Sidecar {
     /// re-review): while one is held, that task (and any whose write scope
     /// meets it) cannot start a team run, save, merge or discard; a build
     /// cannot be reserved while such work goes on (work_scope.rs).
-    preview_build_holds: std::collections::BTreeMap<String, String>,
+    preview_build_holds: preview_build_holds::Holds,
     /// Where those holds are kept across an engine restart (preview_build_holds.rs).
     build_hold_file: preview_build_holds::HoldFile,
     workflow_requests: BTreeMap<String, (String, String)>,
@@ -750,6 +750,10 @@ struct PendingAgentStart {
     /// Arrival order: the oldest start takes the loop's step first.
     #[cfg(target_os = "macos")]
     arrival: u64,
+    /// How many times this start checked the provider again because its
+    /// check got too old while it waited (agent_start.rs `ready_check`).
+    #[cfg(target_os = "macos")]
+    rediscoveries: u8,
 }
 
 struct AdmissionWorker {
@@ -2037,22 +2041,27 @@ impl Sidecar {
             // The build's write hold (work_scope.rs): reserved before a job
             // starts, released once its processes are proven ended.
             "preview.buildReserve" => {
-                let params = require_exact_params(&request.params, &["projectId", "chatId"]).map_err(invalid_params)?;
+                let params = require_exact_params(&request.params, &["projectId", "chatId", "holdId"]).map_err(invalid_params)?;
                 let project_id = param_string(params, "projectId").map_err(invalid_params)?.to_owned();
                 let chat_id = param_string(params, "chatId").map_err(invalid_params)?.to_owned();
-                self.preview_build_reserve(&project_id, &chat_id)
+                let hold_id = param_string(params, "holdId").map_err(invalid_params)?.to_owned();
+                self.preview_build_reserve(&project_id, &chat_id, &hold_id)
             }
             "preview.buildRelease" => {
                 let params = require_exact_params(&request.params, &["holdId"]).map_err(invalid_params)?;
                 let hold = param_string(params, "holdId").map_err(invalid_params)?.to_owned();
-                let released = self.preview_build_holds.remove(&hold).is_some();
-                if released {
-                    if let Err(error) = self.build_hold_file.save(&self.preview_build_holds) {
-                        // Freed here; the file keeps it until the app's next start (fail closed).
-                        eprintln!("preview build hold not written: {}", error.kind());
-                    }
+                self.preview_build_release(&hold)
+            }
+            "preview.buildHolds" => {
+                let params = require_exact_params(&request.params, &["holds", "leftoversSettled"]).map_err(invalid_params)?;
+                let settled = params.get("leftoversSettled").and_then(Value::as_bool)
+                    .ok_or_else(|| invalid_params("leftoversSettled must be a boolean".into()))?;
+                let mut holds = std::collections::BTreeMap::new();
+                for entry in params.get("holds").and_then(Value::as_array).ok_or_else(|| invalid_params("holds must be a list".into()))? {
+                    let entry = require_exact_params(entry, &["holdId", "chatId"]).map_err(invalid_params)?;
+                    holds.insert(param_string(entry, "holdId").map_err(invalid_params)?.to_owned(), param_string(entry, "chatId").map_err(invalid_params)?.to_owned());
                 }
-                Ok(project::ProjectAction { result: serde_json::json!({"holdId": hold, "released": released}), ..project::ProjectAction::default() })
+                self.preview_build_sync(holds, settled)
             }
             "preview.readAsset" => {
                 let params = require_exact_params(
@@ -2938,7 +2947,7 @@ impl Sidecar {
         self.start_arrivals += 1;
         self.pending_agent_starts.insert(request.request_id.clone(), PendingAgentStart {
             runtime, request, input, reservation: None, process: None, result: None,
-            stage: agent_start::StartStage::Discovering, arrival: self.start_arrivals,
+            stage: agent_start::StartStage::Discovering, arrival: self.start_arrivals, rediscoveries: 0,
         });
         Ok(HandledRequest { response: None, events: Vec::new() })
     }

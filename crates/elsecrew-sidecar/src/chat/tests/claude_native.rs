@@ -77,6 +77,16 @@ fn claude_large_tool_input_is_read_whole_before_allowing_and_its_budget_always_r
     claude_native_cases(&[("big-allow", false), ("big-decline", false), ("big-end", false), ("big-send-fail", false)]);
 }
 
+/// PR #25 review I4 (fault injection on a real approval session): a
+/// permission request past the 8 MiB session bound — many kept-size strings,
+/// or a long valid path — is declined with the guidance (the fake Claude
+/// checks the reply), and the session reads on to its answer.
+#[test]
+fn claude_permission_requests_past_the_session_bound_are_declined_and_the_session_goes_on() {
+    let _slots = crate::provider_login_io::LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    claude_native_cases(&[("huge-path", false), ("huge-many", false)]);
+}
+
 #[test]
 fn claude_durable_native_three_thousand_outputs() {
     claude_native_cases(&[("long", true)]);
@@ -238,6 +248,23 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
                 "big-send-fail" => script.push_str("exec 0<&-\n/bin/sleep 2\n"),
                 _ => {}
             }
+        }
+        if case.starts_with("huge-") {
+            // Past the 8 MiB session bound (PR #25 review I4): many kept-size
+            // strings, or a long valid path beside a huge content. Both are
+            // declined with the guidance, then the session reads on.
+            let input = if case == "huge-many" {
+                let edits: Vec<_> = (0..3000).map(|n| json!({"old_string": format!("{n}{}", "o".repeat(1500)), "new_string": format!("{n}{}", "n".repeat(1500))})).collect();
+                json!({"file_path":format!("{cwd}/a.txt"),"edits":edits})
+            } else {
+                json!({"file_path":format!("{cwd}/{}/big.txt", "d".repeat(8 * 1024)),"content":"w".repeat(9 * 1024 * 1024)})
+            };
+            let frame = json!({"type":"control_request","request_id":"write_huge","request":{"subtype":"can_use_tool",
+                "tool_name":if case == "huge-many" { "MultiEdit" } else { "Write" },"tool_use_id":"tool_huge","input":input}});
+            let path = f._root.path().join(format!("claude-{case}.jsonl"));
+            fs::write(&path, format!("{frame}\n")).unwrap();
+            script.push_str(&format!("/bin/cat '{}' || exit 5\n", path.to_str().unwrap().replace('\'', "'\\''")));
+            script.push_str("IFS= read -r reply || exit 3\ncase \"$reply\" in *'too large for this application to review'*) ;; *) exit 4 ;; esac\n");
         }
         if case == "auto-read-index-lock" {
             // A concurrent provider `git status` briefly owns the index lock while
@@ -500,7 +527,7 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             .collect();
         assert_eq!(
             final_text,
-            if matches!(case, "success" | "long" | "many-processes" | "organization-guard" | "privacy" | "privacy-with-guard" | "default-effort" | "allow" | "auto" | "auto-outside" | "auto-missing" | "auto-missing-hook" | "auto-read" | "auto-read-mutate" | "auto-read-index-lock" | "big-allow" | "big-decline" | "big-end") {
+            if matches!(case, "success" | "long" | "many-processes" | "organization-guard" | "privacy" | "privacy-with-guard" | "default-effort" | "allow" | "auto" | "auto-outside" | "auto-missing" | "auto-missing-hook" | "auto-read" | "auto-read-mutate" | "auto-read-index-lock" | "big-allow" | "big-decline" | "big-end" | "huge-many" | "huge-path") {
                 vec![json!("hello")]
             } else {
                 vec![]
