@@ -122,26 +122,42 @@ impl ConsentStore {
         Ok(view)
     }
 
-    /// Every acceptance attempt consumes the plan, including wrong-provider,
-    /// stale, replaced-path and duplicate submissions. A new plan needs new UI consent.
+    /// An acceptance naming the pending plan consumes it, including
+    /// wrong-provider, expired, replaced-path and duplicate submissions. A
+    /// new plan needs new UI consent.
+    ///
+    /// An acceptance naming another plan (an older one, answered in a box
+    /// opened before the plan was prepared again) is refused and leaves the
+    /// pending plan untouched: it was never shown in that box, so this answer
+    /// cannot be its consent, and refusing it must not discard it either
+    /// (PR #14 re-review). `Err(None)` marks that case for the caller.
     pub(crate) fn accept(
         &mut self,
         id: &str,
         provider: &str,
-    ) -> Result<AuthorizedInstall, SidecarError> {
-        let prepared = self.pending.take().ok_or_else(failure)?;
-        if id != prepared.id.to_string()
-            || provider != prepared.authorization.provider
-            || prepared.created.elapsed() >= TTL
+    ) -> Result<AuthorizedInstall, Option<SidecarError>> {
+        if self
+            .pending
+            .as_ref()
+            .is_none_or(|prepared| id != prepared.id.to_string())
         {
-            return Err(failure());
+            return Err(None);
         }
-        prepared.authorization.revalidate_plan()?;
+        let prepared = self.pending.take().ok_or(None)?;
+        if provider != prepared.authorization.provider || prepared.created.elapsed() >= TTL {
+            return Err(Some(failure()));
+        }
+        prepared.authorization.revalidate_plan().map_err(Some)?;
         Ok(prepared.authorization)
     }
 
     pub(crate) fn dismiss(&mut self) {
         self.pending = None;
+    }
+
+    #[cfg(test)]
+    pub(super) fn pending_id_for_test(&self) -> Option<String> {
+        self.pending.as_ref().map(|prepared| prepared.id.to_string())
     }
 }
 
@@ -221,6 +237,41 @@ mod tests {
         assert!(authorization.revalidate_plan().is_ok());
         std::fs::create_dir(root.join(".local")).unwrap();
         assert!(authorization.revalidate_plan().is_err());
+    }
+
+    #[test]
+    fn an_answer_for_an_older_plan_leaves_the_new_plan_waiting() {
+        // PR #14 re-review: a box opened for the first plan is answered after
+        // the plan was prepared again. That answer is refused, and the plan
+        // now awaiting consent is neither used nor discarded.
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let mut store = ConsentStore::default();
+        let older = store.prepare_at_home("codex", &root).unwrap();
+        let newer = store.prepare_at_home("codex", &root).unwrap();
+        let older_id = older["planId"].as_str().unwrap();
+        let newer_id = newer["planId"].as_str().unwrap();
+        assert_ne!(older_id, newer_id);
+        for provider in ["codex", "claude"] {
+            assert!(matches!(store.accept(older_id, provider), Err(None)));
+            assert!(matches!(store.accept("not-a-plan", provider), Err(None)));
+        }
+        assert_eq!(store.pending.as_ref().unwrap().id.to_string(), newer_id);
+        // The pending plan's own answer still behaves as before: a wrong
+        // provider consumes it.
+        assert!(matches!(store.accept(newer_id, "claude"), Err(Some(_))));
+        assert!(store.pending.is_none());
+        assert!(matches!(store.accept(newer_id, "codex"), Err(None)));
+        let last = store.prepare_at_home("codex", &root).unwrap();
+        assert!(matches!(store.accept(older_id, "codex"), Err(None)));
+        assert_eq!(
+            store
+                .accept(last["planId"].as_str().unwrap(), "codex")
+                .ok()
+                .unwrap()
+                .provider(),
+            "codex"
+        );
     }
 
     #[test]

@@ -3657,8 +3657,8 @@ fn git(path: &std::path::Path, args: &[&str]) {
 }
 
 fn sidecar_binary() -> std::path::PathBuf {
-    // Cargo puts this test executable in <target>/<profile>/deps, including
-    // custom target directories and target triples. Do not assume repo/target.
+    // Next to this test's own build (either Cargo layout, custom target
+    // directories and target triples alike). Do not assume repo/target.
     let test_executable = std::env::current_exe().expect("current Cargo test executable");
     let binary = sidecar_binary_for_test_executable(&test_executable);
     assert!(

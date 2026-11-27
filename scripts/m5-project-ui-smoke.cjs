@@ -1,6 +1,9 @@
 // macOS native UI smoke: synthetic project and isolated app data, no providers selected.
 // Requires current .vite/build output and native sidecar; this script does not build them.
 const { app, BrowserWindow, dialog, ipcMain } = require('electron');
+// The checks read the Korean screen, whatever the machine's language (CI runners are English).
+// Chromium takes "ko" here ("ko-KR" falls back to English), as the renderer smoke does.
+app.commandLine.appendSwitch('lang', 'ko');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFile, execFileSync } = require('node:child_process');
@@ -19,15 +22,19 @@ if (nativeInput && (measureMemory || largeFile || largeTree || largeDiff)) throw
 if (idleOnly && (largeFile || largeTree || largeDiff || process.env.ELSECREW_SMOKE_APPLY === '1')) throw new Error('Idle-only diagnostic cannot include project scenarios');
 if (largeDiff && (measureMemory || largeFile || largeTree || process.env.ELSECREW_SMOKE_APPLY === '1')) throw new Error('Large diff is a separate diagnostic scenario');
 if (discardFlow && (measureMemory || idleOnly || nativeInput || largeFile || largeTree || largeDiff || process.env.ELSECREW_SMOKE_APPLY === '1')) throw new Error('Discard is a separate synthetic integration scenario');
-if (discardFlow) {
+// The discard scenario runs a fixture agent. Every other flow keeps the real
+// engine with no provider: the fixture engine keeps the first role set, so
+// the new-task window cannot save its team there (m5-multiproject-ui-smoke.cjs).
+const fixtureScenario = discardFlow ? 'clean' : null;
+if (fixtureScenario) {
   const cp = require('node:child_process');
-  const assert = require('node:assert/strict');
   const originalSpawn = cp.spawn;
+  const sidecar = path.resolve(__dirname, '../target/debug/elsecrew-sidecar');
   cp.spawn = function(command, args, options) {
     if (typeof command === 'string' && path.basename(command) === 'elsecrew-sidecar') {
-      assert.equal(command, path.resolve(__dirname, '../target/debug/elsecrew-sidecar'));
-      assert.deepEqual(args, ['--stdio']);
-      return Reflect.apply(originalSpawn, this, [command, ['--stdio-agent-fixture', 'clean'], options]);
+      // After a clean close the app adds that close's seal (`--storage-seal <value>`).
+      if (path.resolve(command) !== sidecar || args[0] !== '--stdio' || (args.length !== 1 && !(args.length === 3 && args[1] === '--storage-seal'))) throw new Error('unexpected sidecar launch');
+      return Reflect.apply(originalSpawn, this, [command, ['--stdio-agent-fixture', fixtureScenario, ...args.slice(1)], options]);
     }
     return Reflect.apply(originalSpawn, this, arguments);
   };
@@ -108,6 +115,9 @@ if (largeFile) {
 }
 for (const args of [['init','-q','--template='],['add','.'],['-c','core.hooksPath=/dev/null','-c','user.name=Smoke','-c','user.email=smoke@example.invalid','commit','-qm','fixture']]) execFileSync('/usr/bin/git', args, {cwd:source, env:{...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_COUNT:'0'}});
 app.setPath('userData', path.join(root,'userdata'));
+// Task workspaces (real git worktrees) go here, never under the real ~/elsecrew.
+const workspacesRoot = path.join(root, 'workspaces');
+fs.mkdirSync(workspacesRoot);
 // Folders the next pickers return, in order (null = the person cancels); then the default project.
 const pickQueue = [];
 dialog.showOpenDialog = async () => {
@@ -180,6 +190,12 @@ app.on('browser-window-created', (_event, window) => {
       throw new Error('UI condition timeout: '+predicate+'\n'+await run('document.body.innerText'));
     };
     try {
+      // The checks use the wide layout (task list beside the story). A smaller screen (a CI runner's)
+      // shrinks the 1280 px window below the 1100 px band and folds the list into a rail: zoom out so
+      // the page is 1280 CSS px wide. ELSECREW_SMOKE_NARROW=1 shrinks the window to try this locally.
+      if (process.env.ELSECREW_SMOKE_NARROW === '1') { window.setSize(1000, 760); await new Promise(r => setTimeout(r, 300)); }
+      const cssWidth = await run('innerWidth');
+      if (cssWidth < 1280) window.webContents.setZoomFactor(cssWidth / 1280);
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='프로젝트 선택'&&!b.disabled)`);
       if (measureMemory) {
         await sampleMemory();
@@ -227,6 +243,10 @@ app.on('browser-window-created', (_event, window) => {
         await wait(`!document.querySelector('.m5-settings-dialog')`);
       }
       await run(require('./m5-smoke-complete-team.cjs'));
+      // Settings → "작업 공간 폴더" through main's own picker.
+      pickQueue.push(workspacesRoot);
+      const folder = await run(`window.m5Projects.request({action:'chooseWorkspaceFolder'})`);
+      if (folder.folder?.path !== fs.realpathSync(workspacesRoot)) throw new Error('workspace folder not set: ' + JSON.stringify(folder));
       if (projectsFlow) {
         const shots = {};
         const shot = async name => { await new Promise(r => setTimeout(r, 400)); await run(`new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))`); shots[name] = path.join(root, name + '.png'); fs.writeFileSync(shots[name], (await window.webContents.capturePage()).toPNG()); };
@@ -404,8 +424,10 @@ app.on('browser-window-created', (_event, window) => {
       // Team roles from the switcher menu (the PR #8 editor; its draft rules have their own tests). Closing returns
       // focus to a control on the page, not to the document (PR #12 review minor 1).
       await run(`document.querySelector('[data-testid=project-switcher]').open=true`);
-      await wait(`document.querySelector('.m5-switcher-projects li.m5-project-open')`);
-      await run(`document.querySelector('.m5-switcher-projects li.m5-project-open .m5-project-context-popup button:not(.m5-project-manage):not(.m5-danger)').click();document.querySelector('[data-testid=project-switcher]').open=false`);
+      // The team roles item stays off until the project's data is read: wait for it, never click it disabled.
+      const rolesItem = `document.querySelector('.m5-switcher-projects li.m5-project-open .m5-project-context-popup button:not(.m5-project-manage):not(.m5-danger)')`;
+      await wait(`Boolean(${rolesItem})&&!${rolesItem}.disabled`);
+      await run(`${rolesItem}.click();document.querySelector('[data-testid=project-switcher]').open=false`);
       await wait(`document.querySelector('.m5-settings-dialog')?.matches(':modal')`);
       await clickText('프로젝트로 돌아가기', '.m5-settings-dialog');
       await wait(`!document.querySelector('.m5-settings-dialog')`);
@@ -414,7 +436,6 @@ app.on('browser-window-created', (_event, window) => {
       await run(`document.querySelector('.m5-new-chat-button').click()`);
       await wait(`document.querySelector('.m5-new-chat-dialog')?.matches(':modal')`);
       await run(`(()=>{const e=document.querySelector('.m5-new-chat-form input:not([type=checkbox])');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,'Improve hello');e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
-      // The first task's separate yes (Q9) opens once its permissions are read; the permission switches are other boxes.
       await wait(`document.querySelector('.m5-first-chat-confirm input')&&!document.querySelector('.m5-first-chat-confirm input').disabled`);
       await run(`document.querySelector('.m5-first-chat-confirm input').click()`);
       await wait(`!document.querySelector('.m5-new-chat-form button[type=submit]').disabled`);
@@ -480,70 +501,80 @@ app.on('browser-window-created', (_event, window) => {
       await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='저장').click()`);
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='저장'&&b.disabled)`);
       await wait(`document.querySelector('.m5-changes')?.textContent.includes('hello.txt') || document.body.innerText.includes('변경 (1)')`);
-      await showPanel('팀 대화');
-      await run(`Array.from(document.querySelectorAll('.m5-chat-review button')).find(b=>b.textContent==='작업 사본 diff 열기').click()`);
-      await wait(`document.querySelector('[data-testid=right-tab-changes]')?.getAttribute('aria-selected')==='true' || Boolean(document.querySelector('.m5-changes')?.getBoundingClientRect().height)`);
-      // Review opens a fresh summary; the previous rows are intentionally
-      // cleared until that request resolves. Panel visibility is not readiness.
+      // L1 layout: the saved edit is a row in the changes tab, and its diff opens from there.
+      await showPanel('변경');
       await wait(`Array.from(document.querySelectorAll('.m5-change-row')).some(b=>b.title==='hello.txt'&&!b.disabled)`);
-      await run(`Array.from(document.querySelectorAll('.m5-change-row')).find(b=>b.title==='hello.txt'&&!b.disabled).click()`);
-      await wait(`document.querySelector('.m5-diff-details')?.textContent.includes('edited in snapshot')`);
+      // The save starts a fresh read of the changes; a comparison opened while it is on its way is
+      // dropped when it lands, so the row is opened again until its comparison shows.
+      // Monaco draws spaces as no-break spaces.
+      const diffShown = `document.querySelector('.m5-sheet-head h2')?.textContent==='바뀐 내용'&&(document.querySelector('.m5-diff-details')?.textContent??'').replace(/\\u00a0/g,' ').includes('edited in snapshot')`;
+      const openHelloDiff = async () => {
+        for (let attempt = 0; attempt < 10 && !await run(diffShown); attempt++) {
+          await run(`Array.from(document.querySelectorAll('.m5-change-row')).find(b=>b.title==='hello.txt'&&!b.disabled)?.click()`);
+          const until = performance.now() + 1500;
+          while (performance.now() < until && !await run(diffShown)) await new Promise(r=>setTimeout(r,100));
+        }
+        await wait(`(${diffShown})&&Boolean(document.querySelector('.m5-diff-details .monaco-diff-editor, .m5-diff-details .monaco-editor'))`);
+      };
+      await openHelloDiff();
       await new Promise(r=>setTimeout(r,700));
       if(await run(`document.body.innerText.includes('열어 둔 파일이 밖에서 바뀌었어요')`)) throw new Error('self-save reported as external change');
       if(fs.readFileSync(path.join(source,'hello.txt'),'utf8')!=='original\n') throw new Error('source changed');
-      const files = execFileSync('/usr/bin/find',[path.join(root,'userdata'),'-name','hello.txt'],{encoding:'utf8'}).trim().split('\n').filter(Boolean);
-      if(!files.some(file=>fs.readFileSync(file,'utf8')==='edited in snapshot\noriginal\n')) throw new Error('saved snapshot content missing');
+      // The task's workspace is a real git worktree under the chosen workspace folder.
+      const workspaceFiles = () => execFileSync('/usr/bin/find',[workspacesRoot,'-name','hello.txt','-not','-path','*/.git/*'],{encoding:'utf8'}).trim().split('\n').filter(Boolean);
+      if(!workspaceFiles().some(file=>fs.readFileSync(file,'utf8')==='edited in snapshot\noriginal\n')) throw new Error('saved workspace content missing');
+      await openHelloDiff();
       const followupReview = await run(`(${require('../tests/m5-diff-followup-probe.cjs').toString()})()`);
       console.log(JSON.stringify({stage:'DIFF_FOLLOWUP_REVIEW',...followupReview}));
-      await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='이 작업의 반영 전 변경 목록 보기').click()`);
-      await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='이 변경 묶음으로 확인 준비'&&!b.disabled)`);
-      const confirmationStarted = performance.now();
+      // Task = PR (L1 layout): the task is a branch merged into the folder's base. The result bar
+      // offers the merge only after the team ran, and no provider runs here, so the merge goes
+      // through the same bridge request the bar sends (the old apply/restore buttons are gone).
+      if (await run(`Array.from(document.querySelectorAll('button')).some(b=>['작업 사본 diff 열기','이 작업의 반영 전 변경 목록 보기','이 변경 묶음으로 확인 준비'].includes(b.textContent))`)) throw new Error('the old apply flow is still shown');
+      const mergeAddress = `(async()=>{const catalog=await window.m5Projects.request({action:'list',cursor:null});const projectId=catalog.projects.find(p=>p.canonicalPath.endsWith('/project')).projectId;
+        const page=await window.m5.listChats({projectId,cursor:null,limit:100});const chat=page.items.find(c=>c.goal==='Improve hello');
+        return {chatId:chat.chatId,projectId:chat.projectId,worktreeId:chat.worktreeId,workspaceIdentity:chat.workspaceIdentity};})()`;
+      const address = await run(mergeAddress);
+      const inspect = () => run(`window.m5Projects.request(${JSON.stringify({action:'inspectChatMerge',...address})})`);
+      const mergeStarted = performance.now();
       confirmationReport = {status:'pending',diagnostic:true,gateEligible:false};
-      await run(`(()=>{const button=Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='이 변경 묶음으로 확인 준비'); if(!button||button.disabled)throw new Error('confirmation trigger unavailable'); button.click();})()`);
-      try {
-        await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='확인 취소'&&!b.disabled)`, largeTree ? 65000 : 15000);
-        confirmationReport = {...confirmationReport,status:'ready',readyMs:performance.now()-confirmationStarted};
-      } catch(error) {
-        confirmationReport = {...confirmationReport,status:'failed',elapsedMs:performance.now()-confirmationStarted,ui:await run(`({busy:document.querySelector('.m5-chat-review')?.getAttribute('aria-busy'),statuses:Array.from(document.querySelectorAll('.m5-chat-review [role=status]')).map(e=>e.textContent)})`)};
-        throw error;
-      }
-      console.log(JSON.stringify({stage:'CONFIRMATION_READY',...confirmationReport}));
-      await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='확인 취소').click()`);
-      await wait(`!Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='확인 취소')`);
-      if(fs.readFileSync(path.join(source,'hello.txt'),'utf8')!=='original\n') throw new Error('preview cancellation changed source');
-      if (process.env.ELSECREW_SMOKE_APPLY === '1') {
-        await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='이 변경 묶음으로 확인 준비').click()`);
-        await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='백업 후 원본에 반영')`);
-        await run(`Array.from(document.querySelectorAll('label')).find(e=>e.textContent.includes('원본 파일을 변경하는 작업')).querySelector('input').click()`);
-        await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='백업 후 원본에 반영').click()`);
-        await wait(`document.body.innerText.includes('기록된 변경 묶음의 반영이 완료됐어요.')`);
-        if(fs.readFileSync(path.join(source,'hello.txt'),'utf8')!=='edited in snapshot\noriginal\n') throw new Error('application did not write reviewed source');
-        console.log(JSON.stringify({stage:'APPLIED',root}));
+      const before = (await inspect()).merge;
+      confirmationReport = {...confirmationReport,status:'ready',readyMs:performance.now()-mergeStarted,merge:before};
+      console.log(JSON.stringify({stage:'MERGE_STATE',...confirmationReport}));
+      if (before.kind !== 'gitWorktree' || !before.uncommitted || !before.baseCheckedOut || !/^elsecrew\/task-/.test(before.branch ?? '')) throw new Error('the task is not a mergeable task branch: ' + JSON.stringify(before));
+      if(fs.readFileSync(path.join(source,'hello.txt'),'utf8')!=='original\n') throw new Error('reading the merge state changed source');
+      const applied = process.env.ELSECREW_SMOKE_APPLY === '1';
+      if (applied) {
+        // A confirmation for an outdated head is refused and changes nothing.
+        const stale = await run(`window.m5Projects.request(${JSON.stringify({action:'mergeChatWorkspace',...address,expectedHead:'0'.repeat(40),expectedBase:before.baseTip,keepConflicts:false,confirmed:true})})`).catch(error => ({rejected:String(error?.message ?? error)}));
+        if (stale?.outcome === 'merged') throw new Error('a stale confirmation merged');
+        if(fs.readFileSync(path.join(source,'hello.txt'),'utf8')!=='original\n') throw new Error('a refused merge changed source');
+        const merged = await run(`window.m5Projects.request(${JSON.stringify({action:'mergeChatWorkspace',...address,expectedHead:before.head,expectedBase:before.baseTip,keepConflicts:false,confirmed:true})})`);
+        if (merged.outcome !== 'merged') throw new Error('merge did not complete: ' + JSON.stringify(merged));
+        if(fs.readFileSync(path.join(source,'hello.txt'),'utf8')!=='edited in snapshot\noriginal\n') throw new Error('merge did not write the reviewed change into the folder');
+        if(execFileSync('/usr/bin/git',['-C',source,'status','--porcelain'],{encoding:'utf8'}).trim()) throw new Error('merge left the folder with uncommitted changes');
+        console.log(JSON.stringify({stage:'MERGED',root,stale}));
         if (process.env.ELSECREW_SMOKE_RELOAD === '1') {
           await new Promise(resolve => { window.webContents.once('did-finish-load', resolve); window.webContents.reload(); });
-          // The home (ADE U2): the most recent project leads with its continue button.
-          await wait(`document.querySelector('.m5-home:not([hidden]) .m5-home-continue')&&!document.querySelector('.m5-home .m5-home-continue').disabled`);
-          await run(`document.querySelector('.m5-home .m5-home-continue').click()`);
-          await wait(`Array.from(document.querySelectorAll('.m5-chat-chip')).some(b=>b.querySelector('.m5-chat-goal')?.textContent==='Improve hello')`);
+          // The app opens the last project again, or the home (ADE U2) leads with its continue button.
+          await wait(`Boolean(document.querySelector('[data-testid=task-layout]'))||Boolean(document.querySelector('.m5-home:not([hidden]) .m5-home-continue:not(:disabled)'))`, 30000);
+          if (!await run(`Boolean(document.querySelector('[data-testid=task-layout]'))`)) await run(`document.querySelector('.m5-home .m5-home-continue').click()`);
+          await wait(`Array.from(document.querySelectorAll('.m5-chat-chip')).some(b=>b.querySelector('.m5-chat-goal')?.textContent==='Improve hello')`, 30000);
           await run(`Array.from(document.querySelectorAll('.m5-chat-chip')).find(b=>b.querySelector('.m5-chat-goal')?.textContent==='Improve hello').click()`);
+          const after = (await inspect()).merge;
+          if (after.blocked !== 'nothingToMerge') throw new Error('after the reload the task is not merged: ' + JSON.stringify(after));
+          console.log(JSON.stringify({stage:'MERGED_AFTER_RELOAD',root}));
         }
-        await run(`Array.from(document.querySelectorAll('button')).filter(b=>b.textContent==='반영·복원 기록 확인').forEach(b=>b.click())`);
-        await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='복구 기록의 파일 목록 확인')`);
-        await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='복구 기록의 파일 목록 확인').click()`);
-        await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='기록을 확인하고 복원 시작')`);
-        await run(`Array.from(document.querySelectorAll('label')).filter(e=>e.textContent.includes('원본 파일을 변경하는 작업')).find(e=>!e.querySelector('input').checked).querySelector('input').click()`);
-        await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='기록을 확인하고 복원 시작').click()`);
-        await wait(`document.body.innerText.includes('기록된 변경 묶음의 복원이 완료됐어요.')`);
-        if(fs.readFileSync(path.join(source,'hello.txt'),'utf8')!=='original\n') throw new Error('restoration did not restore source');
-        console.log(JSON.stringify({stage:'RESTORED',root}));
       }
+      // After a reload the button waits for the project's data.
+      await wait(`!document.querySelector('.m5-new-chat-button').disabled`, 30000);
       await run(`document.querySelector('.m5-new-chat-button').click()`);
       await wait(`document.querySelector('.m5-new-chat-dialog')?.matches(':modal')`);
       await run(`(()=>{const e=document.querySelector('.m5-new-chat-form input:not([type=checkbox])');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,'Second task');e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
       await wait(`!document.querySelector('.m5-new-chat-form button[type=submit]').disabled`);
       await run(`document.querySelector('.m5-new-chat-form button[type=submit]').click()`);
       await wait(`document.querySelector('.m5-timeline h2')?.textContent==='Second task'`, largeTree ? 65000 : 15000);
-      if (await run(`document.querySelector('.m5-provider-selection')?.open!==false`)) throw new Error('project workbench selection should start collapsed');
+      // The old provider selection block is gone from the L1 layout; if it ever returns it starts collapsed.
+      if (await run(`document.querySelector('.m5-provider-selection')?.open===true`)) throw new Error('project workbench selection should start collapsed');
       await wait(`document.querySelector('.m5-chat-chip[aria-current=true] .m5-chat-goal')?.textContent==='Second task' && Boolean(document.querySelector('.m5-chat-chip[aria-current=true] .m5-chat-status')?.textContent)`);
       console.log(JSON.stringify({stage:'SECOND_CHAT_WINDOW',visible:window.isVisible(),minimized:window.isMinimized(),focused:window.isFocused(),backgroundThrottling:window.webContents.getBackgroundThrottling(),page:await run(`({visibility:document.visibilityState,focus:document.hasFocus()})`)}));
       window.show(); window.focus(); window.webContents.focus();
@@ -552,7 +583,8 @@ app.on('browser-window-created', (_event, window) => {
       await wait(`document.querySelector('.monaco-editor textarea')!==null`);
       await run(`document.querySelector('.monaco-editor textarea').scrollIntoView({block:'center'})`);
       await wait(`document.querySelector('.monaco-editor .view-lines')?.textContent.includes('original')`);
-      if(await run(`document.querySelector('.monaco-editor .view-lines').textContent.includes('edited')`)) throw new Error('chat snapshots mixed');
+      // A new task starts from the folder's base: the first task's edit only after it was merged.
+      if(await run(`document.querySelector('.monaco-editor .view-lines').textContent.includes('edited')`) !== applied) throw new Error(applied ? 'second task did not start from the merged base' : 'chat snapshots mixed');
       await run(`Array.from(document.querySelectorAll('.m5-chat-chip')).find(b=>b.querySelector('.m5-chat-goal')?.textContent==='Improve hello').click()`);
       await wait(`document.querySelector('.m5-timeline h2')?.textContent==='Improve hello'`);
       await showPanel('파일');

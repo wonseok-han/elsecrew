@@ -85,3 +85,76 @@ jobs:
           name: baseline-harness-${{ matrix.os }}
           path: .artifacts/m5-harness/*.json
           if-no-files-found: warn
+
+  # sidecar 전체 시험(위 하네스는 공용 코어·protocol만 돈다, PR #4·#18 보고).
+  # 한 job이면 macOS 3코어에서 30분 가까이 걸려 넷으로 나눈다. 2026-11-27 로컬
+  # 시험별 시간(CPU 초): storage::tests 1953(compaction_writer_v10 592 +
+  # reopen_projection 295), chat::tests 971, 나머지 약 770(project::tests 420,
+  # 통합 시험 stdio_process 포함). 이름 필터와 --skip이 정확히 나누므로 빠지는
+  # 시험도 겹치는 시험도 없다. 시험이 늘면 묶음을 이 표대로 다시 나눈다.
+  # macOS만: 상당수 시험이 macOS 전용(cfg)이고 Windows 실제 실행은 꺼져 있다.
+  sidecar:
+    name: sidecar (macos, ${{ matrix.shard.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - { name: storage-a, filter: "storage::tests::compaction_writer_v10 storage::tests::reopen_projection" }
+          - { name: storage-b, filter: "storage::tests --skip storage::tests::compaction_writer_v10 --skip storage::tests::reopen_projection" }
+          - { name: chat, filter: "chat::tests" }
+          - { name: rest, filter: "--skip storage::tests --skip chat::tests" }
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: 3
+      CARGO_INCREMENTAL: 0
+      RUST_TEST_THREADS: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: sidecar-macos
+
+      # 러너 기본값은 정식 Xcode(/Applications/Xcode_*.app)다. 작업 sandbox는
+      # 개발자 폴더(Contents/Developer)만 읽게 해 `/usr/bin/git` 셰임이 부르는
+      # xcodebuild가 Contents/SharedFrameworks를 못 읽는다(정식 Xcode 사용자의
+      # 남은 결함, 2026-11-27 기록). 일반 사용자와 같은 Command Line Tools로 돈다.
+      - name: 개발자 도구를 Command Line Tools로
+        run: |
+          if [ -x /Library/Developer/CommandLineTools/usr/bin/git ]; then
+            sudo xcode-select -s /Library/Developer/CommandLineTools
+          fi
+          xcode-select -p
+
+      # lib 시험이 같은 target의 sidecar 실행 파일을 띄운다(sidecar_binary()).
+      - name: sidecar 실행 파일
+        run: cargo build -p elsecrew-sidecar --locked --bin elsecrew-sidecar
+
+      - name: sidecar 시험 (${{ matrix.shard.name }})
+        run: cargo test -p elsecrew-sidecar --locked -- ${{ matrix.shard.filter }}
+
+      # 네이티브 스모크(실제 sidecar, 격리 앱 데이터, 공급자 없음): 디버그 sidecar를
+      # 이미 만든 rest 묶음에서만 돈다. 프로젝트 화면 기본 흐름과 합치기·다시
+      # 불러오기, 여러 프로젝트 동시 작업. 시험 단계가 실패해도 따로 돈다.
+      - uses: pnpm/action-setup@v4
+        if: ${{ !cancelled() && matrix.shard.name == 'rest' }}
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        if: ${{ !cancelled() && matrix.shard.name == 'rest' }}
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 네이티브 스모크 (Electron, macOS)
+        if: ${{ !cancelled() && matrix.shard.name == 'rest' }}
+        run: |
+          pnpm install --frozen-lockfile
+          node node_modules/electron/install.js
+          node scripts/m5-multiproject-ui-run.mjs --build
+          node_modules/.bin/electron scripts/m5-project-ui-smoke.cjs
+          ELSECREW_SMOKE_APPLY=1 ELSECREW_SMOKE_RELOAD=1 node_modules/.bin/electron scripts/m5-project-ui-smoke.cjs

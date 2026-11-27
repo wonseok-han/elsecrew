@@ -311,15 +311,26 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             )
             .unwrap();
         assert!(reserved.is_none() && owned_process.is_none());
-        let deadline = Instant::now() + Duration::from_secs(if case == "long" { 660 } else { 15 });
+        // A hang is a run that stops making progress, not one that is slow:
+        // durable `auto-read` alone sends every shared command case (~80
+        // approvals, each with its stored work-history row) and took 13 s on
+        // an idle machine, so a fixed 15 s for the whole run failed under the
+        // load of the full suite. Fail after 15 s without any new event, with
+        // a generous ceiling for the whole run.
+        let stall = Duration::from_secs(15);
+        let ceiling = Instant::now() + Duration::from_secs(if case == "long" { 660 } else { 180 });
+        let mut last_progress = Instant::now();
         if case.starts_with("auto") { assert!(f.projects.automation_permissions(&f.storage, &f.project_id).unwrap().files, "consent survived workspace preparation"); }
         let mut approved = false;
         let mut canceled = false;
         let mut events = Vec::new();
         while runtime.has_active_run(&identity.run_id) {
-            assert!(Instant::now() < deadline, "{case}: owner did not terminate");
-            events.extend(runtime.poll(&mut f.storage, &mut f.projects)
-                .unwrap_or_else(|error| panic!("{case} durable={durable}: {error:?}")));
+            assert!(last_progress.elapsed() < stall, "{case}: no progress for {stall:?}, owner did not terminate");
+            assert!(Instant::now() < ceiling, "{case}: owner did not terminate");
+            let polled = runtime.poll(&mut f.storage, &mut f.projects)
+                .unwrap_or_else(|error| panic!("{case} durable={durable}: {error:?}"));
+            if !polled.is_empty() { last_progress = Instant::now(); }
+            events.extend(polled);
             let current = f
                 .storage
                 .projection_record("run", &identity.run_id)
