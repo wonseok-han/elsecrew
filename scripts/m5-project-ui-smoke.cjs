@@ -1,6 +1,9 @@
 // macOS native UI smoke: synthetic project and isolated app data, no providers selected.
 // Requires current .vite/build output and native sidecar; this script does not build them.
 const { app, BrowserWindow, dialog, ipcMain } = require('electron');
+// The checks read the Korean screen, whatever the machine's language (CI runners are English).
+// Chromium takes "ko" here ("ko-KR" falls back to English), as the renderer smoke does.
+app.commandLine.appendSwitch('lang', 'ko');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFile, execFileSync } = require('node:child_process');
