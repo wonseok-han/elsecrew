@@ -34,6 +34,7 @@ declare global {
     readonly m5ExternalLink?: { open(url: string): Promise<{ opened: boolean }> };
     /** Result preview (ADE 1차-나 F12). On by default; with `ELSECREW_PREVIEW=0` main answers only `status`. */
     readonly m5Preview?: import("./contracts/preview-v1.ts").M5PreviewBridgeV1;
+    readonly m5PreviewBuild?: import("./contracts/preview-v1.ts").M5PreviewBuildBridgeV1;
     readonly m5: Readonly<M5BridgeV8>;
   }
 }

@@ -94,6 +94,8 @@ export interface PreviewManagerOptionsV1 {
   /** The app page's zoom factor and its display's scale (PR #9 review B1). */
   zoomFactor(): number;
   displayScale(): number;
+  /** The task's last successful build (`source: "build"`), from the build runner. */
+  buildOutput?(projectId: string, chatId: string): { dir: string; workspaceIdentity: string } | null;
   /** Tests only shorten these. */
   readDeadlineMs?: number;
   snapshotDelayMs?: number;
@@ -103,6 +105,9 @@ interface PreviewInstance {
   readonly previewId: string;
   readonly token: string;
   readonly entry: string;
+  /** A build output folder: the page's paths are inside it and its own
+   * routes (no extension) are the entry page. Null: the workspace itself. */
+  readonly root: string | null;
   readonly ref: PreviewWorkspaceRefV1;
   /** The sidecar's record of the verified workspace root (review B1). */
   readonly handle: string;
@@ -307,14 +312,19 @@ export class PreviewManagerV1 {
     if (this.#current) this.#close(this.#current, "replaced");
     const sidecar = this.#options.sidecar();
     if (!sidecar) throw new Error("sidecar was not started");
-    const resolved = await sidecar.previewResolve({ projectId: request.projectId, chatId: request.chatId, entry: request.entry });
+    // A build preview: the folder is main's record of the task's last
+    // successful build, never the page's word.
+    const build = request.source === "build" ? this.#options.buildOutput?.(request.projectId, request.chatId) ?? null : null;
+    if (request.source === "build" && !build) return { action: "open", outcome: "empty", reason: "noBuild" };
+    const resolved = await sidecar.previewResolve({ projectId: request.projectId, chatId: request.chatId, entry: build ? `${build.dir}/index.html` : request.entry });
     this.#assertCurrent(generation);
+    if (build && resolved.workspaceIdentity !== build.workspaceIdentity) return { action: "open", outcome: "empty", reason: "noBuild" };
     if (resolved.entry === null) return { action: "open", outcome: "empty", reason: resolved.refusal ?? "noEntry" };
 
     const token = newPreviewToken();
     const session = this.#options.fromPartition(previewPartition(token));
     const instance: PreviewInstance = {
-      previewId: newPreviewId(), token, entry: resolved.entry,
+      previewId: newPreviewId(), token, entry: resolved.entry, root: build?.dir ?? null,
       ref: { chatId: resolved.chatId, projectId: resolved.projectId, worktreeId: resolved.worktreeId, workspaceIdentity: resolved.workspaceIdentity },
       handle: resolved.previewHandle,
       session, view: undefined, state: "loading", bounds, viewport: request.viewport,
@@ -345,7 +355,9 @@ export class PreviewManagerV1 {
     view.setVisible(false);
     target.contentView.addChildView(view);
     this.#apply(instance);
-    view.webContents.loadURL(previewEntryUrl(token, resolved.entry)).catch(() => {
+    // A build's page is at the root of its own origin (its paths are inside the output folder).
+    const loaded = instance.root ? resolved.entry.slice(instance.root.length + 1) : resolved.entry;
+    view.webContents.loadURL(previewEntryUrl(token, loaded)).catch(() => {
       // `did-fail-load` reports it; a closed preview has nothing to report.
     });
     return { action: "open", outcome: "opened", previewId: instance.previewId, entry: resolved.entry, state: "loading" };
@@ -541,7 +553,7 @@ export class PreviewManagerV1 {
       this.diagnostics.refusedMethods++;
       return new Response(null, { status: 405, headers: { ...previewResponseHeaders(null), Allow: PREVIEW_ALLOWED_METHODS.join(", ") } });
     }
-    const decision = parsePreviewRequestUrl(request.url, instance.token, instance.entry);
+    const decision = parsePreviewRequestUrl(request.url, instance.token, instance.entry, instance.root);
     if (!decision.ok) return notFound();
     if (this.#suspended) return status(503);
     // At most a few files at once; the rest wait, and a full queue is busy.

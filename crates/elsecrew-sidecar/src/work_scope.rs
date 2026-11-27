@@ -57,6 +57,8 @@ impl Sidecar {
             return BusyChats::Unknown;
         };
         chats.extend(self.workflow_chats.iter().cloned());
+        // A build-then-preview job writes its task's workspace too (PR #22 re-review).
+        chats.extend(self.preview_build_holds.values().cloned());
         chats.extend(self.g5.active_chat_ids());
         chats.extend(self.pending_agent_starts.values().map(|start| start.input.chat_id.clone()));
         chats.extend(self.pending_agent_cancels.values().map(|(_, identity)| identity.chat_id.clone()));
@@ -164,4 +166,54 @@ enum Target {
     Chat(String),
     Project(String),
     Everything,
+}
+
+impl Sidecar {
+    /// Reserves a task's workspace for a build-then-preview job (PR #22
+    /// re-review): refused while anything may write there — its own team or
+    /// run, a start or stop in flight, another build, or any busy task whose
+    /// write scope meets it. Held, it keeps team runs and every write
+    /// `write_refusal` knows away from that scope until main releases it.
+    pub(crate) fn preview_build_reserve(&mut self, project_id: &str, chat_id: &str) -> Result<project::ProjectAction, project::ProjectFailure> {
+        let address = self.chat_address(chat_id)
+            .filter(|address| address.project_id == project_id)
+            .ok_or_else(|| project::ProjectFailure::manifest("build hold names an unknown task"))?;
+        let busy = self.busy_chats();
+        let refused = busy.contains(chat_id)
+            || self.scope_busy(&busy, self.projects.task_write_scope(&self.storage, &address).ok());
+        let result = if refused {
+            serde_json::json!({"holdId": Value::Null, "refusal": "busy"})
+        } else {
+            let hold = format!("pbh_{}", uuid::Uuid::new_v4().simple());
+            self.preview_build_holds.insert(hold.clone(), chat_id.to_owned());
+            serde_json::json!({"holdId": hold, "refusal": Value::Null})
+        };
+        Ok(project::ProjectAction { result, ..project::ProjectAction::default() })
+    }
+
+    /// A check or start of a task whose workspace a build holds: answered
+    /// before anything of the team is recorded (PR #22 re-review), so the
+    /// same message can start the team once the build ends.
+    pub(crate) fn preview_build_refusal(&self, request: &RequestV1) -> Option<HandledRequest> {
+        if !matches!(request.method.as_str(), "agent.getCapabilities" | "run.startAgent") {
+            return None;
+        }
+        let chat = request.params.get("chatId").and_then(Value::as_str)?;
+        self.preview_build_blocks(chat).then(|| HandledRequest::response(error_response(request, "orchestrationBusy", "requestBlocked",
+            "a build of this task's workspace is running; wait for it or stop it first")))
+    }
+
+    /// Whether a build holds this task's workspace or one its writes meet.
+    /// A scope that cannot be resolved meets everything (fail closed).
+    pub(crate) fn preview_build_blocks(&self, chat: &str) -> bool {
+        if self.preview_build_holds.is_empty() {
+            return false;
+        }
+        if self.preview_build_holds.values().any(|held| held == chat) {
+            return true;
+        }
+        let scope = |chat: &str| self.chat_address(chat).and_then(|address| self.projects.task_write_scope(&self.storage, &address).ok());
+        let Some(target) = scope(chat) else { return true };
+        self.preview_build_holds.values().any(|held| scope(held).map_or(true, |held| held.meets(&target)))
+    }
 }

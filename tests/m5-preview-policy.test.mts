@@ -237,7 +237,7 @@ test("sidecar contract: requests are exact, answers must echo them and match the
 });
 
 test("renderer contract: exact actions and answers", () => {
-  const open = { action: "open", projectId: "p", chatId: "c", entry: null, bounds: { x: 1, y: 2, width: 300, height: 300 }, viewport: "narrow", pixelRatio: 2, page: { width: 1280, height: 800 } } as const;
+  const open = { action: "open", projectId: "p", chatId: "c", entry: null, source: "workspace", bounds: { x: 1, y: 2, width: 300, height: 300 }, viewport: "narrow", pixelRatio: 2, page: { width: 1280, height: 800 } } as const;
   assert.deepEqual(validatePreviewIpcRequestV1(open), open);
   // The page's devicePixelRatio comes with every measurement (PR #9 review B1).
   const { pixelRatio: _ratio, ...unmeasured } = open;

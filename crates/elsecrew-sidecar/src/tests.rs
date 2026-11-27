@@ -409,7 +409,7 @@ fn g5d_shell_ready_precedes_storage_and_verifying_blocks_before_params_or_side_e
 
     let ready = sidecar.ready_event().expect("shell ready");
     let mut baseline = ready.payload.clone();
-    for preview in ["preview.readAsset", "preview.resolve"] {
+    for preview in ["preview.buildRelease", "preview.buildReserve", "preview.buildPlan", "preview.readAsset", "preview.resolve"] {
         assert_eq!(baseline["capabilities"].as_array_mut().unwrap().pop(), Some(json!(preview)));
     }
     assert_eq!(
