@@ -1866,7 +1866,9 @@ mod tests {
             Some("providerBusy"),
             "the copied lock is real for a moment"
         );
-        lock_exclusive(&next).unwrap();
+        // Asked again, it is free once the child's exec closed its copy (a
+        // slow runner may take longer than the product's 100 ms to get there).
+        lock_exclusive_settled(&next, std::time::Duration::from_secs(10)).unwrap();
         assert!(starter.join().unwrap().success());
         drop(next);
         // A lock that is kept stays busy.

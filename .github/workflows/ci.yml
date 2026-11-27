@@ -118,6 +118,17 @@ jobs:
         with:
           shared-key: sidecar-macos
 
+      # 러너 기본값은 정식 Xcode(/Applications/Xcode_*.app)다. 작업 sandbox는
+      # 개발자 폴더(Contents/Developer)만 읽게 해 `/usr/bin/git` 셰임이 부르는
+      # xcodebuild가 Contents/SharedFrameworks를 못 읽는다(정식 Xcode 사용자의
+      # 남은 결함, 2026-11-27 기록). 일반 사용자와 같은 Command Line Tools로 돈다.
+      - name: 개발자 도구를 Command Line Tools로
+        run: |
+          if [ -x /Library/Developer/CommandLineTools/usr/bin/git ]; then
+            sudo xcode-select -s /Library/Developer/CommandLineTools
+          fi
+          xcode-select -p
+
       # lib 시험이 같은 target의 sidecar 실행 파일을 띄운다(sidecar_binary()).
       - name: sidecar 실행 파일
         run: cargo build -p elsecrew-sidecar --locked --bin elsecrew-sidecar

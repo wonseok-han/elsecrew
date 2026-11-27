@@ -899,13 +899,7 @@ mod tests {
                 .unwrap()
                 .success());
         }
-        let binary = std::env::current_exe()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("elsecrew-sidecar");
+        let binary = crate::chat::test_binary::test_sidecar_binary();
         let runtime = AgentRuntime::fake(binary, FakeScenario::OrchestratorDelegate);
         let ready = SidecarSession::new("orchestration_fixture".into(), AgentRuntime::blocked())
             .ready
@@ -1595,7 +1589,7 @@ mod tests {
         // for good is the independent descendant case below.
         assert!(!identities.iter().all(gone), "{case}: the agent was at work when the engine went");
         drop(sidecar);
-        let binary = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("elsecrew-sidecar");
+        let binary = crate::chat::test_binary::test_sidecar_binary();
         let open = |ready: &ReadyPayloadV1| Sidecar::initialize(
             root.path().join(elsecrew_protocol::lifecycle_v1::SQLITE_FILE_V1),
             ready.clone(),
@@ -1723,7 +1717,7 @@ mod tests {
         assert!(fence_path.is_file());
         let database = sidecar.storage.path().to_path_buf();
         drop(sidecar);
-        let binary = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("elsecrew-sidecar");
+        let binary = crate::chat::test_binary::test_sidecar_binary();
         let ready = SidecarSession::new("orchestration_restart".into(), AgentRuntime::blocked()).ready.clone();
         let restarted = Sidecar::initialize(database, ready, AgentRuntime::fake(binary, FakeScenario::OrchestratorDelegate), &AtomicBool::new(false)).unwrap();
         assert!(!fence_path.exists(), "the hold is gone before any provider request");
@@ -1832,13 +1826,7 @@ mod tests {
         let mut ready = sidecar.ready.clone();
         ready.sidecar_instance_id = "orchestration_reopened".into();
         drop(sidecar);
-        let binary = std::env::current_exe()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("elsecrew-sidecar");
+        let binary = crate::chat::test_binary::test_sidecar_binary();
         let mut reopened = Sidecar::initialize(
             root.path().join("data.sqlite3"),
             ready,
@@ -1868,13 +1856,7 @@ mod tests {
         let mut ready = sidecar.ready.clone();
         ready.sidecar_instance_id = "orchestration_crash_reopened".into();
         drop(sidecar);
-        let binary = std::env::current_exe()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("elsecrew-sidecar");
+        let binary = crate::chat::test_binary::test_sidecar_binary();
         let mut reopened = Sidecar::initialize(
             root.path().join("data.sqlite3"),
             ready,
