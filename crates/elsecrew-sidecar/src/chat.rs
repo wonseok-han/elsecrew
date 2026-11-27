@@ -2182,7 +2182,7 @@ fn now() -> String {
 #[cfg(all(test, target_os = "macos"))]
 mod tests;
 #[cfg(test)]
-mod test_binary;
+pub(crate) mod test_binary;
 
 /// How many tasks the inbox shows at most.
 pub(crate) const TASK_INBOX_SHOWN: usize = 200;

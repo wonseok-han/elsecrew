@@ -58,7 +58,7 @@ impl LoginManager {
             return false;
         }
         // Run holds first: they never block the sign-in hold's proof.
-        let sign_in = |profile: &dyn crate::provider_profile::LoginProfile| {
+        let sign_in = |profile: &dyn crate::provider_profile::LoginProfile| crate::provider_login_process::settling(|| {
             let _ = crate::provider_login_process::clean_publish_leftovers(profile);
             let _ = recover_run_holds(profile, storage, Some(projects));
             if !crate::provider_login_process::has_login_hold(profile)? {
@@ -67,7 +67,7 @@ impl LoginManager {
             crate::provider_login_process::recover_confirmed_login(profile)
                 .or_else(|_| crate::provider_login_process::recover_settled_login(profile))
                 .or_else(|error| recover_bound(profile, storage, Some(projects), error))
-        };
+        });
         let result = if self.claude {
             crate::provider_claude_profile::ClaudeProfileBinding::from_storage(storage).and_then(|profile| sign_in(&profile))
         } else {
@@ -166,8 +166,9 @@ impl LoginManager {
                 if self.worker.is_some() {
                     return Err(invalid());
                 }
-                // Runs' own holds whose runs ended, then the sign-in hold.
-                let recover = |profile: &dyn crate::provider_profile::LoginProfile| {
+                // Runs' own holds whose runs ended, then the sign-in hold:
+                // one recovery pass, one settle budget for all of it.
+                let recover = |profile: &dyn crate::provider_profile::LoginProfile| crate::provider_login_process::settling(|| {
                     crate::provider_login_process::clean_publish_leftovers(profile)?;
                     let runs = recover_run_holds(profile, storage, projects);
                     if !crate::provider_login_process::has_login_hold(profile)? {
@@ -177,7 +178,7 @@ impl LoginManager {
                         .or_else(|_| crate::provider_login_process::recover_settled_login(profile))
                         .or_else(|error| recover_bound(profile, storage, projects, error))
                         .and(runs)
-                };
+                });
                 let result = if self.claude {
                     crate::provider_claude_profile::ClaudeProfileBinding::from_storage(storage).and_then(|profile| recover(&profile))
                 } else {
@@ -379,29 +380,48 @@ fn recover_bound(profile: &dyn crate::provider_profile::LoginProfile, storage: &
 /// Each run's own hold (ADE multi-project P5) whose run has durably ended,
 /// by the same proof as a bound sign-in hold. A hold a live run still owns is
 /// busy and simply stays. The first unproven one is the error.
+///
+/// Contended holds are asked again together within one recovery pass's
+/// budget (`provider_login_process::settling`): a first sweep answers every
+/// contended lock at once, then only those are asked again until the
+/// budget ends. However many runs are live, a pass waits once (PR #24
+/// review I2).
 pub(crate) fn recover_run_holds(profile: &dyn crate::provider_profile::LoginProfile, storage: &Storage,
     projects: Option<&crate::project::ProjectManager>) -> Result<(), SidecarError> {
-    let mut result = Ok(());
-    for name in crate::provider_login_process::profile_run_holds(profile)? {
+    use crate::provider_login_process::{settle_deadline, settling, without_settling};
+    settling(|| {
+        let deadline = settle_deadline();
         // A model list, a check, or a run that died before it was bound: the
         // hold's own proof, no run record needed (PR #20 review B2).
-        let outcome = match crate::provider_login_process::recover_unbound_run(profile, &name) {
+        let attempt = |name: &str| without_settling(|| match crate::provider_login_process::recover_unbound_run(profile, name) {
             Ok(true) => Ok(()),
             Ok(false) => match projects {
-                Some(projects) => crate::provider_login_process::recover_bound_run(profile, &name, |binding, identities| {
+                Some(projects) => crate::provider_login_process::recover_bound_run(profile, name, |binding, identities| {
                     crate::agent_runtime::verify_resolved_provider_fence(storage, projects, binding, identities)
                 }),
                 None => Err(SidecarError::new("providerLoginRecoveryRequired", "a run hold needs its run's record")),
             },
             Err(error) => Err(error),
+        });
+        let mut result = Ok(());
+        let settle = |outcome: Result<(), SidecarError>, result: &mut Result<(), SidecarError>| match outcome {
+            Ok(()) => false,
+            Err(error) if error.kind() == "providerBusy" => true,
+            Err(error) => {
+                if result.is_ok() { *result = Err(error) }
+                false
+            }
         };
-        match outcome {
-            Ok(()) => {}
-            Err(error) if error.kind() == "providerBusy" => {}
-            Err(error) => if result.is_ok() { result = Err(error) },
+        let mut contended: Vec<String> = Vec::new();
+        for name in crate::provider_login_process::profile_run_holds(profile)? {
+            if settle(attempt(&name), &mut result) { contended.push(name); }
         }
-    }
-    result
+        while !contended.is_empty() && deadline.is_some_and(|until| std::time::Instant::now() < until) {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            contended.retain(|name| settle(attempt(name), &mut result));
+        }
+        result
+    })
 }
 
 pub(super) fn valid_code(code: &str) -> bool {

@@ -661,6 +661,9 @@ React·Vite처럼 빌드해야 볼 수 있는 결과물을, 사람이 동의하�
   - 프로젝트 열기·닫기 → 홈, 홈에서 추가, 전환 팝오버(경로 없음, 추가 취소 시 화면 유지), 한 번 전환
   - 삭제 확인(전체 폴더, 첫 초점 취소, 취소 시 그대로)
   - 첫 작업(확인 전 권한 미저장, 권한을 바꾸면 체크 해제, 보낸 뒤 보인 권한 저장), 작업이 열린 동안 추가 꺼짐과 이유
+- **네이티브 기본 흐름**(같은 스크립트, 환경 변수 없이; ADE 안정화 B에서 L1 레이아웃에 맞춤): 작업 공간 폴더를 스모크 임시 폴더로 바꾸고(실제 `~/elsecrew` 미사용) 새 작업 창 → 편집기 저장 → 변경 탭·검토 시트의 diff(Monaco) → 후속 요청 프로브 → 작업 브랜치 합치기 상태(`inspectChatMerge`: `gitWorktree`, `elsecrew/task-…`, 기록 안 된 변경 있음) → 두 번째 작업의 분리 확인. `ELSECREW_SMOKE_APPLY=1`(+`ELSECREW_SMOKE_RELOAD=1`)은 오래된 확인 거절 → 합치기(내 폴더 반영·깨끗한 Git 상태) → 다시 불러온 뒤 `nothingToMerge`까지 본다.
+  - 결과 막대의 합치기 버튼은 팀 실행이 끝난 작업에만 보이고, fixture 엔진은 새 작업 창의 팀을 저장할 수 없다. 그래서 합치기는 결과 막대가 보내는 것과 같은 bridge 요청(`mergeChatWorkspace`)으로 확인한다. 화면 클릭까지 보려면 V3 역할을 저장할 수 있는 fixture 엔진이 필요하다(남은 일).
+  - CI: `sidecar (macos, rest)` job이 디버그 sidecar를 만든 뒤 이 기본 흐름·합치기 흐름과 `m5:smoke:multiproject`를 돌린다.
 - **캡처**: `pnpm m5:capture [폴더]`(`scripts/m5-ui-capture.mjs`)가 렌더러 스모크를 다크·라이트로 돌려 캡처 지점마다 PNG와 렌더 대비 결과를 남긴다(옛 `tests/m5-ui-capture.cjs`를 대신함). 렌더러 빌드가 필요하다.
 
 ### 여러 프로젝트 동시 작업 (ADE multi-project PR-A, 2026-11-26)

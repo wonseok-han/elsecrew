@@ -14,6 +14,9 @@
 // Requires current .vite/build output and target/debug/elsecrew-sidecar.
 // Run: electron scripts/m5-multiproject-ui-smoke.cjs [capture-folder]
 const { app, dialog } = require('electron');
+// The checks read the Korean screen, whatever the machine's language (CI runners are English).
+// Chromium takes "ko" here ("ko-KR" falls back to English), as the renderer smoke does.
+app.commandLine.appendSwitch('lang', 'ko');
 const cp = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');

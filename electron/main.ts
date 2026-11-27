@@ -665,6 +665,11 @@ function registerIpcHandlers(): void {
         detail: `${ko ? "공식 배포 경로로 설치하고, 아래 폴더의 기존 명령이 바뀔 수 있어요. 셸 설정 파일은 바꾸지 않아요." : "It installs from the official source; the existing commands in these folders may change. Shell settings files are not changed."}\n\n${plan.writeDirectories.join("\n")}`,
         buttons: ko ? ["취소", "설치·업데이트"] : ["Cancel", "Install or update"], defaultId: 0, cancelId: 0 });
       if (answer.response !== 1) return current;
+      // The page may have prepared again while the box was open: this yes
+      // was for the plan shown, not for one that replaced it. Return what
+      // awaits consent now, untouched (PR #14 re-review).
+      const after = validateInstallStatus(await sidecar.install({ action: "status" }));
+      if (after.state !== "awaitingConsent" || after.plan?.planId !== plan.planId || after.plan.provider !== plan.provider) return after;
     }
     return validateInstallStatus(await sidecar.install(request));
   }));

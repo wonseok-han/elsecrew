@@ -162,7 +162,11 @@ impl InstallManager {
                 }
                 let authorization = match self.consent.accept(id, provider) {
                     Ok(value) => value,
-                    Err(error) => {
+                    // An answer for another (older) plan: the plan awaiting
+                    // consent and what the page shows stay as they are
+                    // (PR #14 re-review).
+                    Err(None) => return Err(invalid()),
+                    Err(Some(error)) => {
                         self.set(view(
                             "failed",
                             None,
@@ -447,6 +451,34 @@ mod tests {
             )
             .is_err());
         assert!(manager.worker.is_none());
+    }
+    #[test]
+    fn a_start_for_an_older_plan_keeps_the_plan_awaiting_consent() {
+        // PR #14 re-review: main's box was opened for the first plan; the
+        // page prepared again before the answer came. The late answer must
+        // neither start anything nor discard the plan now awaiting consent.
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let home = root.join("home");
+        std::fs::create_dir(&home).unwrap();
+        let storage = Storage::open(&root.join("elsecrew.sqlite3")).unwrap();
+        let mut manager = InstallManager::default();
+        let older = manager.consent.prepare_at_home("codex", &home).unwrap();
+        let newer = manager.consent.prepare_at_home("codex", &home).unwrap();
+        manager.set(view("awaitingConsent", None, Some("codex"), Some(newer.clone()), None));
+        let late = json!({"action":"start","provider":"codex","planId":older["planId"]});
+        assert_eq!(manager.request(&storage, &late, true).unwrap_err().kind(), "invalidParams");
+        let status = manager.request(&storage, &json!({"action":"status"}), true).unwrap();
+        assert_eq!(status["state"], "awaitingConsent");
+        assert_eq!(status["error"], Value::Null);
+        assert_eq!(status["plan"]["planId"], newer["planId"]);
+        assert_eq!(
+            manager.consent.pending_id_for_test().as_deref(),
+            newer["planId"].as_str()
+        );
+        assert!(manager.worker.is_none());
+        assert!(!journal::has_active(&storage).unwrap());
+        assert_eq!(std::fs::read_dir(&home).unwrap().count(), 0);
     }
     #[test]
     fn pending_evidence_blocks_without_deletion_or_resume() {

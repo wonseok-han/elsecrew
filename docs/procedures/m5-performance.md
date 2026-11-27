@@ -74,13 +74,13 @@ renderer는 저장소 admission ready·빈 시작 화면·선택 차단 해제 �
 
 저장 프로젝트를 선택해 `Improve hello`와 `Second task`의 작업 복사본을 Monaco로 다시 열고 각각 저장된 편집/원래 내용이 유지되는지 확인한다. 새 폴더 선택·에이전트 실행은 하지 않는다. `reopen-result.json`은 정상 종료 수락 뒤에만 PASS가 되며 `reopen.png`를 함께 보존한다. 이는 정상 종료 후 프로젝트/채팅/파일 영속성 시험이며 강제 종료 복구, 실제 계정 로그인 유지, 실행 중인 에이전트 재시작의 증거는 아니다. 최신 `.vite/build`와 debug sidecar를 먼저 준비한다.
 
-### 생성부터 편집·반영·복원까지
+### 생성부터 편집·diff·합치기까지
 
-macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sidecar를 먼저 빌드한 뒤 `pnpm m5:smoke:project-ui`로 실행한다. 스크립트 자체는 빌드하지 않으므로 오래된 산출물의 PASS를 최신 코드 증거로 쓰지 않는다. 실행할 때마다 임시 Git 프로젝트와 독립 userData를 만들며 사용자 프로젝트·선택된 에이전트·인증 정보를 사용하지 않는다. 실제 Electron/native sidecar를 통해 채팅 생성, Monaco 편집/저장, diff, 원본 불변, 반영 확인 취소, 두 채팅 사본 분리를 확인한다.
+macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sidecar를 먼저 빌드한 뒤 `pnpm m5:smoke:project-ui`로 실행한다. 스크립트 자체는 빌드하지 않으므로 오래된 산출물의 PASS를 최신 코드 증거로 쓰지 않는다. 실행할 때마다 임시 Git 프로젝트와 독립 userData를 만들며 사용자 프로젝트·선택된 에이전트·인증 정보를 사용하지 않는다. 실제 Electron/native sidecar를 통해 채팅 생성, Monaco 편집/저장, 변경 탭·검토 시트의 Monaco diff(나란히·한 화면의 실제 표시와 두 쪽 본문), 원본 불변, 작업 브랜치 합치기 상태(`inspectChatMerge`), 두 채팅 사본 분리를 확인한다(2026-11-27 L1 레이아웃 기준, `docs/architecture.md` "네이티브 기본 흐름"). 작업 공간은 시험 임시 폴더 아래에 만든다.
 
-- `ELSECREW_SMOKE_APPLY=1 pnpm m5:smoke:project-ui`: 스크립트가 생성한 프로젝트만 명시 확인 UI로 적용 후 복원한다.
+- `ELSECREW_SMOKE_APPLY=1 pnpm m5:smoke:project-ui`: 스크립트가 생성한 프로젝트에서 오래된 확인의 거절을 본 뒤 작업 브랜치를 기준 브랜치에 합친다(내 폴더 반영·깨끗한 Git 상태). 결과 막대가 보내는 것과 같은 bridge 요청(`mergeChatWorkspace`)이며 화면 클릭이 아니다. 옛 사본의 반영·복원 UI는 이 흐름에 없으므로 이 명령으로 복원을 주장하지 않는다(별도 시나리오 필요).
 - `ELSECREW_SMOKE_NATIVE_INPUT=1 pnpm m5:smoke:project-ui`: 잠금 해제된 Mac에서 시험 창을 직접 활성화하고, `WAITING_FOR_NATIVE_INPUT` 뒤 편집기에 `edited in snapshot`을 입력한다. 포커스/입력을 각각 최대45초 기다리며 자동 insertText를 사용하지 않는다. 결과의 `inputMethod`로 기본 자동 삽입과 구분한다. 화면 잠금/입력 미확인은 실패로 보존하며 시험이 창을 활성화하지 못했다는 사실만으로 제품 입력 결함이라고 단정하지 않는다.
-- 위 설정에 `ELSECREW_SMOKE_RELOAD=1`을 함께 주면 적용 후 renderer reload→저장 프로젝트/채팅 재선택→복원 경로를 포함한다. 전체 앱 재시작 검증은 아니다.
+- 위 설정에 `ELSECREW_SMOKE_RELOAD=1`을 함께 주면 합친 뒤 renderer reload→저장 프로젝트/채팅 재선택→합쳐진 상태(`nothingToMerge`) 확인을 포함한다. 전체 앱 재시작 검증은 아니다.
 - 시작 화면의 빈 dock 부재, 목표 예시의 입력만 채우기/기존 초안 보호, 역할 설정 modal의 Escape→계속 편집→폐기·닫기/포커스 복원, 저장 후 재열기 및 원래 모델 복원도 같은 실행에서 확인한다. `START_AND_SETTINGS`는 중간 단계이며 마지막 PASS가 전체 시나리오 결과다. 저장 실패 주입과 메시지 스크롤은 별도 회귀가 필요하다.
 - 이 시각 검증은 앱 창을 표시하고 포커스를 가져온다. macOS에서는 window가 visible이어도 renderer가 hidden인 상태가 관측돼 Monaco 표시/캡처가 멈춘 적이 있어, 재진입 편집 전 창을 다시 활성화한다. `SECOND_CHAT_WINDOW`의 창/페이지 가시성 진단과 renderer 오류를 함께 기록한다. 제품의 background 정책은 변경하지 않는다.
 - PASS/FAIL JSON과 screenshot 경로를 출력하고 실패는 종료 코드1이다. 임시 프로젝트/userData는 성공·실패 모두 증거 확인을 위해 보존하며 자동 삭제하지 않는다. 이 실행은 실제 공급자·Windows·G6 합격을 대신하지 않는다.

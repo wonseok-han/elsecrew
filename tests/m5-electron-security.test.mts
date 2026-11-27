@@ -318,7 +318,7 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
     },
     BrowserWindow: Object.assign(FakeWindow, { getAllWindows: () => FakeWindow.windows }),
     screen: { getDisplayMatching: () => ({ scaleFactor: 1 }) },
-    dialog: { showOpenDialog: async () => folderPick.path ? { canceled: false, filePaths: [folderPick.path] } : { canceled: true, filePaths: [] }, showMessageBox: async (first: unknown, second?: { detail?: string }) => { const options = (second ?? first) as { detail?: string }; sidecarCalls.push(`confirm:${options.detail ?? ""}`); return { response: externalLinkAnswer.value }; } },
+    dialog: { showOpenDialog: async () => folderPick.path ? { canceled: false, filePaths: [folderPick.path] } : { canceled: true, filePaths: [] }, showMessageBox: async (first: unknown, second?: { detail?: string }) => { const options = (second ?? first) as { detail?: string }; sidecarCalls.push(`confirm:${options.detail ?? ""}`); messageBoxOpen.during?.(); return { response: externalLinkAnswer.value }; } },
     shell: { openExternal: async () => { sidecarCalls.push("openExternal"); } },
     safeStorage: { isEncryptionAvailable: () => false, encryptString: () => { throw new Error("unexpected encryption"); }, decryptString: () => { throw new Error("unexpected decryption"); } },
     ipcMain: {
@@ -621,6 +621,8 @@ const installAwaiting = { state: "awaitingConsent", operationId: null, provider:
     writeDirectories: ["/Users/me/.local/bin", "/Users/me/.codex/packages/standalone"], replacesExistingCommands: true, shellSettingsWritable: false, startsLogin: false } };
 /** What the native "open this address?" confirmation answers (0 = open). */
 const externalLinkAnswer = { value: 1 };
+/** Runs while a native box is open, before it is answered (PR #14 re-review). */
+const messageBoxOpen: { during: (() => void) | null } = { during: null };
 import * as catalogContract from "../src/m5/contracts/project-catalog-v1.ts";
 import * as installContract from "../src/m5/contracts/provider-install-v1.ts";
 
@@ -975,6 +977,27 @@ test("installing starts only after main's own box: a page with a valid plan cann
     await handler(harness.currentEvent(), { action: "status" });
     assert.equal(boxes(), boxesNow);
   } finally { externalLinkAnswer.value = answer; }
+});
+
+test("installing: a yes in a box opened for one plan never starts the plan that replaced it (PR #14 re-review)", async () => {
+  const harness = await loadMain();
+  const handler = harness.handlers.get(installContract.INSTALL_CHANNEL)!;
+  const answer = externalLinkAnswer.value;
+  const shown = installAwaiting.plan;
+  const replacement = { ...shown, planId: "33333333-2222-4333-8444-555555555555" };
+  try {
+    externalLinkAnswer.value = 1;
+    // The page prepares again while main's box for the first plan is open.
+    messageBoxOpen.during = () => { installAwaiting.plan = replacement; };
+    const result = await handler(harness.currentEvent(), { action: "start", provider: "codex", planId: shown.planId }) as { state: string; plan: { planId: string } | null };
+    assert.ok(!harness.sidecarCalls.includes("install:start"), "the late yes starts nothing");
+    assert.equal(result.state, "awaitingConsent");
+    assert.equal(result.plan?.planId, replacement.planId, "the new plan still awaits its own yes");
+  } finally {
+    externalLinkAnswer.value = answer;
+    messageBoxOpen.during = null;
+    installAwaiting.plan = shown;
+  }
 });
 
 test("update restart: main's yes, then the screen's readiness and the quit preparation decide; only a clean result installs (PR #16 review I1)", async () => {

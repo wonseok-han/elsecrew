@@ -21,6 +21,7 @@ function harness(catalogOnly = false, autoFinish = true, projectUi = false, sele
     setPath(name, value) { paths.set(name, value); }, on(name, callback) { events.set(name, callback); }, quit() {},
     once(name, callback) { events.set(name, callback); },
     exit(code) { exits.push(code); },
+    commandLine: { appendSwitch() {} },
   };
   const context = vm.createContext({
     __dirname: path.resolve(__dirname, '../scripts'),
