@@ -2579,7 +2579,8 @@ mod tests {
         let released = ask(&mut sidecar, "req_release_restart", "preview.buildRelease", json!({"holdId": hold}));
         assert_eq!(released.result.unwrap(), json!({"holdId": hold, "released": true}));
         assert!(!sidecar.preview_build_blocks(&id) && !file.exists());
-        assert!(start_as(&mut sidecar, &chat_a, "req_team_released").ok);
+        let started = start_as(&mut sidecar, &chat_a, "req_team_released");
+        assert!(started.ok, "{started:?}");
     }
 
     /// PR #25 review B1 (fault injection): the engine wrote the hold and
@@ -2611,7 +2612,8 @@ mod tests {
         assert!(sidecar.preview_build_blocks(&id));
         assert_eq!(sync_holds(&mut sidecar, &[], true, "req_sync_lost").result.unwrap(), json!({"held": 0, "blocking": false}));
         assert!(!sidecar.preview_build_blocks(&id));
-        assert!(start_as(&mut sidecar, &chat_a, "req_team_lost").ok);
+        let started = start_as(&mut sidecar, &chat_a, "req_team_lost");
+        assert!(started.ok, "{started:?}");
     }
 
     /// PR #25 review B2 (fault injection): a record the new engine cannot
