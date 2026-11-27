@@ -2549,6 +2549,19 @@ mod tests {
         Sidecar::initialize(root.path().join("data.sqlite3"), ready, AgentRuntime::fake(binary, FakeScenario::OrchestratorDelegate), &AtomicBool::new(false)).unwrap()
     }
 
+    /// Nothing of a build hold refuses the task any more: a team check or
+    /// start and a discard pass the hold gates (the start itself is not run:
+    /// a restarted test engine has no fake agent launcher on every runner).
+    fn assert_released(sidecar: &mut Sidecar, chat: &Value, label: &str) {
+        let id = chat["chatId"].as_str().unwrap();
+        assert!(!sidecar.preview_build_blocks(id), "{label}");
+        let start = sidecar.workflow_request(format!("{label}_start"), "run.startAgent", json!({"chatId": id, "roleId": "coordinator", "inputMessageIds": [], "expectedCapabilityFingerprint": "x"}));
+        assert!(sidecar.preview_build_refusal(&start).is_none(), "{label}: start");
+        let mut discard = sidecar.workflow_request(format!("{label}_discard"), "project.catalog", json!({"action":"inspectChatDiscard"}));
+        for key in ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"] { discard.params[key] = chat[key].clone(); }
+        assert!(sidecar.write_refusal(&discard).is_none(), "{label}: discard");
+    }
+
     fn sync_holds(sidecar: &mut Sidecar, holds: &[(&str, &Value)], settled: bool, request: &str) -> ResponseV1 {
         let holds: Vec<_> = holds.iter().map(|(hold, chat)| json!({"holdId": hold, "chatId": chat["chatId"]})).collect();
         ask(sidecar, request, "preview.buildHolds", json!({"holds": holds, "leftoversSettled": settled}))
@@ -2579,8 +2592,7 @@ mod tests {
         let released = ask(&mut sidecar, "req_release_restart", "preview.buildRelease", json!({"holdId": hold}));
         assert_eq!(released.result.unwrap(), json!({"holdId": hold, "released": true}));
         assert!(!sidecar.preview_build_blocks(&id) && !file.exists());
-        let started = start_as(&mut sidecar, &chat_a, "req_team_released");
-        assert!(started.ok, "{started:?}");
+        assert_released(&mut sidecar, &chat_a, "req_team_released");
     }
 
     /// PR #25 review B1 (fault injection): the engine wrote the hold and
@@ -2612,8 +2624,7 @@ mod tests {
         assert!(sidecar.preview_build_blocks(&id));
         assert_eq!(sync_holds(&mut sidecar, &[], true, "req_sync_lost").result.unwrap(), json!({"held": 0, "blocking": false}));
         assert!(!sidecar.preview_build_blocks(&id));
-        let started = start_as(&mut sidecar, &chat_a, "req_team_lost");
-        assert!(started.ok, "{started:?}");
+        assert_released(&mut sidecar, &chat_a, "req_team_lost");
     }
 
     /// PR #25 review B2 (fault injection): a record the new engine cannot

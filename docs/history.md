@@ -24,6 +24,7 @@
 
   - 1초 목표는 여전히 못 맞춘다(원장 쓰기 전체 재생 — 후속).
 - **함께 찾은 기존 결함**: 한 번의 읽기가 128KiB 경계를 넘으며 줄 끝까지 가져오면 큰 줄 자리 없이 처리했다(타이밍 의존, 부하 때 `a_session_waiting_too_long_for_a_slot_fails_alone` 2/3 실패로 드러남). 안정화 B(PR #24)가 같은 것을 읽기 크기를 경계+1바이트로 묶어 고쳐서, `feature/ade` 병합 때 B의 방식을 채택하고 내 중복 검사는 뺐다. 스트리밍 때문에 큰 줄 진행 시계는 `received` 기준을 유지했다.
+- **CI sidecar rest 묶음**: 재시작 시험 2건이 마지막의 팀 시작에서 CI 실행기에서만 실패했다(`fake agent control launcher failed: No such file or directory`, 재시작한 시험 엔진에서 가짜 에이전트 실행기를 띄우지 못함, 로컬은 같은 명령으로 통과 — 원인 미확인). 이 시험이 볼 것은 보류 해제이므로 실행 대신 보류 관문(`preview_build_refusal`·`write_refusal`)이 더는 거절하지 않는지 확인하게 바꿨다(`assert_released`).
 - **PR #24 병합**: 충돌은 `provider_login_io.rs`(B 쪽 파일에 내 스트리밍·시험을 다시 얹음)와 `docs/history.md`(두 쪽 엔트리 모두 유지)였다.
 - **검증**(PR #24 병합 뒤): `cargo test --workspace` core 272·protocol 75·sidecar 989·통합 16 실패 0. `npm test` 1050/1050, `pnpm build`, `git diff --check`, `m5:check:history` missing 0. 병합 전 실행에서는 `claude_project_consent_auto_approves_and_still_rejects_outside_files`가 부하로 한 번 실패했다(단독 통과).
 - **롤오버**: 엔트리 부분이 501줄이 되어 PR #15~#18 엔트리 12개를 `docs/archive/history-2026-11.md` 맨 위로 옮겼다(267줄).
