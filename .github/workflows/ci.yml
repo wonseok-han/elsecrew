@@ -124,3 +124,26 @@ jobs:
 
       - name: sidecar 시험 (${{ matrix.shard.name }})
         run: cargo test -p elsecrew-sidecar --locked -- ${{ matrix.shard.filter }}
+
+      # 네이티브 스모크(실제 sidecar, 격리 앱 데이터, 공급자 없음): 디버그 sidecar를
+      # 이미 만든 rest 묶음에서만 돈다. 프로젝트 화면 기본 흐름과 합치기·다시
+      # 불러오기, 여러 프로젝트 동시 작업. 시험 단계가 실패해도 따로 돈다.
+      - uses: pnpm/action-setup@v4
+        if: ${{ !cancelled() && matrix.shard.name == 'rest' }}
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        if: ${{ !cancelled() && matrix.shard.name == 'rest' }}
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 네이티브 스모크 (Electron, macOS)
+        if: ${{ !cancelled() && matrix.shard.name == 'rest' }}
+        run: |
+          pnpm install --frozen-lockfile
+          node node_modules/electron/install.js
+          node scripts/m5-multiproject-ui-run.mjs --build
+          node_modules/.bin/electron scripts/m5-project-ui-smoke.cjs
+          ELSECREW_SMOKE_APPLY=1 ELSECREW_SMOKE_RELOAD=1 node_modules/.bin/electron scripts/m5-project-ui-smoke.cjs
