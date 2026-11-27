@@ -28,7 +28,8 @@
 - **PR #24 병합**: 충돌은 `provider_login_io.rs`(B 쪽 파일에 내 스트리밍·시험을 다시 얹음)와 `docs/history.md`(두 쪽 엔트리 모두 유지)였다.
 - **검증**(PR #24 병합 뒤): `cargo test --workspace` core 272·protocol 75·sidecar 989·통합 16 실패 0. `npm test` 1050/1050, `pnpm build`, `git diff --check`, `m5:check:history` missing 0. 병합 전 실행에서는 `claude_project_consent_auto_approves_and_still_rejects_outside_files`가 부하로 한 번 실패했다(단독 통과).
 - **롤오버**: 엔트리 부분이 501줄이 되어 PR #15~#18 엔트리 12개를 `docs/archive/history-2026-11.md` 맨 위로 옮겼다(267줄).
-- **다음 할 일**: 노예 재확인 뒤 머지. 머지 뒤 후속(원장 쓰기 증분화, Codex `failed at initialize` 원인)은 따로 맡는다.
+- **CI**(150f5c87): macOS·Windows·website·GitGuardian, sidecar 4묶음(chat·rest·storage-a·storage-b) 모두 통과.
+- **다음 할 일**: 노예 재확인 뒤 머지. 머지 뒤 후속(원장 쓰기 증분화, Codex `failed at initialize` 원인)은 따로 맡는다. CI에서만 재시작한 시험 엔진의 가짜 에이전트 실행기가 없던 원인은 미확인.
 
 ### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — ADE 안정화 A: 엔진 시작 구조·8MiB 넘는 줄·빌드 예약 재시작 (`orca/ade-stab-a-engine`, 기준 main 0eab5f67)
 현행 설명은 architecture "엔진 루프와 실행 시작". 조정자 지시 작업(안정화 B와 병렬).
