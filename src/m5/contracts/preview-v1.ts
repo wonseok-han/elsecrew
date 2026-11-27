@@ -12,7 +12,7 @@
  */
 import { exactKeys, fail, requireObject } from "./project-v1.ts";
 
-export const PREVIEW_METHODS_V1 = ["preview.resolve", "preview.readAsset"] as const;
+export const PREVIEW_METHODS_V1 = ["preview.resolve", "preview.readAsset", "preview.buildPlan", "preview.buildReserve", "preview.buildRelease"] as const;
 export const PREVIEW_ASSET_MAX_BYTES_V1 = 5 * 1024 * 1024;
 export const PREVIEW_ASSET_CHUNK_BYTES_V1 = 512 * 1024;
 export const PREVIEW_PATH_MAX_BYTES_V1 = 1024;
@@ -225,10 +225,15 @@ export const PREVIEW_NARROW_WIDTH_V1 = 390;
 export interface PreviewBoundsV1 { x: number; y: number; width: number; height: number }
 export interface PreviewPageSizeV1 { width: number; height: number }
 export type PreviewViewportV1 = "wide" | "narrow";
+export type PreviewSourceV1 = "workspace" | "build";
 
 export type PreviewIpcRequestV1 =
   | { action: "status" }
-  | { action: "open"; projectId: string; chatId: string; entry: string | null; bounds: PreviewBoundsV1; viewport: PreviewViewportV1; pixelRatio: number; page: PreviewPageSizeV1 }
+  /** `source: "build"` opens the task's last successful build output (main
+   * knows its folder; `entry` is then null). Paths of that page are served
+   * from the output folder, and a path with no extension is the page itself
+   * (a single-page app's own route). */
+  | { action: "open"; projectId: string; chatId: string; entry: string | null; source: PreviewSourceV1; bounds: PreviewBoundsV1; viewport: PreviewViewportV1; pixelRatio: number; page: PreviewPageSizeV1 }
   /** `obscured`: something of the app's own covers the area (dialog, sheet,
    * drawer, popover, toast). The view hides and the answer carries a still
    * image to show in its place. */
@@ -239,7 +244,8 @@ export type PreviewIpcRequestV1 =
   | { action: "close"; previewId: string };
 
 export type PreviewStateV1 = "loading" | "shown" | "hidden" | "closed";
-export type PreviewEmptyReasonV1 = "noEntry" | PreviewEntryRefusalV1;
+/** `noBuild`: a build preview was asked for and the task has no finished build. */
+export type PreviewEmptyReasonV1 = "noEntry" | "noBuild" | PreviewEntryRefusalV1;
 
 export type PreviewIpcResultV1 =
   | { action: "status"; enabled: boolean }
@@ -298,10 +304,12 @@ export function validatePreviewIpcRequestV1(value: unknown): PreviewIpcRequestV1
       exactKeys(object, ["action"]);
       return { action: "status" };
     case "open":
-      exactKeys(object, ["action", "projectId", "chatId", "entry", "bounds", "viewport", "pixelRatio", "page"]);
+      exactKeys(object, ["action", "projectId", "chatId", "entry", "source", "bounds", "viewport", "pixelRatio", "page"]);
+      if (object.source !== "workspace" && object.source !== "build") fail("preview source is invalid");
+      if (object.source === "build" && object.entry !== null) fail("a build preview names no entry");
       return {
         action: "open", projectId: id(object.projectId, "projectId"), chatId: id(object.chatId, "chatId"),
-        entry: entryPath(object.entry, "entry"), bounds: bounds(object.bounds), viewport: viewport(object.viewport), pixelRatio: pixelRatio(object.pixelRatio), page: pageSize(object.page),
+        entry: entryPath(object.entry, "entry"), source: object.source as PreviewSourceV1, bounds: bounds(object.bounds), viewport: viewport(object.viewport), pixelRatio: pixelRatio(object.pixelRatio), page: pageSize(object.page),
       };
     case "layout":
       exactKeys(object, ["action", "previewId", "bounds", "viewport", "obscured", "pixelRatio", "page"]);
@@ -316,7 +324,7 @@ export function validatePreviewIpcRequestV1(value: unknown): PreviewIpcRequestV1
 }
 
 const STATES = new Set<PreviewStateV1>(["loading", "shown", "hidden", "closed"]);
-const EMPTY_REASONS = new Set<string>(["noEntry", ...REFUSALS]);
+const EMPTY_REASONS = new Set<string>(["noEntry", "noBuild", ...REFUSALS]);
 const SNAPSHOT = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/;
 export const PREVIEW_SNAPSHOT_MAX_CHARS_V1 = 8 * 1024 * 1024;
 
@@ -373,10 +381,292 @@ export function validatePreviewEventV1(value: unknown): PreviewEventV1 {
  * main refuses everything but `status`. */
 export interface M5PreviewBridgeV1 {
   status(): Promise<{ enabled: boolean }>;
-  open(input: { projectId: string; chatId: string; entry: string | null; bounds: PreviewBoundsV1; viewport: PreviewViewportV1; pixelRatio: number; page: PreviewPageSizeV1 }): Promise<Extract<PreviewIpcResultV1, { action: "open" }>>;
+  open(input: { projectId: string; chatId: string; entry: string | null; source: PreviewSourceV1; bounds: PreviewBoundsV1; viewport: PreviewViewportV1; pixelRatio: number; page: PreviewPageSizeV1 }): Promise<Extract<PreviewIpcResultV1, { action: "open" }>>;
   layout(input: { previewId: string; bounds: PreviewBoundsV1; viewport: PreviewViewportV1; obscured: boolean; pixelRatio: number; page: PreviewPageSizeV1 }): Promise<Extract<PreviewIpcResultV1, { action: "layout" }>>;
   reload(input: { previewId: string }): Promise<{ previewId: string; state: PreviewStateV1 }>;
   hide(input: { previewId: string }): Promise<{ previewId: string; state: PreviewStateV1 }>;
   close(input: { previewId: string }): Promise<{ previewId: string; state: PreviewStateV1 }>;
   onEvent(listener: (event: PreviewEventV1) => void): () => void;
+}
+
+// ---------------------------------------------------------------------------
+// Build-then-preview (결과 미리보기 확장 1단계, 2026-11-27)
+//
+// `preview.buildPlan` is read-only: the sidecar looks at the task's own
+// workspace (from the chat binding) and says what a build needs. Main runs
+// the installation and the build itself, each only after the person agrees
+// in main's native box; the page never names a folder or a command.
+
+export type PreviewPackageManagerV1 = "npm" | "pnpm" | "yarn";
+export const PREVIEW_BUILD_REFUSALS_V1 = [
+  "noPackage", "noBuildScript", "invalidPackage", "unsupportedManager", "unsupportedWorkspace",
+  "unsafeOutput", "dependenciesNotIgnored", "outputNotIgnored", "linkedInput", "unsupportedSettings",
+] as const;
+export type PreviewBuildRefusalV1 = (typeof PREVIEW_BUILD_REFUSALS_V1)[number];
+
+export interface PreviewBuildPlanRequestV1 { projectId: string; chatId: string }
+export interface PreviewBuildPlanResultV1 extends PreviewWorkspaceRefV1 {
+  refusal: PreviewBuildRefusalV1 | null;
+  /** Main only: never sent to the renderer. */
+  workspacePath: string | null;
+  packageManager: PreviewPackageManagerV1 | null;
+  lockfile: boolean;
+  buildScript: string | null;
+  /** `prebuild`/`postbuild`: npm runs them with `build` (shown in the consent box). */
+  buildHooks: { name: string; script: string }[] | null;
+  /** Declared package names (first 40) and how many there are. */
+  dependencies: string[] | null;
+  dependencyCount: number | null;
+  yarnBerry: boolean;
+  outputDir: string | null;
+  needsInstall: boolean;
+  /** SHA-256 over the folder and every input file (PR #22 review B1): main
+   * runs only while it is the one the person agreed to. */
+  fingerprint: string | null;
+  /** The folder's device:inode, shown with its path (re-review B1). */
+  folderIdentity: string | null;
+  /** Every input file there is, with its SHA-256: exactly what the
+   * fingerprint stands for, and shown in the box (re-review B1). */
+  inputs: { name: string; sha256: string }[] | null;
+}
+
+export interface PreviewBuildReserveRequestV1 { projectId: string; chatId: string }
+export interface PreviewBuildReserveResultV1 { holdId: string | null; refusal: "busy" | null }
+export interface PreviewBuildReleaseRequestV1 { holdId: string }
+export interface PreviewBuildReleaseResultV1 { holdId: string; released: boolean }
+const HOLD_ID = /^pbh_[0-9a-f]{32}$/;
+export function validatePreviewBuildReserveRequestV1(value: unknown): PreviewBuildReserveRequestV1 {
+  const object = requireObject(value, "preview build reserve request");
+  exactKeys(object, ["projectId", "chatId"]);
+  return { projectId: id(object.projectId, "projectId"), chatId: id(object.chatId, "chatId") };
+}
+export function validatePreviewBuildReserveResultV1(value: unknown): PreviewBuildReserveResultV1 {
+  const object = requireObject(value, "preview build reserve result");
+  exactKeys(object, ["holdId", "refusal"]);
+  if (object.holdId === null) {
+    if (object.refusal !== "busy") fail("an unheld reserve says why");
+    return { holdId: null, refusal: "busy" };
+  }
+  if (typeof object.holdId !== "string" || !HOLD_ID.test(object.holdId) || object.refusal !== null) fail("build hold is invalid");
+  return { holdId: object.holdId as string, refusal: null };
+}
+export function validatePreviewBuildReleaseRequestV1(value: unknown): PreviewBuildReleaseRequestV1 {
+  const object = requireObject(value, "preview build release request");
+  exactKeys(object, ["holdId"]);
+  if (typeof object.holdId !== "string" || !HOLD_ID.test(object.holdId)) fail("holdId is invalid");
+  return { holdId: object.holdId as string };
+}
+export function validatePreviewBuildReleaseResultV1(value: unknown, request: PreviewBuildReleaseRequestV1): PreviewBuildReleaseResultV1 {
+  const object = requireObject(value, "preview build release result");
+  exactKeys(object, ["holdId", "released"]);
+  if (object.holdId !== request.holdId || typeof object.released !== "boolean") fail("build release is invalid");
+  return { holdId: request.holdId, released: object.released as boolean };
+}
+
+/** The sidecar's output folder rule (`safe_output_dir`): plain segments inside the workspace. */
+export function isPreviewOutputDirV1(value: string): boolean {
+  if (value.length === 0 || value.length > 120 || value.split("/").length > 4 || !/^[A-Za-z0-9._/-]+$/.test(value)) return false;
+  if (["src", "public", "node_modules"].includes(value.split("/")[0]!)) return false;
+  return previewPathRefusalV1(`${value}/index.html`) === null;
+}
+
+export function validatePreviewBuildPlanRequestV1(value: unknown): PreviewBuildPlanRequestV1 {
+  const object = requireObject(value, "preview build plan request");
+  exactKeys(object, ["projectId", "chatId"]);
+  return { projectId: id(object.projectId, "projectId"), chatId: id(object.chatId, "chatId") };
+}
+
+export function validatePreviewBuildPlanResultV1(value: unknown, request: PreviewBuildPlanRequestV1): PreviewBuildPlanResultV1 {
+  const object = requireObject(value, "preview build plan");
+  exactKeys(object, ["chatId", "projectId", "worktreeId", "workspaceIdentity", "refusal", "workspacePath", "packageManager", "lockfile", "buildScript", "buildHooks", "dependencies", "dependencyCount", "yarnBerry", "outputDir", "needsInstall", "fingerprint", "folderIdentity", "inputs"]);
+  if (object.chatId !== request.chatId || object.projectId !== request.projectId) fail("preview build plan answered another chat");
+  const ref = { chatId: request.chatId, projectId: request.projectId, worktreeId: id(object.worktreeId, "worktreeId"), workspaceIdentity: id(object.workspaceIdentity, "workspaceIdentity") };
+  if (typeof object.lockfile !== "boolean" || typeof object.needsInstall !== "boolean" || typeof object.yarnBerry !== "boolean") fail("preview build flags are invalid");
+  if (object.refusal !== null) {
+    if (typeof object.refusal !== "string" || !(PREVIEW_BUILD_REFUSALS_V1 as readonly string[]).includes(object.refusal)) fail("preview build refusal is invalid");
+    if (object.workspacePath !== null || object.packageManager !== null || object.buildScript !== null || object.outputDir !== null || object.lockfile || object.needsInstall
+      || object.buildHooks !== null || object.dependencies !== null || object.dependencyCount !== null || object.yarnBerry || object.fingerprint !== null
+      || object.folderIdentity !== null || object.inputs !== null) {
+      fail("a refused build plan carries no plan");
+    }
+    return { ...ref, refusal: object.refusal as PreviewBuildRefusalV1, workspacePath: null, packageManager: null, lockfile: false, buildScript: null,
+      buildHooks: null, dependencies: null, dependencyCount: null, yarnBerry: false, outputDir: null, needsInstall: false, fingerprint: null, folderIdentity: null, inputs: null };
+  }
+  const hooks = object.buildHooks;
+  if (!Array.isArray(hooks) || hooks.length > 2 || hooks.some(hook => {
+    const entry = requireObject(hook, "build hook");
+    exactKeys(entry, ["name", "script"]);
+    return (entry.name !== "prebuild" && entry.name !== "postbuild") || typeof entry.script !== "string" || entry.script.length > 1200;
+  })) fail("buildHooks is invalid");
+  const dependencies = object.dependencies;
+  if (!Array.isArray(dependencies) || dependencies.length > 40 || dependencies.some(name => typeof name !== "string" || name.length === 0 || name.length > 214 || /[\u0000-\u001f\u007f]/u.test(name))) fail("dependencies are invalid");
+  const count = object.dependencyCount;
+  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < dependencies.length) fail("dependencyCount is invalid");
+  if (typeof object.fingerprint !== "string" || !/^[0-9a-f]{64}$/.test(object.fingerprint)) fail("fingerprint is invalid");
+  if (typeof object.folderIdentity !== "string" || !/^\d+:\d+$/.test(object.folderIdentity)) fail("folderIdentity is invalid");
+  const inputs = object.inputs;
+  if (!Array.isArray(inputs) || inputs.length === 0 || inputs.length > 16 || inputs.some(entry => {
+    const input = requireObject(entry, "build input");
+    exactKeys(input, ["name", "sha256"]);
+    return typeof input.name !== "string" || !/^[A-Za-z0-9._-]{1,40}$/.test(input.name) || typeof input.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(input.sha256);
+  }) || !inputs.some(entry => (entry as { name: string }).name === "package.json")) fail("inputs are invalid");
+  const path = object.workspacePath;
+  if (typeof path !== "string" || !path.startsWith("/") && !/^[A-Za-z]:\\/.test(path) || path.length > 4096 || /[\u0000-\u001f\u007f]/u.test(path)) fail("workspacePath is invalid");
+  if (object.packageManager !== "npm" && object.packageManager !== "pnpm" && object.packageManager !== "yarn") fail("packageManager is invalid");
+  const script = object.buildScript;
+  if (typeof script !== "string" || script.length === 0 || script.length > 1200) fail("buildScript is invalid");
+  if (typeof object.outputDir !== "string" || !isPreviewOutputDirV1(object.outputDir)) fail("outputDir is invalid");
+  return {
+    ...ref, refusal: null, workspacePath: path as string, packageManager: object.packageManager as PreviewPackageManagerV1,
+    lockfile: object.lockfile as boolean, buildScript: script as string, buildHooks: hooks as { name: string; script: string }[],
+    dependencies: dependencies as string[], dependencyCount: count as number, yarnBerry: object.yarnBerry as boolean,
+    outputDir: object.outputDir as string, needsInstall: object.needsInstall as boolean, fingerprint: object.fingerprint as string,
+    folderIdentity: object.folderIdentity as string, inputs: inputs as { name: string; sha256: string }[],
+  };
+}
+
+// Renderer ↔ main (`m5:previewBuild:v1`). The page names the project and
+// the chat; main asks the sidecar for the plan every time and shows the
+// exact command and folder in its own box before anything runs.
+
+export const PREVIEW_BUILD_CHANNEL_V1 = "m5:previewBuild:v1";
+export type PreviewBuildStepV1 = "install" | "build";
+export type PreviewBuildStateV1 = "idle" | "running" | "succeeded" | "failed" | "cancelled" | "timedOut";
+export const PREVIEW_BUILD_LOG_MAX_LINES_V1 = 1000;
+export const PREVIEW_BUILD_LINE_MAX_CHARS_V1 = 2000;
+
+export type PreviewBuildIpcRequestV1 =
+  | { action: "plan"; projectId: string; chatId: string }
+  /** Asks main to run one step. Main shows its own box first; "취소" there is `declined`. */
+  | { action: "start"; projectId: string; chatId: string; step: PreviewBuildStepV1 }
+  | { action: "cancel"; projectId: string; chatId: string }
+  /** The job's state and its log lines from `cursor` on. */
+  | { action: "status"; projectId: string; chatId: string; cursor: number };
+
+/** What the page may know of a plan: the commands as shown, never the folder. */
+export interface PreviewBuildPlanViewV1 {
+  /** `unavailable`: the engine could not answer; `toolMissing`: no `node` or
+   * package manager was found on this computer. */
+  refusal: PreviewBuildRefusalV1 | "unavailable" | "toolMissing" | null;
+  installCommand: string | null;
+  buildCommand: string | null;
+  needsInstall: boolean;
+  outputDir: string | null;
+}
+
+export interface PreviewBuildJobViewV1 {
+  step: PreviewBuildStepV1 | null;
+  state: PreviewBuildStateV1;
+  /** The next cursor and the lines since the asked one (already masked). */
+  cursor: number;
+  lines: string[];
+  exitCode: number | null;
+  /** A build that succeeded: its output can be opened (`open` with `source: "build"`). */
+  outputReady: boolean;
+  startedAt: number | null;
+  endedAt: number | null;
+  /** Processes of the job (or that it started) not seen to end after it
+   * was stopped (PR #22 review B3). While any lives, this task cannot build. */
+  leftovers: number;
+}
+
+/** `changed`: what the person agreed to changed before it ran (nothing ran;
+ * main asked again and that was not agreed either). `cancelled`: stopped while
+ * the box was open. `leftovers`: an earlier job's processes still live. */
+export type PreviewBuildStartOutcomeV1 = "started" | "declined" | "busy" | "refused" | "changed" | "cancelled" | "leftovers";
+export const PREVIEW_BUILD_START_OUTCOMES_V1: readonly PreviewBuildStartOutcomeV1[] = ["started", "declined", "busy", "refused", "changed", "cancelled", "leftovers"];
+
+export type PreviewBuildIpcResultV1 =
+  | { action: "plan"; plan: PreviewBuildPlanViewV1; job: PreviewBuildJobViewV1 }
+  | { action: "start"; outcome: PreviewBuildStartOutcomeV1; job: PreviewBuildJobViewV1 }
+  | { action: "cancel" | "status"; job: PreviewBuildJobViewV1 };
+
+function step(value: unknown): PreviewBuildStepV1 {
+  if (value !== "install" && value !== "build") fail("build step is invalid");
+  return value as PreviewBuildStepV1;
+}
+
+export function validatePreviewBuildIpcRequestV1(value: unknown): PreviewBuildIpcRequestV1 {
+  const object = requireObject(value, "preview build request");
+  switch (object.action) {
+    case "plan": case "cancel":
+      exactKeys(object, ["action", "projectId", "chatId"]);
+      return { action: object.action, projectId: id(object.projectId, "projectId"), chatId: id(object.chatId, "chatId") };
+    case "start":
+      exactKeys(object, ["action", "projectId", "chatId", "step"]);
+      return { action: "start", projectId: id(object.projectId, "projectId"), chatId: id(object.chatId, "chatId"), step: step(object.step) };
+    case "status": {
+      exactKeys(object, ["action", "projectId", "chatId", "cursor"]);
+      const cursor = object.cursor;
+      if (typeof cursor !== "number" || !Number.isSafeInteger(cursor) || cursor < 0) fail("cursor is invalid");
+      return { action: "status", projectId: id(object.projectId, "projectId"), chatId: id(object.chatId, "chatId"), cursor: cursor as number };
+    }
+    default:
+      return fail("preview build action is unknown");
+  }
+}
+
+const BUILD_STATES = new Set<PreviewBuildStateV1>(["idle", "running", "succeeded", "failed", "cancelled", "timedOut"]);
+function nullableTime(value: unknown, field: string): number | null {
+  if (value === null) return null;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) fail(`${field} is invalid`);
+  return value as number;
+}
+function command(value: unknown, field: string): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string" || value.length === 0 || value.length > 200) fail(`${field} is invalid`);
+  return value as string;
+}
+
+export function validatePreviewBuildJobViewV1(value: unknown): PreviewBuildJobViewV1 {
+  const object = requireObject(value, "preview build job");
+  exactKeys(object, ["step", "state", "cursor", "lines", "exitCode", "outputReady", "startedAt", "endedAt", "leftovers"]);
+  if (typeof object.leftovers !== "number" || !Number.isSafeInteger(object.leftovers) || object.leftovers < 0) fail("leftovers is invalid");
+  if (object.step !== null) step(object.step);
+  if (typeof object.state !== "string" || !BUILD_STATES.has(object.state as PreviewBuildStateV1)) fail("build state is invalid");
+  if (typeof object.cursor !== "number" || !Number.isSafeInteger(object.cursor) || object.cursor < 0) fail("cursor is invalid");
+  if (!Array.isArray(object.lines) || object.lines.length > PREVIEW_BUILD_LOG_MAX_LINES_V1
+    || object.lines.some(line => typeof line !== "string" || line.length > PREVIEW_BUILD_LINE_MAX_CHARS_V1)) fail("build lines are invalid");
+  if (object.exitCode !== null && (typeof object.exitCode !== "number" || !Number.isSafeInteger(object.exitCode))) fail("exitCode is invalid");
+  if (typeof object.outputReady !== "boolean") fail("outputReady is invalid");
+  return {
+    step: object.step as PreviewBuildStepV1 | null, state: object.state as PreviewBuildStateV1, cursor: object.cursor as number,
+    lines: object.lines as string[], exitCode: object.exitCode as number | null, outputReady: object.outputReady as boolean,
+    startedAt: nullableTime(object.startedAt, "startedAt"), endedAt: nullableTime(object.endedAt, "endedAt"), leftovers: object.leftovers as number,
+  };
+}
+
+export function validatePreviewBuildIpcResultV1(value: unknown, request: PreviewBuildIpcRequestV1): PreviewBuildIpcResultV1 {
+  const object = requireObject(value, "preview build result");
+  if (object.action !== request.action) fail("preview build result answers another action");
+  switch (request.action) {
+    case "plan": {
+      exactKeys(object, ["action", "plan", "job"]);
+      const plan = requireObject(object.plan, "preview build plan view");
+      exactKeys(plan, ["refusal", "installCommand", "buildCommand", "needsInstall", "outputDir"]);
+      if (plan.refusal !== null && plan.refusal !== "unavailable" && plan.refusal !== "toolMissing" && !(PREVIEW_BUILD_REFUSALS_V1 as readonly string[]).includes(plan.refusal as string)) fail("plan refusal is invalid");
+      if (typeof plan.needsInstall !== "boolean") fail("needsInstall is invalid");
+      if (plan.outputDir !== null && (typeof plan.outputDir !== "string" || !isPreviewOutputDirV1(plan.outputDir))) fail("outputDir is invalid");
+      return {
+        action: "plan",
+        plan: { refusal: plan.refusal as PreviewBuildPlanViewV1["refusal"], installCommand: command(plan.installCommand, "installCommand"), buildCommand: command(plan.buildCommand, "buildCommand"), needsInstall: plan.needsInstall as boolean, outputDir: plan.outputDir as string | null },
+        job: validatePreviewBuildJobViewV1(object.job),
+      };
+    }
+    case "start":
+      exactKeys(object, ["action", "outcome", "job"]);
+      if (!(PREVIEW_BUILD_START_OUTCOMES_V1 as readonly unknown[]).includes(object.outcome)) fail("start outcome is invalid");
+      return { action: "start", outcome: object.outcome as PreviewBuildStartOutcomeV1, job: validatePreviewBuildJobViewV1(object.job) };
+    default:
+      exactKeys(object, ["action", "job"]);
+      return { action: request.action, job: validatePreviewBuildJobViewV1(object.job) };
+  }
+}
+
+/** `window.m5PreviewBuild` (preload). */
+export interface M5PreviewBuildBridgeV1 {
+  plan(input: { projectId: string; chatId: string }): Promise<Extract<PreviewBuildIpcResultV1, { action: "plan" }>>;
+  start(input: { projectId: string; chatId: string; step: PreviewBuildStepV1 }): Promise<Extract<PreviewBuildIpcResultV1, { action: "start" }>>;
+  cancel(input: { projectId: string; chatId: string }): Promise<{ job: PreviewBuildJobViewV1 }>;
+  status(input: { projectId: string; chatId: string; cursor: number }): Promise<{ job: PreviewBuildJobViewV1 }>;
 }

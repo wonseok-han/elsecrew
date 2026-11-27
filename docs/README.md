@@ -19,6 +19,7 @@
 | **M5 ADE 고도화 전 진단(2026-11-25)** | [`proposals/m5-ade-diagnosis-2026-11-25.md`](proposals/m5-ade-diagnosis-2026-11-25.md) | 작업대 디자인 문제 D1~D13·기능 공백 F1~F14·방향 A/B/C·1~3차 로드맵; 스크린샷은 원본 폴더 경로만 |
 | **M5 ADE 1차-나 레이아웃 계획** | [`proposals/m5-ade-layout-plan.md`](proposals/m5-ade-layout-plan.md) | 방향 A 뼈대 + C 미리보기 + B 상태별 목록의 3영역 레이아웃·결과 미리보기 안전 설계·작업 묶음과 1차-가 충돌 표; 아직 제품 동작 아님 |
 | **M5 나머지 화면 디자인 통일 계획** | [`proposals/m5-ade-screens-plan.md`](proposals/m5-ade-screens-plan.md) | 앱 전체 화면 57개 목록·어긋남, 앱 전체 규칙·토큰(다크/라이트)·컴포넌트, 목업 17화면, 작업 묶음 U0~U8. U0·U1 구현 뒤 현행 동작은 architecture "색·간격 토큰과 화면 밝기" 절 |
+| **M5 결과 미리보기 2단계(개발 서버)** | [`proposals/m5-preview-dev-server.md`](proposals/m5-preview-dev-server.md) | 관리되는 `npm run dev`: 포트 고르기·LISTEN 소유 확인·그 포트만 허용하는 미리보기 정책·HMR·수명·동의, 위협 표·독립 검토 지점, 3단계(에이전트 미리보기 도구) 연결; 1단계(빌드해서 보기) 현행은 architecture "빌드해서 보기" |
 | **M5 사용자 정의 팀 역할 계획** | [`proposals/m5-custom-roles-plan.md`](proposals/m5-custom-roles-plan.md) | 역할 동적화 조사·설계·구현 순서와 1차-가·1차-나와의 경계. R0·R1·R2·R4 구현 뒤 현행 동작은 architecture "팀 역할 편집" 절 |
 
 > ⚠️ **`proposals/`는 구현된 것이 아니다.** 여기 있는 내용을 현재 동작으로 인용하지 말 것. 이 경계가 이 분류의 존재 이유다.

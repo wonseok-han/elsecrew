@@ -60,8 +60,14 @@ export type PreviewUrlDecision = { ok: true; path: string } | { ok: false; reaso
 
 /** A request the preview's own protocol handler serves: this exact token,
  * no port or credentials, no second level of encoding, then the same path
- * rules as the sidecar. `/` is the entry page. */
-export function parsePreviewRequestUrl(raw: string, token: string, entry: string): PreviewUrlDecision {
+ * rules as the sidecar. `/` is the entry page.
+ *
+ * With a `root` (a build output folder, 결과 미리보기 확장 1단계) the page's
+ * paths are inside that folder, so a built app's absolute `/assets/…` finds
+ * its files, and a path whose last segment has no extension (`/about`,
+ * `/users/42/`) is one of a single-page app's own routes: the entry page
+ * (history fallback). Dot segments stay refused either way. */
+export function parsePreviewRequestUrl(raw: string, token: string, entry: string, root: string | null = null): PreviewUrlDecision {
   if (!isPreviewToken(token)) return { ok: false, reason: "token" };
   let url: URL;
   try { url = new URL(raw); } catch { return { ok: false, reason: "invalid" }; }
@@ -76,7 +82,17 @@ export function parsePreviewRequestUrl(raw: string, token: string, entry: string
   // Chromium hands a standard scheme's root as `/`; Node's URL keeps it empty.
   if (pathname === "") pathname = "/";
   if (!pathname.startsWith("/")) return { ok: false, reason: "invalid" };
-  const path = pathname === "/" ? entry : pathname.slice(1);
+  let path = pathname === "/" ? entry : pathname.slice(1);
+  if (root !== null && pathname !== "/") {
+    const route = path.replace(/\/+$/, "");
+    const last = route.slice(route.lastIndexOf("/") + 1);
+    const segments = route.split("/");
+    if (!last.includes(".") && segments.every(segment => segment !== "" && segment !== "." && segment !== "..") && previewPathRefusalV1(`${route}.html`) === null) {
+      path = entry;
+    } else {
+      path = `${root}/${path}`;
+    }
+  }
   const refusal = previewPathRefusalV1(path);
   return refusal === null ? { ok: true, path } : { ok: false, reason: refusal };
 }

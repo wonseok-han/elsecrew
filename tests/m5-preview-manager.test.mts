@@ -133,7 +133,7 @@ function harness(overrides: Partial<PreviewManagerOptionsV1> = {}, files: Record
     manager, log, sessions, views, events, reads, resolves, children, window, sidecar, zoom,
     gate(promise: Promise<void>) { resolveGate = promise; },
     gateReads(promise: Promise<void>) { readGate = promise; },
-    open: (entry: string | null = null) => manager.request({ action: "open", projectId: "project_1", chatId: "chat_1", entry, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", pixelRatio: 1, page: { width: 1280, height: 800 } }),
+    open: (entry: string | null = null) => manager.request({ action: "open", projectId: "project_1", chatId: "chat_1", entry, source: "workspace", bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", pixelRatio: 1, page: { width: 1280, height: 800 } }),
   };
 }
 
@@ -532,7 +532,7 @@ test("zoom: the page's CSS pixels become window pixels, rounded inwards; a stale
   const h = harness();
   h.zoom.factor = 1.25;
   h.zoom.scale = 2;
-  const result = await h.manager.request({ action: "open", projectId: "project_1", chatId: "chat_1", entry: null, bounds: { x: 700.4, y: 60, width: 400, height: 500 }, viewport: "wide", pixelRatio: 2.5, page: { width: 1024, height: 640 } });
+  const result = await h.manager.request({ action: "open", projectId: "project_1", chatId: "chat_1", entry: null, source: "workspace", bounds: { x: 700.4, y: 60, width: 400, height: 500 }, viewport: "wide", pixelRatio: 2.5, page: { width: 1024, height: 640 } });
   assert.ok(result.action === "open" && result.outcome === "opened");
   const previewId = result.previewId;
   const view = h.views[0]!;
@@ -686,4 +686,39 @@ test("the app's window shortcuts typed in the preview reach the app; nothing els
   assert.deepEqual(h.window.webContents.sent, [{ type: "keyDown", keyCode: "2", modifiers: [process.platform === "darwin" ? "meta" : "control"] }]);
   assert.equal(send(key({ key: "a" })), false);
   assert.equal(h.window.webContents.sent.length, 1);
+});
+
+test("a build preview serves the task's last build from its output folder, with a single-page app's routes (결과 미리보기 확장 1단계)", async () => {
+  const files = { "dist/index.html": Buffer.from("<div id=root></div><script src=/assets/app.js></script>"), "dist/assets/app.js": Buffer.from("ok()"), "index.html": Buffer.from("source") };
+  let output: { dir: string; workspaceIdentity: string } | null = null;
+  const h = harness({ buildOutput: () => output }, files);
+  h.sidecar.previewResolve = async (input: PreviewResolveRequestV1) => {
+    h.resolves.push(input);
+    return { ...input, worktreeId: "worktree_1", workspaceIdentity: "workspace_1", previewHandle: "ph_dddddddddddddddddddddddddddddddd", entry: input.entry ?? "index.html", refusal: null };
+  };
+  const openBuild = () => h.manager.request({ action: "open", projectId: "project_1", chatId: "chat_1", entry: null, source: "build", bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", pixelRatio: 1, page: { width: 1280, height: 800 } });
+  // Nothing built yet: nothing opens and the engine is not asked.
+  assert.deepEqual(await openBuild(), { action: "open", outcome: "empty", reason: "noBuild" });
+  assert.deepEqual(h.resolves, []);
+  // A build of another workspace (the task's folder was replaced since): not shown.
+  output = { dir: "dist", workspaceIdentity: "workspace_old" };
+  assert.deepEqual(await openBuild(), { action: "open", outcome: "empty", reason: "noBuild" });
+  output = { dir: "dist", workspaceIdentity: "workspace_1" };
+  const result = await openBuild();
+  assert.ok(result.action === "open" && result.outcome === "opened");
+  assert.equal(result.entry, "dist/index.html");
+  assert.deepEqual(h.resolves.at(-1), { projectId: "project_1", chatId: "chat_1", entry: "dist/index.html" });
+  const session = h.sessions.at(-1)!;
+  const token = session.partition.slice("preview-".length);
+  // The page loads at its origin's root, where its own paths begin.
+  assert.equal(h.views.at(-1)!.webContents.url, `elsecrew-preview://${token}/index.html`);
+  const serve = async (path: string) => { const response = await session.handler!(new Request(`elsecrew-preview://${token}${path}`)); return { status: response.status, body: await response.text() }; };
+  // The built page's absolute paths are inside the output folder.
+  assert.deepEqual(await serve("/assets/app.js"), { status: 200, body: "ok()" });
+  assert.equal(h.reads.at(-1)!.path, "dist/assets/app.js");
+  // Its own routes are the page (history fallback); the workspace's sources are not reachable.
+  for (const route of ["/", "/about", "/users/42/", "/index.html"]) assert.equal((await serve(route)).body, files["dist/index.html"].toString(), route);
+  assert.equal((await serve("/missing.js")).status, 404);
+  assert.equal(h.reads.at(-1)!.path, "dist/missing.js");
+  for (const path of ["/.env", "/assets/.secret.js", "/src/main.tsx"]) assert.equal((await serve(path)).status, 404, path);
 });

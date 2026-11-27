@@ -263,7 +263,7 @@ impl ProjectManager {
 }
 
 /// The chat's own workspace, from its durable record only.
-fn preview_chat_address(
+pub(super) fn preview_chat_address(
     storage: &Storage,
     project_id: &str,
     chat_id: &str,
@@ -289,7 +289,7 @@ fn preview_chat_address(
     })
 }
 
-fn regular_file(root: &Dir, path: &str) -> bool {
+pub(super) fn regular_file(root: &Dir, path: &str) -> bool {
     open_parent_capability(root, path)
         .and_then(|(parent, name)| open_real_file_at(&parent, &name))
         .is_ok()

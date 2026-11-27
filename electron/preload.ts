@@ -1,3 +1,4 @@
+import { PREVIEW_BUILD_CHANNEL_V1 as M5_PREVIEW_BUILD_CHANNEL, validatePreviewBuildIpcRequestV1, validatePreviewBuildIpcResultV1, type M5PreviewBuildBridgeV1 } from "../src/m5/contracts/preview-v1.ts";
 import { PREVIEW_CHANNEL_V1 as M5_PREVIEW_CHANNEL, PREVIEW_EVENT_CHANNEL_V1 as M5_PREVIEW_EVENT_CHANNEL, validatePreviewEventV1, validatePreviewIpcRequestV1, validatePreviewIpcResultV1, type M5PreviewBridgeV1, type PreviewEventV1 } from "../src/m5/contracts/preview-v1.ts";
 import { CLAUDE_USAGE_CHANNEL as M5_CLAUDE_USAGE_CHANNEL, validateClaudeUsageResult } from "../src/m5/contracts/provider-usage-v1.ts";
 import { GIT_SELECTION_CHANNEL as M5_GIT_SELECTION_CHANNEL, validateGitSelectionAction, validateGitSelection, type GitSelectionAction } from "../src/m5/contracts/git-selection-v1.ts";
@@ -302,3 +303,17 @@ const previewBridge: M5PreviewBridgeV1 = Object.freeze({
   onEvent: (listener: (event: PreviewEventV1) => void) => subscribe(previewListeners, listener),
 });
 contextBridge.exposeInMainWorld("m5Preview", previewBridge);
+
+// Build-then-preview (결과 미리보기 확장 1단계). The page names a chat and a
+// step only; main shows the command and folder in its own box.
+async function previewBuildCall(input: unknown): Promise<unknown> {
+  const request = validatePreviewBuildIpcRequestV1(input);
+  return validatePreviewBuildIpcResultV1(await ipcRenderer.invoke(M5_PREVIEW_BUILD_CHANNEL, request), request);
+}
+const previewBuildBridge: M5PreviewBuildBridgeV1 = Object.freeze({
+  plan: (input: { projectId: string; chatId: string }) => previewBuildCall({ ...input, action: "plan" }) as ReturnType<M5PreviewBuildBridgeV1["plan"]>,
+  start: (input: Parameters<M5PreviewBuildBridgeV1["start"]>[0]) => previewBuildCall({ ...input, action: "start" }) as ReturnType<M5PreviewBuildBridgeV1["start"]>,
+  cancel: (input: { projectId: string; chatId: string }) => previewBuildCall({ ...input, action: "cancel" }) as ReturnType<M5PreviewBuildBridgeV1["cancel"]>,
+  status: (input: { projectId: string; chatId: string; cursor: number }) => previewBuildCall({ ...input, action: "status" }) as ReturnType<M5PreviewBuildBridgeV1["status"]>,
+});
+contextBridge.exposeInMainWorld("m5PreviewBuild", previewBuildBridge);

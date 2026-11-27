@@ -2322,13 +2322,13 @@ test("a run that failed with a failure diagnostic is delivered and never ends th
 });
 
 test("result preview: an optional pair after installation, validated answers, never without the baseline", async () => {
-  const suffix = ["chat.appendMessage", "provider.login", "run.approval", "project.catalog", "provider.install", "preview.resolve", "preview.readAsset"];
+  const suffix = ["chat.appendMessage", "provider.login", "run.approval", "project.catalog", "provider.install", "preview.resolve", "preview.readAsset", "preview.buildPlan", "preview.buildReserve", "preview.buildRelease"];
   const { child, client } = createClient();
   const started = client.start();
   const ready = JSON.parse(g5dReadyLine());
   ready.payload.capabilities.push(...suffix);
   child.stdout.write(`${JSON.stringify(ready)}\n`);
-  assert.deepEqual((await started).capabilities.slice(-3), ["provider.install", "preview.resolve", "preview.readAsset"]);
+  assert.deepEqual((await started).capabilities.slice(-6), ["provider.install", "preview.resolve", "preview.readAsset", "preview.buildPlan", "preview.buildReserve", "preview.buildRelease"]);
   const status = client.getSystemStatus();
   const result = g5dStatus("ready") as any;
   result.sidecar.capabilities.push(...suffix);
@@ -2363,7 +2363,7 @@ test("result preview: an optional pair after installation, validated answers, ne
   const bareStarted = bare.client.start();
   const rejected = assert.rejects(bareStarted);
   const bareReady = JSON.parse(g5dReadyLine());
-  bareReady.payload.capabilities.push("chat.appendMessage", "preview.resolve", "preview.readAsset");
+  bareReady.payload.capabilities.push("chat.appendMessage", "preview.resolve", "preview.readAsset", "preview.buildPlan", "preview.buildReserve", "preview.buildRelease");
   bare.child.stdout.write(`${JSON.stringify(bareReady)}\n`);
   await rejected;
 
@@ -2371,7 +2371,7 @@ test("result preview: an optional pair after installation, validated answers, ne
   const old = createClient();
   const oldStarted = old.client.start();
   const oldReady = JSON.parse(g5dReadyLine());
-  oldReady.payload.capabilities.push(...suffix.slice(0, -2));
+  oldReady.payload.capabilities.push(...suffix.slice(0, -5));
   old.child.stdout.write(`${JSON.stringify(oldReady)}\n`);
   await oldStarted;
   const writes = old.child.writes.length;

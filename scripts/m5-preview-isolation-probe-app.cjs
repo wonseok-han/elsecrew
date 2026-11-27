@@ -159,7 +159,7 @@ async function run(window) {
   const measureNow = () => page('({ pixelRatio: devicePixelRatio, page: { width: innerWidth, height: innerHeight } })');
   const layoutOf = async (previewId, viewport, obscured) => page(`window.m5Preview.layout(${JSON.stringify({ previewId, bounds, viewport, obscured, ...(await measureNow()) })})`);
   const open = async (chat, entry, viewport = 'wide') => {
-    const opened = await page(`window.m5Preview.open(${JSON.stringify({ projectId, chatId: chat.chatId, entry, bounds, viewport, ...(await measureNow()) })})`);
+    const opened = await page(`window.m5Preview.open(${JSON.stringify({ projectId, chatId: chat.chatId, entry, source: "workspace", bounds, viewport, ...(await measureNow()) })})`);
     // Main keeps a new view hidden until the page places it (PR #9 review I1).
     if (opened && opened.outcome === 'opened') await layoutOf(opened.previewId, viewport, false);
     return opened;

@@ -15,7 +15,8 @@ import { SESSION_DIAGNOSTICS_CHANNEL, classifySessionDiagnostics } from "../src/
 import { readDeviceReport } from "./device-report.ts";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, protocol, safeStorage, screen, session, shell, WebContentsView } from "electron";
 import { APPEARANCE_CHANNEL, APPEARANCE_GET_CHANNEL, isThemePreference, readThemePreference, windowBackground, writeThemePreference, type ThemePreference } from "./appearance.ts";
-import { PREVIEW_CHANNEL_V1, PREVIEW_EVENT_CHANNEL_V1, validatePreviewIpcRequestV1 } from "../src/m5/contracts/preview-v1.ts";
+import { PREVIEW_BUILD_CHANNEL_V1, PREVIEW_CHANNEL_V1, PREVIEW_EVENT_CHANNEL_V1, validatePreviewBuildIpcRequestV1, validatePreviewIpcRequestV1 } from "../src/m5/contracts/preview-v1.ts";
+import { createPreviewBuildManager } from "./preview-build-host.ts";
 import { previewFlags } from "./preview-flag.ts";
 import { PreviewManagerV1 } from "./preview-manager.ts";
 import { PREVIEW_SCHEME, PREVIEW_SCHEME_PRIVILEGES } from "./preview-policy.ts";
@@ -131,6 +132,25 @@ const previewManager = new PreviewManagerV1({
     if (window && !window.isDestroyed()) window.webContents.send(PREVIEW_EVENT_CHANNEL_V1, event);
   },
   log: (label) => console.info(`m5: ${label}`),
+  buildOutput: (projectId, chatId) => previewBuildManager.buildOutput(projectId, chatId),
+});
+/** Build-then-preview (결과 미리보기 확장 1단계): main runs a task's install
+ * or build only after the person's "예" in main's own box (PR #12·#14). Not
+ * on Windows yet: its process tree and tool lookup are not checked. The
+ * program lookup, environment and process group live in preview-build-host.ts. */
+const previewBuildManager = createPreviewBuildManager({
+  // macOS only: its sandbox, process tree and tool lookup are what was checked.
+  enabled: PREVIEW_ENABLED && process.platform === "darwin",
+  sidecar: () => sidecar,
+  ask: async (box) => {
+    const window = mainWindow;
+    if (!window || window.isDestroyed()) return 0;
+    return (await dialog.showMessageBox(window, { type: "question", noLink: true, defaultId: 0, cancelId: 0, ...box })).response;
+  },
+  korean: () => app.getLocale().toLowerCase().startsWith("ko"),
+  dataDirectory: () => m5DataDirectory(),
+  hiddenFolders: () => [m5DataDirectory(), app.getPath("userData")],
+  log: (label) => console.info(`m5: ${label}`),
 });
 /** Stopping agent processes takes up to about 8 seconds each (terminate, then kill). */
 const ENGINE_EXIT_WAIT_MS = 12_000;
@@ -199,6 +219,8 @@ const quitCoordinator = new QuitCoordinatorV1({
     quitStarted = true;
     // The preview closes at once; its pending reads find it closed.
     previewManager.shutdown();
+    // A running install or build ends with the app.
+    previewBuildManager.shutdown();
     // Look closed at once; running work stops in the background.
     for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.hide();
   },
@@ -540,12 +562,13 @@ async function prepareQuit(): Promise<PrepareQuitResultV1> {
   // through `before-quit`) closes the preview and stops its reads first; a
   // preparation called off lets it open again (PR #6 review I4).
   previewManager.suspend();
+  previewBuildManager.suspend();
   await gitPreparation?.close();
   try {
     const result = await quitCoordinator.prepareQuit();
-    if (!result.safeToQuit) { gitPreparation?.reopen(); previewManager.resume(); }
+    if (!result.safeToQuit) { gitPreparation?.reopen(); previewManager.resume(); previewBuildManager.resume(); }
     return result;
-  } catch (error) { gitPreparation?.reopen(); previewManager.resume(); throw error; }
+  } catch (error) { gitPreparation?.reopen(); previewManager.resume(); previewBuildManager.resume(); throw error; }
 }
 
 function registerIpcHandlers(): void {
@@ -606,6 +629,15 @@ function registerIpcHandlers(): void {
     assertCurrentMainFrame(event);
     if (args.length !== 1) throw new Error("preview takes one request");
     return previewManager.request(validatePreviewIpcRequestV1(args[0]));
+  }));
+  // Build-then-preview: the page names a chat and a step; main asks the
+  // sidecar for the plan and the person in its own box (preview-build.ts).
+  // Processes a build left when the app last ended without stopping them.
+  if (previewBuildManager) { try { previewBuildManager.recoverLeftovers(); } catch { /* best effort */ } }
+  ipcMain.handle(PREVIEW_BUILD_CHANNEL_V1, quietAfterQuit(async (event, ...args: unknown[]) => {
+    assertCurrentMainFrame(event);
+    if (args.length !== 1) throw new Error("preview build takes one request");
+    return previewBuildManager.request(validatePreviewBuildIpcRequestV1(args[0]));
   }));
   ipcMain.handle(SESSION_DIAGNOSTICS_CHANNEL, async (event, ...args: unknown[]) => {
     assertCurrentMainFrame(event);
@@ -902,6 +934,7 @@ async function createMainWindow() {
   window.on("closed", () => {
     if (mainWindow !== window) return;
     previewManager.windowClosed();
+    previewBuildManager.stopAll();
     mainWindow = undefined;
     if (quitCoordinator.exitAllowed) return;
     if (eventCredit.outstanding !== 0) sidecar?.failRendererDisconnected();
@@ -916,9 +949,10 @@ async function createMainWindow() {
       eventCredit.pause();
       // The new page never learns the old preview: close it and any open on its way.
       previewManager.pageReplaced();
+      previewBuildManager.stopAll();
     }
   });
-  window.webContents.on("render-process-gone", () => previewManager.pageReplaced());
+  window.webContents.on("render-process-gone", () => { previewManager.pageReplaced(); previewBuildManager.stopAll(); });
   // A window about to change size hides the preview first; it shows again
   // only where the page measures after the change (PR #9 re-review B1).
   window.on("will-resize", () => previewManager.geometryChanged());
@@ -1017,6 +1051,7 @@ export {
   SIDECAR_READY_TIMEOUT_MS,
   assertCurrentMainFrame,
   m5DataDirectory,
+  previewBuildManager,
   previewManager,
   setPageZoomFactor,
   sidecarLaunch,

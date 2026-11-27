@@ -1691,6 +1691,14 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 [data-preview-wait]::backdrop { opacity: 0 !important; background: transparent !important; backdrop-filter: none !important; }
 .m5-preview-note { margin: 0; font-size: var(--text-xs, 12px); color: var(--text-tertiary); }
 .m5-preview-open-file { margin: 4px 0; }
+/* Build-then-preview bar (결과 미리보기 확장 1단계): above the stage, outside the view. */
+.m5-preview-build { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; border: 1px solid var(--line-default); border-radius: var(--radius-m, 8px); background: var(--bg-raised); }
+.m5-preview-build-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.m5-preview-build-running { font-size: var(--text-m); color: var(--status-running-text); }
+.m5-preview-build-log-toggle { margin-left: auto; }
+.m5-preview-build-help, .m5-preview-build-status, .m5-preview-build-note { margin: 0; font-size: var(--text-xs, 12px); color: var(--text-secondary); }
+.m5-preview-build-note { padding: 6px 8px; border-radius: var(--radius-s, 6px); background: var(--bg-sunken); }
+.m5-preview-build-log { margin: 0; height: 9.5em; overflow: auto; padding: 6px 8px; border-radius: var(--radius-s, 6px); background: var(--bg-sunken); color: var(--text-primary); white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 /* Team roles editor (custom roles R1): vertical list + editor, semantic tokens only. */
 .m5-settings-dialog { width: min(1180px, calc(100vw - 32px)); height: min(820px, calc(100vh - 32px)); }

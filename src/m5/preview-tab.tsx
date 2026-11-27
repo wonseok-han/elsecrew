@@ -19,6 +19,8 @@ import { useI18n } from "../i18n.tsx";
 import type { M5PreviewBridgeV1, PreviewCloseReasonV1, PreviewEmptyReasonV1, PreviewViewportV1 } from "./contracts/preview-v1.ts";
 import { closedView, coveredAtPoints, coveredByRect, emptyView, overlaps, PREVIEW_WAIT_ATTRIBUTE, PreviewBands, previewBounds, sameLayout, samplePoints, type Rect } from "./preview-tab-model.ts";
 import { PREVIEW_HOLD_LIMIT_MS, PreviewLayoutLoop, type LoopMeasure } from "./preview-layout-loop.ts";
+import { PreviewBuildBar } from "./preview-build-bar.tsx";
+import type { PreviewSourceV1 } from "./contracts/preview-v1.ts";
 
 type Phase =
   | { kind: "idle" }
@@ -36,7 +38,7 @@ const SETTLE_MS = 150;
 /** Elements watched by their rectangle (notification panels, toasts, popovers). */
 const MAX_WATCHED = 300;
 
-export function PreviewTab({ projectId, chatId, active, covered, resultKey, entryRequest, onChanges }: {
+export function PreviewTab({ projectId, chatId, active, covered, resultKey, entryRequest, onChanges, teamWorking = false }: {
   projectId: string | null;
   chatId: string | null;
   /** The preview tab is the selected one and on screen. */
@@ -48,6 +50,8 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
   /** "미리보기로 열기" from the files tab. */
   entryRequest: PreviewEntryRequest | null;
   onChanges: () => void;
+  /** The task's team is working (no build meanwhile). */
+  teamWorking?: boolean;
 }) {
   const { t } = useI18n();
   const bridge: M5PreviewBridgeV1 | undefined = window.m5Preview;
@@ -80,6 +84,10 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
   const setBand = (which: "newResult" | "notice", value: boolean) => bandModel.current!.set(which, value);
   const hidden = useRef(false);
   const entry = useRef<string | null>(null);
+  /** What the next open shows: the workspace's own files, or its last build. */
+  const [source, setSource] = useState<PreviewSourceV1>("workspace");
+  const sourceRef = useRef<PreviewSourceV1>("workspace");
+  sourceRef.current = source;
   const shownResultKey = useRef(resultKey);
   const [overlay, setOverlay] = useState(false);
   /** Everything that decides "hidden", read at once by the layout loop
@@ -103,12 +111,16 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
   useEffect(() => {
     if (!entryRequest) return;
     entry.current = entryRequest.path;
+    sourceRef.current = "workspace";
+    setSource("workspace");
     setOpenRequest(value => value + 1);
   }, [entryRequest]);
 
   // Another task: a new preview (a new token: storage starts empty).
   useEffect(() => {
     entry.current = null;
+    sourceRef.current = "workspace";
+    setSource("workspace");
     openGeneration.current++;
     setPhase({ kind: "idle" });
     setNewResult(false);
@@ -134,7 +146,8 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
     setPhase({ kind: "opening" });
     setStill(null);
     hidden.current = false;
-    bridge.open({ projectId, chatId, entry: entry.current, bounds, viewport, pixelRatio: window.devicePixelRatio, page: { width: window.innerWidth, height: window.innerHeight } }).then(result => {
+    const from = sourceRef.current;
+    bridge.open({ projectId, chatId, entry: from === "build" ? null : entry.current, source: from, bounds, viewport, pixelRatio: window.devicePixelRatio, page: { width: window.innerWidth, height: window.innerHeight } }).then(result => {
       if (generation !== openGeneration.current) {
         if (result.outcome === "opened") void bridge.close({ previewId: result.previewId }).catch(() => undefined);
         return;
@@ -420,6 +433,13 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
     setPhase({ kind: "idle" });
     setOpenRequest(value => value + 1);
   };
+  /** Show the workspace's own files or its last build (a new preview, a new token). */
+  const showSource = (next: PreviewSourceV1) => {
+    setBand("newResult", false);
+    sourceRef.current = next;
+    setSource(next);
+    reopen();
+  };
 
   // What the tab shows as hidden (the layout loop above reads the same causes).
   const obscured = covered || overlay || !active;
@@ -433,6 +453,7 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
         <span className="m5-preview-badge">{t("m5.preview.offline")}</span>
       </div>
       {phase.kind === "open" && <div className="m5-preview-controls">
+        {source === "build" && <span className="m5-preview-badge" data-testid="preview-build-badge">{t("m5.preview.buildBadge")}</span>}
         <span className="m5-preview-entry" title={phase.entry}>{phase.entry}</span>
         <div className="m5-preview-viewport" role="group" aria-label={t("m5.preview.width")}>
           <button type="button" aria-pressed={viewport === "wide"} data-testid="preview-wide" onClick={() => setViewport("wide")}>{t("m5.preview.wide")}</button>
@@ -441,6 +462,8 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
         <button type="button" className="m5-secondary" data-testid="preview-reload" onClick={reload}>{t("m5.preview.reload")}</button>
       </div>}
     </header>
+    {enabled === true && <PreviewBuildBar projectId={projectId} chatId={chatId} active={active} teamWorking={teamWorking} showingBuild={source === "build"}
+      onBuilt={() => showSource("build")} onShowBuild={() => showSource("build")} onShowSource={() => showSource("workspace")} />}
     {newResult && phase.kind === "open" && <p className="m5-preview-band" role="status" data-testid="preview-new-result">
       {t("m5.preview.newResult")} <button type="button" className="m5-link-button" onClick={reload}>{t("m5.preview.reload")}</button>
     </p>}
@@ -451,7 +474,7 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
       {enabled === false && <div className="m5-preview-state" data-testid="preview-off"><strong>{t("m5.preview.off")}</strong><p>{t("m5.preview.offHelp")}</p></div>}
       {!chatId && enabled !== false && <div className="m5-preview-state"><p>{t("m5.preview.noTask")}</p></div>}
       {phase.kind === "empty" && <div className="m5-preview-state" data-testid="preview-empty">
-        <strong>{emptyView(phase.reason) === "noPage" ? t("m5.preview.noPage") : t("m5.preview.notOpenable")}</strong>
+        <strong>{phase.reason === "noBuild" ? t("m5.preview.noBuild") : emptyView(phase.reason) === "noPage" ? t("m5.preview.noPage") : t("m5.preview.notOpenable")}</strong>
         <p>{t("m5.preview.noPageHelp")}</p>
         <button type="button" className="m5-secondary" onClick={onChanges}>{t("m5.preview.toChanges")}</button>
       </div>}
