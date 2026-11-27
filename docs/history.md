@@ -2,6 +2,31 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — ADE 안정화 B: 불안정 시험 원인 수정·오래된 설치 응답·네이티브 스모크 L1·sidecar CI (`orca/ade-stab-b`, 기준 feature/ade 5012329e, PR #24)
+조정자 과제(안정화 B). 같은 시기 안정화 A가 엔진 실행 시작 구조를 바꾼다. 이 PR은 `orchestration_dispatch.rs`의 **시험 모듈**만 건드렸다(겹치면 그쪽 시험 두 곳).
+
+- **불안정 시험 원인과 수정**(재사용할 함정은 핵심 결정·발견 "시험 안정성 함정")
+  - `a_sign_in_hold_*`(재번호·삭제 뒤 해제·스스로 끝난 실행·앱 시작 해제): 복구 판단이 잠금 파일을 연 순간 다른 스레드가 `pre_exec`로 자식을 띄우면 자식이 exec 전까지 flock을 쥔다. 다음 판단이 `providerBusy`(실행 잠금은 건너뛰고 `idle`)로 읽었다. 3스레드 fork 폭주와 함께 3/3 재현. 수정: `lock_exclusive`가 바쁘면 100ms 다시 묻는다(`lock_exclusive_settled`). 시험 `a_lock_copied_into_a_starting_child_is_not_a_live_owner`. 수정 뒤 fork 폭주 속 5/5 통과.
+  - `claude_project_consent_auto_approves_and_still_rejects_outside_files`: durable `auto-read`가 공유 명령 사례 약 80건을 실제 승인 경로로 보내 유휴 단독으로도 13.3초(승인당 약 130ms). 멈춤이 아니라 느림. 기한을 "이벤트 없이 15초 + 전체 180초"로.
+  - `a_session_waiting_too_long_for_a_slot_fails_alone`(제품 결함): 짧은 읽기로 120KiB가 남으면 다음 64KiB 읽기가 150KiB 줄을 자리 없이 끝냈다. 자리 없는 세션 읽기는 128KiB 경계에서 멈춘다. 시험 `a_line_that_crosses_the_bound_in_one_read_still_needs_a_slot`(수정을 빼면 실패 확인).
+  - `an_app_closed_mid_run_reopens_with_the_work_kept_and_the_task_usable`: "엔진이 죽은 뒤 살아 있음" 전제를 drop 뒤에 확인했다(fake 런처는 SIGPIPE로 곧 끝남). drop 직전에 확인.
+  - 렌더러 마운트 스모크(CI run 45854467204 "send after the first-task yes"): 권한을 읽기 전 비활성 체크박스를 눌렀다. 활성화를 기다린다.
+  - 미리보기 UI 스모크의 일시 실패는 이번 반복에서 재현되지 않았다(3/3 PASS). 기록상 원인을 특정한 증거는 렌더러 마운트 스모크 쪽뿐이다.
+- **잔여 결함**
+  - PR #14 재확인 메모: 다른 계획 ID의 `start`는 대기 계획과 화면 상태를 건드리지 않고 거절(`ConsentStore::accept` → `Err(None)`). main은 대화상자 응답 뒤 계획을 다시 읽어 바뀌었으면 시작하지 않는다. 시험: Rust `an_answer_for_an_older_plan_leaves_the_new_plan_waiting`·`a_start_for_an_older_plan_keeps_the_plan_awaiting_consent`, 보안 하네스 "a yes in a box opened for one plan never starts the plan that replaced it".
+  - 네이티브 스모크 L1: architecture "네이티브 기본 흐름". 화면 클릭 합치기는 fixture 엔진이 V3 역할을 못 저장해 bridge 요청으로 확인한다(남은 일).
+- **CI**: `sidecar (macos, storage-a|storage-b|chat|rest)` 4묶음, rest 묶음에서 네이티브·다중 프로젝트 스모크. 첫 CI에서 찾은 것:
+  - Rust 1.100(러너)은 시험 실행 파일을 `<profile>/build/<패키지>/<해시>/out`에 둔다. `<profile>/deps`를 가정한 sidecar 실행 파일 찾기가 깨져 chat·rest 90건 실패. 조상 폴더를 거슬러 찾게 고침(`chat/test_binary.rs`, 배치 시험 포함).
+  - 러너의 정식 Xcode: 작업 sandbox는 `Contents/Developer`만 읽게 해 `/usr/bin/git` 셰임의 xcodebuild가 `SharedFrameworks`를 못 읽는다(`git_works_read_only_inside_a_task_worktree_sandbox`). **정식 Xcode를 고른 사용자의 남은 결함**(sandbox 경계 변경이라 별도 작업·독립 검토 필요). CI는 Command Line Tools로 돈다.
+  - 러너가 영어라 화면도 영어: 네이티브 스모크에 `--lang=ko`.
+- **발견(별도 작업 후보)**: 공급자가 연결되지 않은 채 새 작업을 보내면 총괄 시작이 거절되고 작업이 "준비 중 · 0분째"로 남는다(채팅 상태는 draft). 저장 직후 변경 행을 누르면 변경 요약 새로 읽기와 겹쳐 diff 열기가 한 번 무시될 수 있다(스모크는 다시 누름).
+- **검증**
+  - `cargo test --workspace` 연속 5회(5b789e96 Rust 코드, 4스레드): 매회 1,336 통과·실패 0, 982~1,483초. 같은 시기 다른 워커의 cargo와 겹치지 않게 기다린 뒤 돌렸다. 수정 전 같은 조건 1회차에서 새 불안정 2건(큰 줄 자리·엔진 drop 뒤 전제)이 드러나 위처럼 고쳤다.
+  - `npm test` 1044/1044(커밋마다 다시), `pnpm build`, 보안 하네스 27/27.
+  - 스모크 각 3회 PASS: 렌더러 마운트(`pnpm m5:test:editor` 69/69), 미리보기 UI(`node scripts/m5-preview-ui-run.mjs`), 네이티브 프로젝트(기본·합치기+다시 불러오기·`ELSECREW_SMOKE_PROJECTS=1`), 다중 프로젝트. 그 뒤 바꾼 언어·좁은 화면 처리는 기본·합치기(`ELSECREW_SMOKE_NARROW=1` 포함)·다중 프로젝트 각 1회 PASS.
+  - CI(600a9dd8): test macOS·Windows, website, GitGuardian, sidecar storage-a 8분 41초·storage-b 10분 47초·chat 12분 26초·rest 11분 47초(네이티브·다중 프로젝트 스모크 포함) 모두 통과.
+- **다음 할 일**: Codex 검토 대응. 정식 Xcode 사용자의 sandbox 안 `/usr/bin/git`(별도 작업, 독립 검토). 화면 클릭 합치기 스모크를 위한 V3 역할 fixture 엔진. 공급자 미연결 새 작업의 "준비 중" 고착 확인.
+
 ### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #22 재검토(B1~B4 부분 해소·동시 쓰기) 반영 (`orca/ade-preview-build`)
 재검토 `~/Documents/elsecrew-ade-preview-build-2026-11-27/REVIEW-pr22-2.md`(대상 dd63472a). 현행 설명은 architecture "빌드해서 보기"를 고쳤다.
 
