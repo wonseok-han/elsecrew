@@ -2,6 +2,61 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #25 검토(차단 2·중요 5·경미 2) 반영 (`orca/ade-stab-a-engine`)
+검토 `~/Documents/elsecrew-ade-stab-2026-11-27/REVIEW-pr25.md`(대상 ce0bf4b1). 원칙: 확인에 실패하면 보호를 유지하고, 사람이 볼 안내와 안전한 해제 경로(소유 프로세스가 없음을 확인한 뒤)를 둔다. 현행 설명은 architecture "엔진 루프와 실행 시작".
+
+- **B1 예약 응답 유실**: 예약 이름을 main이 정한다(`preview.buildReserve {…, holdId}`, 같은 이름·작업이면 같은 답). 응답을 못 받으면 main이 그 이름으로 해제한다. 시험 `a_hold_whose_reserve_answer_was_lost_is_released_by_its_name`, Node `PR #25 review B1: …`.
+- **B2 복구 불능**: 새 엔진은 같은 앱의 보류는 그대로, 이전 앱 실행의 보류는 `stale`(계속 막음), 읽지 못하거나 믿을 수 없는 기록·앱 신원 없음은 `unknown`(모든 작업 바쁨)으로 되살리고 파일을 지우지 않는다. main이 엔진 준비 때마다 새 메서드 `preview.buildHolds {holds, leftoversSettled}`로 자기 목록과 이전 빌드 프로세스 종료 여부를 알리고, 끝났을 때만 풀린다. 남았으면 10초마다 다시 본다. 거절은 이유를 말한다(`BLOCKED_DETAIL`). 시험 `holds_a_new_engine_cannot_confirm_keep_blocking_until_the_app_settles_them`(손상 파일·다른 앱 소유자 주입), `holds_come_back_and_what_cannot_be_confirmed_keeps_blocking`, Node `PR #25 review B2: …`.
+- **I1 해제 기록 실패**: 쓰기 성공 뒤에만 메모리에서 지우고, 실패하면 오류로 답해 main이 다시 보낸다. 시험 `an_unwritten_release_keeps_the_hold_and_a_retry_frees_it`(쓰기 실패 주입 → 재시작 → 재시도).
+- **I2 미리 만든 명령의 인자**: 작업자는 서명 실행 파일 고정만 하고, 인자·환경은 실행 걸음에서 현재 파일 상태로 조합한다(`ClaudeCommand::with_pin`, `CodexCommand::with_pins`). 입력 비교 구조체는 없앴다.
+- **I3 오래된 확인 결과**: 예약 직전 `ready_check`가 25초 넘은 결과는 쓰지 않고 공급자를 다시 확인한다(최대 2번). 팀이 중단된 팀 단계·앱 종료 준비 중인 시작은 걸음을 밟지 않는다(`start_gate`). 시험 `a_check_too_old_to_reserve_on_is_checked_again_never_used`, 준비 중 취소 `a_start_stopped_or_quitting_during_preparation_never_takes_its_step`.
+- **I4 8MiB 넘는 Claude 요청**: 뼈대가 1MiB를 넘으면 128바이트 이하 문자열만 그대로 두어(상한 10MiB) 권한 요청 판별까지 간다. 보류 요청에는 거절에 필요한 필드만 남기고, 권한 파서는 입력·대상·훅 범위를 해석하지 않는다(`observe_withheld_parts`). 시험 core `streamed_requests_with_many_strings_or_a_long_path_reach_their_refusal`, 실제 승인 세션(가짜 Claude가 거절 문구 확인 후 다음 프레임) `claude_permission_requests_past_the_session_bound_are_declined_and_the_session_goes_on`. 처음 시도에서 '작은 문자열 다수' 프레임이 세션 예산(`session budget`)에 걸렸고, 필드만 남기게 해 해결했다.
+- **I5 측정**: 샘플러를 `scripts/m5-latency-sampler.cjs`로 빼서 타이머를 하나로 유지(전환·종료 때 취소), 판정은 Claude 2·Codex 2 시작이 모두 받아들여지고 작업 중 실행이 끝까지 살아야 부하로 인정한다. 작업 중 실행은 Codex(1~300)로 바꿨다(Claude는 긴 목록을 13초에 끝내 판정이 정확히 실패시켰다). 시험 `starting: the sampler keeps one timer however rounds switch`, `starting: a slow read, …`.
+- **M1 메모리**: 뼈대는 커지기 전에 검사, 앞부분 보관은 4,096개까지, 줄 머리는 고정 배열. 계산상 자리당 약 37MiB·둘 74MiB(실측 아님)를 `provider_login_io.rs`에 적었다.
+- **M2 기준**: 이번 측정의 기준은 `feature/ade` 5012329e(엔진과 앱 번들 모두, `--main`). 같은 개발 데이터·같은 부하(작업 중 Codex 1 옆에서 Claude 2·Codex 2 시작, 1초마다 세 읽기)에서 판정 문제 없음:
+
+  | 지표 | 전(5012329e) | 후 |
+  | --- | --- | --- |
+  | 4개 시작 응답까지 | 135.9초 | 58.8초 |
+  | 루프 한 번 최장 점유(시작 구간) | 23.3초 | 7.7초 |
+  | 시작 중 파일 읽기 / 승인 목록 / 작업 조회 p95 | 122.9 / 122.6 / 122.4초 | 36.8 / 36.2 / 35.9초 |
+  | 대조(작업 중 1개) 세 읽기 p95 | 0.48~0.95초 | 0.29~0.44초 |
+
+  - 1초 목표는 여전히 못 맞춘다(원장 쓰기 전체 재생 — 후속).
+- **함께 찾은 기존 결함**: 한 번의 읽기가 128KiB 경계를 넘으며 줄 끝까지 가져오면 큰 줄 자리 없이 처리했다(타이밍 의존, 부하 때 `a_session_waiting_too_long_for_a_slot_fails_alone` 2/3 실패로 드러남). 안정화 B(PR #24)가 같은 것을 읽기 크기를 경계+1바이트로 묶어 고쳐서, `feature/ade` 병합 때 B의 방식을 채택하고 내 중복 검사는 뺐다. 스트리밍 때문에 큰 줄 진행 시계는 `received` 기준을 유지했다.
+- **CI sidecar rest 묶음**: 재시작 시험 2건이 마지막의 팀 시작에서 CI 실행기에서만 실패했다(`fake agent control launcher failed: No such file or directory`, 재시작한 시험 엔진에서 가짜 에이전트 실행기를 띄우지 못함, 로컬은 같은 명령으로 통과 — 원인 미확인). 이 시험이 볼 것은 보류 해제이므로 실행 대신 보류 관문(`preview_build_refusal`·`write_refusal`)이 더는 거절하지 않는지 확인하게 바꿨다(`assert_released`).
+- **PR #24 병합**: 충돌은 `provider_login_io.rs`(B 쪽 파일에 내 스트리밍·시험을 다시 얹음)와 `docs/history.md`(두 쪽 엔트리 모두 유지)였다.
+- **검증**(PR #24 병합 뒤): `cargo test --workspace` core 272·protocol 75·sidecar 989·통합 16 실패 0. `npm test` 1050/1050, `pnpm build`, `git diff --check`, `m5:check:history` missing 0. 병합 전 실행에서는 `claude_project_consent_auto_approves_and_still_rejects_outside_files`가 부하로 한 번 실패했다(단독 통과).
+- **롤오버**: 엔트리 부분이 501줄이 되어 PR #15~#18 엔트리 12개를 `docs/archive/history-2026-11.md` 맨 위로 옮겼다(267줄).
+- **CI**(150f5c87): macOS·Windows·website·GitGuardian, sidecar 4묶음(chat·rest·storage-a·storage-b) 모두 통과.
+- **다음 할 일**: 노예 재확인 뒤 머지. 머지 뒤 후속(원장 쓰기 증분화, Codex `failed at initialize` 원인)은 따로 맡는다. CI에서만 재시작한 시험 엔진의 가짜 에이전트 실행기가 없던 원인은 미확인.
+
+### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — ADE 안정화 A: 엔진 시작 구조·8MiB 넘는 줄·빌드 예약 재시작 (`orca/ade-stab-a-engine`, 기준 main 0eab5f67)
+현행 설명은 architecture "엔진 루프와 실행 시작". 조정자 지시 작업(안정화 B와 병렬).
+
+- **원인 실측**(단계 계측 `latency_log::step`, 개발 DB 234MB): 시작 13~18초의 대부분은 서명 실행 파일 재확인(전체 SHA-256, 시작 하나에 약 20번·한 번 0.5~0.85초)이었다. 4개 동시면 한 번의 폴링에서 모두 처리해 루프를 70~90초 잡았다. 남은 비용은 원장 쓰기(쓰기마다 이벤트 8,666개·46MB 전체 재생, 약 0.6초)와 프로세스 생성.
+- **구조**: (1) 서명 고정 실행 파일은 엄격한 창의 스탬프와 같으면 다시 읽지 않는다. (2) 명령 만들기(서명 확인)를 예약 전에 작업자에서, 예약→잠금→실행→기록은 루프 한 걸음 그대로(입력이 같을 때만 미리 만든 명령 사용). 지속 기록이 바퀴를 넘어 반쯤 남지 않아 새 취소·복구 창이 없다. (3) 한 바퀴에 무거운 걸음 하나, 오래된 시작부터. (4) 기다리는 요청을 250ms 안에서 이어 답한 뒤 폴링. 재확인 우회(`drop_stale_start_discovery`)는 제거(4개 동시 확인 결과 최대 나이 24초 < 30초), Claude 초기화 기한 보정은 백업 등 다른 긴 점유 때문에 유지.
+- **8MiB 넘는 줄**: `OversizedLineStream`(뼈대만 보유). 통째로 읽은 줄과 결과 바이트 동일. 그 크기의 Claude 권한 요청은 입력 없는 보류 요청 → 거절 안내, 세션 유지. 디스크 임시 저장은 쓰지 않았다(4MiB 넘는 입력은 정책상 승인 불가라 원문을 둘 이유가 없음).
+- **빌드 예약 재시작**: `preview-build-holds-v1.json`(앱 신원 = 엔진 부모 pid+시작 시각). 같은 앱이면 요청 전에 복구, 아니면 삭제. main은 닿지 않은 해제를 새 엔진 준비 때·3초마다 재전송.
+- **측정**(`node scripts/m5-latency-run.mjs --starting`, 실제 계정·개발 데이터, 작업 중 Claude 1 옆에서 Claude 2·Codex 2 동시 시작, 1초마다 세 읽기를 기다리지 않고 보냄). 기준 엔진 = origin/main 빌드.
+
+  | 지표 | 전(main) | 후 |
+  | --- | --- | --- |
+  | 4개 시작이 모두 응답하기까지 | 119초 | 52.6초 |
+  | 루프 한 번 최장 점유(시작 중) | 약 92초 | 8.6초 |
+  | 시작 중 파일 읽기 p95 | 91.6초 | 38.1초 |
+  | 시작 중 승인 목록 p95 | 91.3초 | 37.9초 |
+  | 시작 중 작업 조회 p95 | 91.2초 | 37.9초 |
+  | 대조(작업 중 1개) 세 읽기 p95 | 1.2~1.4초 | 0.20~0.31초 |
+
+  - 목표(1초)는 못 맞췄다. 시작 전 확인 단계부터 엔진이 거의 포화(초당 약 8건, 요청당 100ms+, 폴링 1회 0.3~0.5초)라 시작 걸음(3.5~5초) 동안 쌓인 요청이 늦게 빠진다. 원인은 원장 쓰기마다 전체 재생 — 후속 과제.
+- **실제 동시 실행 재시험**(`pr/real-final-2`, ps로 다른 앱 없음 확인, 시험 프로젝트 삭제, 자기 PID만): Claude 2 + Codex 2 모두 성공, 최고 동시 4, Claude 72초·Codex 601초 겹침, 도중·뒤 Claude 확인 `connected`, 모델 목록 5·10. 첫 시도(`real-final`)는 Codex 하나가 스레드 시작 뒤(생성 36초 후) `cleanExit` 실패, 원인 기록 없음. 그래서 실제 시험 스크립트가 엔진 stderr를 남기게 했다(`engine-stderr.log`, `ELSECREW_REAL_SIDECAR`로 다른 엔진 지정).
+  - 같은 DB·같은 시험을 기준(main) 엔진으로(`real-baseline`): Codex 하나 실패, stderr `native Codex transport failed at initialize`. Codex 준비 예산 30초(`PREFLIGHT_BUDGET`, 한 폴링에 한 프레임)를 시작들의 긴 루프 점유가 먹은 것 — PR #20의 미해결 Codex 실패도 같은 원인으로 추정(확인 아님). 이번 변경은 그 점유를 줄인다. 첫 시도의 실패 단계는 이와 달라 원인 미확인.
+  - 실행 중 엔진 루프는 거의 쉬지 않았다(런타임 폴링 76%·요청 23%, 폴링 1회 중앙값 325ms). Codex 1~300이 601초였다(기준 엔진 단독 Codex 343초, PR #20 때 약 300초). Codex는 폴링 한 번에 실행당 한 프레임만 읽고(`advance_text_candidate`), 폴링 비용은 실행 수에 비례한다(실행당 약 0.17초). 기준 쪽은 Codex 하나가 70초에 실패해 나머지가 혼자 돌았고(초당 약 4.5프레임, 폴링 0.2초), 이번 쪽은 Codex 둘이 끝까지 함께 돌아 실행당 초당 2.2프레임(폴링 0.34초)이었다. 루프 런타임 점유는 둘 다 30초 중 22~24초로 같아 이번 변경의 회귀가 아니라 부하 차이로 본다. 폴링 비용의 큰 몫은 원장 쓰기다(후속).
+- **시험**: architecture 절의 목록(sidecar 6·core 4·Node 3). 검증: `cargo test --workspace` core 271·protocol 75 통과, sidecar 단위 973 통과·3 실패(로그인 잠금 복구 2·Claude 승인 1, 다른 워커의 전체 시험과 동시 실행 중 부하성, 단독 재실행 모두 통과), 통합 16 통과. `npm test` 1046/1046, `pnpm build`.
+- **겹치는 파일(안정화 B 확인 필요)**: 부하성 실패 3건(`chat/tests.rs` 로그인 잠금 시험, `chat/tests/claude_native.rs`)은 B의 안정화 범위. 내가 고친 시험 파일은 `tests.rs`·`orchestration_dispatch.rs`(시험 추가)·`tests/m5-preview-build.test.mts`·`tests/m5-latency-judge.test.mts`.
+- **PR #25**(base `feature/ade`): CI(e41a8e89) macOS·Windows·website·GitGuardian 통과. Codex 검토는 조정자가 붙인다.
+- **다음 할 일**: 원장 쓰기 증분화(쓰기마다 전체 재생 제거) — 시작·출력 모두의 루프 점유 주원인. Codex 실행 중 `cleanExit` 실패 원인(stderr 기록으로 재현 시 확인). Windows는 실행 경로 비활성이라 미검증.
 ### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #24 검토(차단 0·중요 3·경미 2) 반영 (`orca/ade-stab-b`)
 검토 `~/Documents/elsecrew-ade-stab-2026-11-27/REVIEW-pr24.md`(대상 ffe17d30). PR #25(안정화 A)와 `provider_login_io.rs`·`provider_login_process.rs`가 겹친다. 먼저 머지되는 쪽에 나중 쪽이 맞춘다.
 
@@ -257,240 +312,6 @@ PR #18 머지(68503092) 뒤 WIP(afaaa370)를 그 위로 옮겨 이어 갔다. �
   - `cargo test -p elsecrew-sidecar` 단위 928 통과(무시 45), 통합 16 통과.
   - feature/ade(PR #17 병합 f2d50132)를 병합했다(history 맨 위 엔트리 충돌만 있었고 양쪽 모두 남김, `m5:check:history` 누락 0). 병합 뒤 관련 sidecar 31개와 `npm test` 1006/1006을 다시 돌려 통과했다. CI(12f8d429) macOS·Windows·website·GitGuardian 모두 통과.
 
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 여러 프로젝트 동시 작업 PR-A: 단계 막대 전체 보기·실행 중 전환·작업 단위 쓰기 차단 (`orca/ade-multiproject-a`, 기준 feature/ade 331a206d)
-계획·조사 `~/Documents/elsecrew-ade-multiproject-2026-11-26/PLAN.md`(본문 + 부록 "Orca 방식과 비교"). 현행 설명은 architecture "여러 프로젝트 동시 작업".
-
-- **조사 결과(코드 변경 전, 같은 날 두 차례)**
-  - 실행은 이미 화면과 무관하게 sidecar에서 돌았다. 프로젝트를 바꾸려면 멈춰야 했던 것은 renderer 규칙(`canLeaveProjectView`가 실행 중이면 거짓) 때문이었다.
-  - sidecar의 진짜 제약은 둘이었다.
-    - 공급자 잠금 파일이 공급자당 하나(`*-login.pending`)라 앱 전체에서 Codex 1·Claude 1개만 돈다.
-    - 어느 팀이든 일하면 모든 프로젝트의 저장·합치기·버리기가 막혔다.
-  - 둘 다 설계 선택이었다. 설치본 Claude Code 2.1.328은 같은 설정 폴더의 프로세스끼리 `.oauth_refresh.lock`(+ `.owner`, 죽은 소유자 인수)으로 토큰 갱신을 잠그고, Codex 0.167.2는 `auth.lock`·"guarded reload"를 쓴다(실행 파일 문자열 근거, 실제 동시 시험은 PR-B). 실행과 겹치면 안 되는 것은 연결 확인 때 sidecar가 직접 하는 Claude 갱신(`provider_claude_refresh.rs` `refresh_if_expired`)과 로그인·설치뿐이다.
-- **단계 막대 전체 보기**(`stage-bar.tsx`)
-  - '+N'은 버튼이다. 누르면 모든 단계를 가로로 스크롤되는 한 줄(`.m5-stage-bar-all`, 칸 148px)로 펼치고 가장 최근 단계에서 끝난다.
-  - 펼친 단계를 누르면 그 팀원 카드로 이동한다. '접기'로 되돌리고, 다른 작업은 접힌 채 시작한다.
-  - 예전 `m5.stage.hidden` 키는 `showAll`·`fold`·`jump`로 바꿨다.
-- **P1 실행 중 전환**
-  - `canLeaveProjectView`는 오는 중인 요청만 보고, 팀이 일하는지는 새 `isTeamWorking`이 답한다. 업데이트 다시 시작·업데이트 배너·작업 버리기 버튼은 `isTeamWorking`을 쓴다.
-  - 저장하지 않은 편집은 `leaveProjectView(false, true)`가 초안 보관소에 넣고, 읽어 확인한 뒤에만 떠난다. 다시 열면 되살린다.
-  - 전환 이유 문구를 `m5.switch.busy`·`unsavedHeld`로 바꾸고 `m5.switch.teamWorking`은 지웠다.
-- **배지**
-  - `project-activity.ts`가 실행 상태 알림으로 프로젝트별 '작업 중'을 셈한다(실행 종료 뒤 20초는 다음 담당을 고르는 중으로 봄, 프로젝트를 열 때 목록으로 맞춤).
-  - 전환 팝오버·홈 줄에 '확인 필요 N'·'작업 중', 전환 단추에 다른 프로젝트 상태 점을 단다. 알림 패널(U6)·다른 프로젝트 알림 열기(PR #14 I4)는 그대로 재사용한다.
-- **P2′ 작업 단위 쓰기 차단**(`work_scope.rs`)
-  - 저장·합치기·버리기·정리·내용 삭제는 그 작업만 기다린다. 사본을 사용자 폴더에 넣는 6개 동작과 `application_running` 슬롯은 전역 그대로다.
-  - 작업에 묶을 수 없는 일이 있으면 전역 규칙으로 돌아간다. 거절 코드는 예전 그대로다.
-  - `AgentRuntime::run_chats`(`discovery_cleanup`이 있으면 `None`), `G5Manager::active_chat_ids`, `ProjectManager::pending_save_target`을 더했다. 안 쓰게 된 `runs_in_flight`는 지웠다.
-  - fake 시나리오 `busy-writer`(작업 공간에 15ms 간격 200번 쓰기)를 더했다.
-- **시험**
-  - 경합 시험 3개(`orchestration_dispatch.rs`):
-    - `other_tasks_save_merge_and_discard_while_a_team_writes_its_own_workspace`: A가 쓰는 동안 같은 저장소 C·다른 프로젝트 B를 실제로 합침. A 자신의 것과 B의 사본 반영은 거절. 끝난 뒤 `git fsck`·깨끗한 상태·자기 파일만.
-    - `work_in_flight_without_a_task_blocks_every_task`
-    - `a_save_to_a_project_view_waits_only_for_that_projects_tasks`
-  - 단위:
-    - `tests/m5-multiproject.test.mts`(5)
-    - chat-state "the project view can be left while the open task's team works…"
-    - editor "leaving a project keeps the open task's unsaved text…", "text that cannot be kept holds the project…"
-  - 렌더러 스모크 지점 33(접힌 단계)·34(펼친 단계)을 더하고, 25(전환 팝오버)에 다른 프로젝트 '작업 중' 배지와 상태 점 검사를 더했다.
-  - 네이티브 스모크 `pnpm m5:smoke:multiproject`(`scripts/m5-multiproject-ui-run.mjs` → `m5-multiproject-ui-smoke.cjs`): 실제 sidecar, 임시 앱 데이터, fixture `cancel-clean`(30초 동안 일함).
-    - A 작업의 에이전트가 일하는 중에 한 번에 B로 바꿨다. A 줄에 '작업 중', 전환 단추에 점이 보였다.
-    - B도 실행을 시작했고, 엔진 기록에서 두 실행이 동시에 `running`이었다.
-    - A로 돌아오니 그 작업이 진행 중 그대로 보였다. 검사 19개 PASS.
-    - 이 시험이 찾아 고친 것: 작업 화면의 '일하는 중'(`teamWorking`)은 막 만든 초안(draft)도 포함한다. 그래서 시작하지 않은 B 작업이 배지에서 '작업 중'으로 보였다. 목록 배지는 `listedWorking`(preparing·running·stopping·applying)을 쓴다.
-    - 함정: fixture 엔진의 저장소는 첫 역할 구성(총괄·V3 역할 없음)이라 새 작업 창과 팀 진행은 여기서 못 돈다. 작업·실행은 bridge로 만들고, 팀 진행은 sidecar 경합 시험이 다룬다.
-- **검증**
-  - `cargo test -p elsecrew-sidecar`: 924 통과, 실패 2. 두 실패는 같은 작업 버리기 거절의 오류 설명 문구가 바뀌어서였고, 문구에 기존 표현("idle native execution")을 남겨 고친 뒤 두 시험만 다시 돌려 통과했다.
-  - `npm test` 988 → 새 시험 포함 통과, `pnpm build`.
-  - `pnpm m5:test:editor` 69/69(다크·라이트, 렌더 대비 라이트 1479곳 실패 0).
-  - 캡처는 `~/Documents/elsecrew-ade-multiproject-2026-11-26/pr-a/`에 있다(렌더러 `dark/`, 네이티브 `native/`).
-- **PR**: https://github.com/wonseok-han/elsecrew/pull/18 (`--base feature/ade`). 본문 캡처는 39cccc59에 올리고 2a42e728에서 지웠다. CI(2a42e728) macOS·Windows(기준선 하네스 포함)·website·GitGuardian 모두 통과.
-- **남은 것(PR-B)**
-  - P5 공급자 병렬 실행: 실행별 잠금 파일, 로그인·설치만 배타, 실행 중 sidecar Claude 갱신 생략.
-  - P3′ 상한과 '차례 기다리는 중', P4 전체 수신함(다시 불러오기 전에 시작된 다른 프로젝트 실행도 잡기).
-  - 실제 계정 동시 실행 시험.
-  - history.md가 500줄을 넘었지만 엔트리가 모두 같은 날짜이고 고정 절만 약 400줄이라, 날짜를 쪼개지 않는 규칙으로는 300줄 이하로 롤오버할 수 없어 두었다.
-
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #17 재확인(B1 해소, 새 중요 1건) 반영: 큰 줄 자리 기한 (`orca/ade-stability`)
-재확인 `~/Documents/elsecrew-ade-stability-2026-11-26/REVIEW-pr17-2.md`: B1 해소. 새 중요: 끝나지 않는 줄 두 개가 큰 줄 자리 2개를 기한 없이 잡으면 다른 실행도 막힐 수 있다.
-
-- **수정** (`provider_login_io.rs` `LargeLineLimits`):
-  - 자리를 잡은 줄은 총 30초(`hold`) 안에 끝나야 한다.
-  - 10초 동안 늘지 않으면(`stall`) 그 줄을 거부한다. 무진행은 파이프가 비었을 때만 판정한다. 그래서 sidecar 폴링이 늦어진 것을 멈춤으로 오인하지 않는다.
-  - 자리를 기다리는 연결은 90초(`wait`, `hold`보다 길게)를 넘으면 그 세션만 실패한다.
-  - 어느 경우든 해당 연결만 실패하고 버퍼와 자리를 돌려준다.
-  - 거부 이유는 고정 진단 이름이다("a large line stopped arriving", "a large line took too long", "waited too long for a large-line slot").
-- **시험**: `stuck_large_lines_release_their_slots_and_another_run_proceeds`, `a_session_waiting_too_long_for_a_slot_fails_alone`.
-  - 첫째: 미완성 줄 두 개가 자리를 잡고 멈추면 무진행 기한에 거부되고 자리가 돌아온다. 세 번째 실행은 5초 안에 큰 줄 3개를 모두 받는다.
-  - 둘째: 대기 상한을 넘은 연결만 실패한다. 자리 보유자는 계속 진행한다.
-  - 시험 기한은 연결별로 줄여 쓴다(`set_large_line_limits`, 시험 전용). 자리를 쓰는 시험들은 `LARGE_LINE_TEST_LOCK`으로 서로 겹치지 않게 했다(Claude 세션 시험 포함).
-- **검증**: sidecar 관련 묶음 15 통과. 전체 Rust·CI는 다음 줄에 덧붙인다.
-- **전체 검증(bd9e9b5c)**: `cargo test --workspace` core 259·protocol 75·sidecar lib 932·stdio_process 16 실패 0. CI(run 45833521943) macOS·Windows·website·GitGuardian 모두 통과. TS 변경 없음. 남은 것: 머지. 큰 Write 권한 요청(128KiB 초과)은 별도 설계.
-
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #17 Codex 검토(차단 1·중요 4·경미 2) 반영 (`orca/ade-stability`)
-검토 `~/Documents/elsecrew-ade-stability-2026-11-26/REVIEW-pr17.md`(대상 d9562788). 원칙(조정자): 승인에 쓰는 값(화면 표시·지문·되돌려 보내는 입력)은 원문만 쓰고, 축약은 관측·표시 전용으로 둔다.
-
-| 지적 | 처리 | 시험 |
-| --- | --- | --- |
-| B1 Codex 승인 명령·폴더 축약 | Codex는 포괄 축약을 버리고 **메서드별로 버려도 되는 필드만** 줄인다: `item/started`·`item/completed`의 `commandExecution.aggregatedOutput`·`fileChange.changes[].diff`, `turn/diff/updated`의 `diff`, 도구 출력 delta. `command`·`cwd`·id·상태와 그 밖의 필드·메서드·요청/응답은 그대로다. 그래서 한도를 못 맞추면 예전처럼 실패한다. Claude는 승인이 `control_request`에서만 오고 그 줄은 줄이지 않는다(기존 그대로). | core `codex_approval_and_completion_use_the_original_command_after_shortening`(시작·승인·완료 모두 큰 줄, 명령 10KB·폴더 6KB 원문 유지, 턴 완료), `codex_approval_filled_from_the_start_keeps_the_original_command`, `claude_allow_echoes_the_original_input_after_shortened_frames`(축약된 assistant 뒤 허용 응답 `updatedInput` = 원문), `codex_notifications_shrink_but_requests_and_public_text_do_not`(모르는 종류·메서드, 버릴 수 없는 필드 초과는 거부) |
-| I1 자원 | 프로세스 전체 **큰 줄 자리 2개**(`LARGE_LINE_SLOTS`). 128KiB를 넘는 줄은 자리를 얻어야 더 읽고, 자리가 없으면 읽기를 멈춘다(공급자는 쓰기에서 기다리며 손실 없음). 자리 보유자는 반드시 끝나거나 실패하므로 교착이 없다. 줄당 JSON 값 개수 상한 64K를 파싱 전에 센다(`count_values`). 줄은 복사 없이 떼어 내고(`split_off`), 실패 때 버퍼 메모리와 자리를 돌려준다. 상한: 자리당 최악 약 24MiB(원문 8MiB + 읽기 64KiB + 트리 + 결과), 두 자리 48MiB, 자리 없는 연결은 192KiB까지. 7.8MB 줄 축약 14ms(디버그). | sidecar `concurrent_large_lines_share_the_process_wide_slots`(4세션 동시, 보유 ≤2, 자리 없는 연결 버퍼 ≤192KiB, 전부 완료), `a_refused_large_line_returns_its_slot`, core `many_small_values_are_refused_before_parsing`, `a_line_near_the_raw_bound_is_shortened_quickly` |
-| I2 거부된 `blob.chunk`가 일반 구독자로 감 | 거부 스트림 청크는 검사 뒤 바로 반환해 어떤 구독자·renderer에도 가지 않는다. | `PR #17 review I2: … reach no listener …`(수정 전 실패 확인) |
-| I3 거부 스트림 검증 누락 | 거부 스트림도 같은 맵에서 같은 검사(크기·개수·**해시**)를 거친다. 모든 스트림에 청크 종류(`blob.chunk`/`workspace.blob.chunk`)와 작업 공간 주소를 묶는다. 작업 공간 청크는 거부 여부와 무관하게 `validateWorkspaceEventV1`을 먼저 통과해야 한다. | `PR #17 review I3: … hash, kind, address and workspace contract`(수정 전 실패 확인) |
-| I4 Codex 도구 출력 delta | `item/commandExecution/outputDelta`·`item/fileChange/outputDelta`의 delta는 줄이고, 메시지·계획 delta(공개 문장)는 줄이지 않는다. | `codex_tool_output_deltas_shrink_and_message_deltas_do_not` |
-| M1 줄 수 상한 초과 | 수를 지킬 수 없으면 원문을 빼서 "모름"으로 둔다. Claude 새 파일은 `content`를 빼고(`lines` None), Codex는 `diff`를 뺀다. Codex `FileChange`의 줄 수를 `lines: Option<(u64,u64)>`로 바꿔, diff 없는 변경은 0/0이 아니라 표시하지 않는다. | `a_new_file_over_the_count_cap_has_no_line_count`, Codex 시험의 4만 줄 diff, `tool_details_are_read_leniently_and_bounded` |
-| M2 진단 | 거부 이유를 고정 이름(`OversizedLineRefusal`)으로 돌려주고 stderr에 `provider session line refused: <이유>`만 남긴다(공급자 원문 없음). | 각 거부 시험이 이유를 단정 |
-
-- **history 롤오버**: 새 기준(엔트리 부분만 계산, 500줄 초과 시)으로 엔트리 부분 약 170줄이라 대상이 아니다.
-- **검증**: core 259(축약기 14), sidecar 영향 묶음 22, `npm test` 994/994, `pnpm build`. 전체 Rust·CI 결과는 아래 줄에 덧붙인다.
-- **전체 검증(f193d7c2)**: `cargo test --workspace` core 259·protocol 75·sidecar lib 930·stdio_process 16 실패 0. CI(run 45830531151) macOS·Windows·website·GitGuardian 모두 통과. 남은 것: 노예의 B1 재확인, 머지. 큰 Write 권한 요청(128KiB 초과)은 여전히 세션을 끊는다(별도 설계).
-
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — history 롤오버 기준 변경 (`orca/ade-stability`, 조정자 지시)
-- **결정(사용자 결정, 조정자 전달)**: 롤오버 줄 수는 **워크로그 엔트리 부분만** 센다(고정 섹션·머리말·아카이브 포인터 제외). 엔트리 부분이 500줄을 넘으면 **날짜와 상관없이 가장 오래된 엔트리부터** `docs/archive/`로 옮겨 300줄 이하로 줄인다. 같은 날짜가 나뉘어도 되지만 엔트리 하나는 쪼개지 않는다. 옮긴 뒤 `pnpm m5:check:history`는 반드시 통과해야 한다. `CLAUDE.md`·`AGENTS.md`(같은 내용)·`docs/README.md`에 반영했다.
-- **현재 상태**: 파일 전체 550줄 중 엔트리 부분은 152줄이라 새 기준으로는 롤오버 대상이 아니다. 앞 엔트리의 "롤오버 보류"는 이 결정으로 해소됐다. 고정 섹션만 약 400줄로 큰 것은 별개 문제다(정리는 이번 범위 밖).
-- **검증**: `pnpm m5:check:history`(기준 origin/feature/ade) 통과, `CLAUDE.md`·`AGENTS.md` 동일 확인.
-
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 실행 안정성 D1 보강·D2 큰 줄 (`orca/ade-stability`, 기준 feature/ade 8c036abd)
-근거: 1차 통합 검증 보고서 `~/Documents/elsecrew-ade-v-2026-11-26/REPORT.md`의 D1·D2.
-
-- **D1 원인(재확인)**: `#registerStream`의 한도 초과 throw가 stdout 처리(`#onEnvelope`) 안에서 나서 그대로 `protocolInvalid` → 엔진 재시작이 됐다. 한도를 채운 누수(`workspace.blob.chunk` 미정리)는 PR #15가 고쳤지만, 그 뒤에도 동시 17개면 여전히 엔진 실패였다(새 시험 4개 중 3개가 #15 머지본에서 실패 확인).
-- **D1 보강**: 한도 초과는 `SidecarStreamCapacityError`로 그 요청만 실패시킨다. 거부한 스트림은 크기·청크 수만 기억해 남은 청크를 조용히 버리고 화면에도 보내지 않는다(최대 64개). 알 수 없는·중복·크기 초과·완료 뒤 청크는 계속 프로토콜 위반이다. 빈 스트림은 자리를 차지하지 않는다. 대기열은 쓰지 않았다: sidecar는 응답 직후 청크를 같은 순서로 보내므로 정상이면 스트림이 동시에 쌓이지 않고, 자리가 새는 경우 대기열은 영원히 멈출 수 있다. 시험 `tests/m5-sidecar-stream-capacity.test.mts`(4개).
-- **D2 원인**: Claude·Codex 세션 출력은 모두 `LoginIo::poll_inner`를 거친다. 한 줄 128KiB 초과뿐 아니라 **연결당 누적 수신 1MiB(`PROVIDER_OBSERVATION_TOTAL_MAX_BYTES`) 초과도 실패**시켰다. 줄 한도만 고치면 큰 이미지 7장쯤에서 다시 끊긴다. 보내는 쪽 누적(승인 응답·후속 입력) 1MiB도 같은 문제다. Codex 경로도 같은 한도다(큰 명령 출력·`turn/diff/updated`·fileChange diff).
-- **D2 수정**: 세션이 묶인 뒤(Claude 세션 채널 생성, Codex 스레드 일치 후 턴)만 `admit_session_lines`로 세션 모드를 켠다. 한 줄을 8MiB까지 읽고(`PROVIDER_SESSION_LINE_RAW_MAX_BYTES`), 128KiB를 넘으면 `elsecrew_core::provider::oversized_line`이 긴 문자열(4KiB 초과)을 앞 256바이트 + 생략 표시로 줄여 관측한다. 중복 키 검사는 줄이기 전에 한다. 세션 모드에서는 64KiB씩 읽고 줄바꿈 탐색 위치를 기억한다(긴 줄 반복 스캔 방지).
-  - 줄이는 것: Claude 도구 결과(`user`)와 무시되는 프레임, assistant의 비공개 블록(공개 text는 그대로). Codex는 id 없는 알림만(delta·agentMessage/plan text 제외).
-  - **절대 줄이지 않는 것**: `control_request`·`control_cancel_request`·`control_response`·`result`·`system/init`, Codex의 모든 요청·응답. 허용 응답이 입력을 `updatedInput`으로 그대로 되돌려 보내므로 줄이면 사용자 파일이 잘린 내용으로 써진다(데이터 손상 경계). 이런 줄은 지금처럼 한도 초과 시 실패한다.
-  - 작업 기록이 읽는 값은 보존한다: 새 파일 줄 수(`tool_use_result.content` → 같은 줄 수의 빈 줄), Codex fileChange의 추가/삭제 줄 수(`diff_counts`가 같은 값을 내는 짧은 diff), 종료 코드 앞부분.
-  - **안전 경계 변경(검토 대상)**: 세션 모드의 연결 누적 한도(받기·보내기)를 1MiB → 256MiB(DurableV1 세션 예산과 같음)로 올렸다. 바이트 수를 셀 뿐이며 메모리에 동시에 드는 것은 한 줄(최대 8MiB)이다. 세션 파서의 자체 예산은 그대로다. 로그인·사전 점검 교환은 엄격한 128KiB/1MiB를 유지한다.
-- **재현 시험**: core `provider::oversized_line::tests`(7, 148KB 이미지·공개 text 보존·권한 요청 거부·중복 키·Codex·작업 기록 수 보존·이미지 10장 세션), sidecar `provider_login_io` 실제 파이프(이미지 줄 10개 + 누적 1MiB 초과 통과, 세션 모드 없으면 실패, 권한 요청 거부, 9MB 무종단 줄 거부), `provider_claude_session::tests::a_session_keeps_going_after_reading_ten_large_images`(가짜 Claude 프로세스 → 세션 채널, 수정 없는 대조 시험은 실패).
-- **검증**: `cargo test -p elsecrew-core` 252, protocol 75, `-p elsecrew-sidecar` lib 928·stdio_process 16(실패 0), `npm test` 963/963, `pnpm build`.
-- **함정**: scm_breeze 환경에서 `cd <폴더> && ...`의 `cd`가 조용히 실패해 뒤 명령이 현재 워크트리에서 돈다. 시험 폴더용 `git add -A && git commit`이 이 워크트리 변경을 엉뚱한 커밋으로 묶은 일이 있었다(곧바로 `reset --soft`로 되돌림, 손실 없음). 다른 폴더 작업은 `git -C <절대경로>`와 절대경로만 쓴다.
-- **실제 앱 확인(기본 프로필, 개발 앱 PID 15327만 띄우고 종료)**: 새 시험 폴더 `~/Downloads/elsecrew-d2-image-test`(86KB PNG 3장, git)를 프로젝트로 추가하고 팀 역할 기본값을 저장(버전 2, 총괄 Claude default)했다. 작업 "screens 폴더의 PNG 세 장을 Read로 직접 열어 설명"을 보냈다. 앱 전용 Claude 프로필의 세션 기록에서 도구 결과 줄이 232,168·232,168·232,128바이트(한도 131,072 초과)였고, 세션은 끊기지 않고 27초 만에 "답변 완료"로 끝났다(에이전트가 세 그림을 바르게 설명). 앱 로그 오류 0, 정상 종료(engine exit 0). 증거 `~/Documents/elsecrew-ade-stability-2026-11-26/`. 앱 데이터 변화: 프로젝트 1개·작업 1개 추가, 그 프로젝트 팀 역할 저장. `todo-test-1126g` 프로젝트 화면은 닫기만 했다(작업 보존).
-- **PR**: https://github.com/wonseok-han/elsecrew/pull/17 (`--base feature/ade`). feature/ade(PR #14·#16) 병합 뒤 `npm test` 992/992·`pnpm build`, CI(run 45826807799) macOS·Windows·website·GitGuardian 모두 통과.
-- **history 롤오버 보류**: 이 파일이 500줄을 넘었지만 작업 엔트리가 모두 11-26 같은 날짜이고 고정 섹션만 약 400줄이라, 날짜를 쪼개지 않고는 300줄 이하로 줄일 수 없다. 조정자 판단 필요.
-- **남은 일**: Codex 검토 대응. 큰 Write의 권한 요청(입력 128KiB 초과)은 여전히 세션을 끊는다 — 허용 응답 프레임 자체도 128KiB 한도라 별도 설계가 필요하다.
-
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #16 독립 검토(병합 차단 1·중요 4·경미 3) 반영과 새 #14 위로 맞춤 (`orca/ade-screens-u7-u8`)
-검토 `~/Documents/elsecrew-ade-screens-u5-u8-2026-11-26/REVIEW-pr16.md`(대상 f06a9e8b). PR #14(검토 반영본, 42e59ad7)를 이 브랜치에 병합했다.
-- U5·U6 엔트리는 #14의 원문 그대로 남겼다. 앞서 이 브랜치에서 그 엔트리에 덧붙였던 PR 링크는 #14 쪽 엔트리로 옮겨졌다.
-- 작업 화면의 `story` 줄은 PR #11의 새 속성과 U7 빈 상태를 합쳤다.
-
-- **B1 병합 충돌**: #14가 feature/ade(PR #11·#13)를 병합해 충돌을 풀었고, 이 브랜치는 그 #14를 병합했다.
-- **I1 하네스**: 업데이트 시험이 main의 실제 다시 시작 콜백을 쓴다. 가짜 종료 조정자는 실제처럼 안전 결과에서 깨끗한 종료를 허락한다.
-  - 시험: 보안 하네스 "update restart: main's yes, then the screen's readiness and the quit preparation decide; only a clean result installs"
-    - 기본 대화상자에서 '다시 시작' 뒤에 화면 준비 거절·무응답(시간 초과)·안전 종료 불가이면 설치하지 않는다.
-    - 준비됨 + 안전이면 설치한다.
-    - 요청하지 않은 준비 답은 거절한다.
-  - 신뢰 경계는 architecture에 따로 적었다. 기본 동의는 위조할 수 없고, 화면 준비의 참·거짓은 화면 콜백이 준다.
-- **I2 반복 실패**: main이 알리는 모든 상태에서 닫힘을 푼다. 확인을 요청할 때도 푼다.
-  - 시험: 단위 "PR #16 I2", 렌더러 스모크(실패 → 닫기 → 확인 중 → 실패 → '다시 확인' 다시 보임).
-- **I3 문구 검사 범위**: en 사전, `src`·`electron` 모든 TS/TSX 코드 글자, 하위 폴더, 따옴표 종류를 넓혔다. 기록 탭 원문 실패 코드를 '자세히'로 옮겼고, 팀에게 보내는 메시지와 en의 recovery point·snapshot 문구를 바꿨다.
-  - 시험: 단위 "U7: no on-screen string uses developer words…", "details-only strings … (any quote, any folder)".
-- **I4 Q7 진입점**: 메뉴의 확인·받기는 앱 안 배너로, 쓸 수 없는 실행은 설정 › 일반으로 보낸다. 설정의 확인은 `request("check")`다. 배너에 확인 중·최신 버전을 더했다. 기본 대화상자는 다시 시작 확인만 남았다.
-  - 시험: 단위 "PR #16 I4".
-- **경미**
-  - M1: 작업 버리기 검사 중에도 취소·Esc로 나갈 수 있고, 검사가 끝나면 취소에 초점을 되돌린다. 시험 "PR #16 M1".
-  - M2: CSS 검사가 '클래스가 코드에 있는지'만 본다는 한계를 시험 주석에 적었다. 렌더러 스모크에 빈 프로젝트 틀·주 행동·예시 줄·작업 목록 안내의 computed style 비교를 더했다.
-  - M3: hex 검사를 `src`·`electron` 모든 TS/TSX의 문자열 안 어디든, 그리고 JSX 글자의 6·8자리 hex까지 넓혔다. 예외 셋은 그대로다.
-  - PR #11이 남긴 `m5-activity-original`·`m5-activity-code`는 쓰이지 않는다. 실행 출력 작업자 영역이라 지우지 않고, 시험 예외에 이유와 함께 적었다.
-- **검증**: `npm test` 982/982, build, 렌더러 스모크 다크·라이트(32화면 1265개 실패 0).
-- **병합·CI**: feature/ade에 PR #15가 들어와 #14(71369834)와 #16 모두 다시 병합했다(누락 0). 병합 뒤 `npm test`는 #14 975, #16 988 모두 통과했다. 렌더러 스모크 두 테마, 미리보기 스모크 각 2회도 PASS다. #14 CI는 macOS·Windows·website·GitGuardian 모두 통과했다. #16 Windows CI에서 새 hex 시험이 경로 구분자(`electron\\appearance.ts`) 때문에 실패해, 경로를 `/`로 맞췄다.
-
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 화면 통일 U7(문구·F11·빈 상태·확인)·U8(죽은 CSS·색·업데이트 배너) (`orca/ade-screens-u7-u8`, PR #14 위)
-설계 DESIGN 4.1 U7·U8, 목업 13·15·16. PR #14(U5·U6) 위에 쌓았다. 현행 설명은 architecture "오류·빈 상태·업데이트 배너와 정리".
-
-- **U7**
-  - 금지어 시험(`tests/m5-ade-screens-u7-u8.test.mts`): ko 문자열과 main 기본 대화상자에 커밋·브랜치·복구점·식별자·준비 기록·worktree·스냅샷이 0건이다. '자세히' 전용 키 3개는 `<details>` 안에서만 쓰이는지 확인한다.
-  - 1차 통합 검증 기준 6에 남아 있던 합치기 차단·충돌·다른 상태 안내와 작업 폴더 도움말의 '브랜치'·'(커밋)'을 없앴다. 준비 기록·복구점·저장 식별자 문구도 바꿨다(스모크·정리 프로브 문구 함께 갱신).
-  - F3(종 안 작업 상태)를 `RecoveryGuide`로 바꿨다. 빈 상태 공용 틀 `EmptyState`를 만들어 빈 프로젝트 가운데·변경 없음·검색 결과 없음·기록·작업 목록에 썼다. 작업 버리기를 공용 확인 대화상자로 맞췄다(첫 초점 취소).
-- **U8**
-  - 죽은 CSS 규칙 약 270개를 지웠다(약 30KB). 지운 뒤 다크·라이트 렌더러 스모크 캡처를 지우기 전과 픽셀 비교했고, 의도한 문구·빈 상태·F3 변화 말고 차이는 없었다.
-  - electron 색 hex는 창 배경 둘(토큰 값과 같은지 시험)과 미리보기 흰색만 남았다.
-  - 업데이트 배너
-    - main이 상태를 갖고 IPC `m5:app-update:state/changed/request`로 알린다.
-    - 화면은 check·restart 요청만 보낸다. restart는 main의 기본 대화상자 확인과 기존 안전 종료 확인을 거친다.
-    - 보안 하네스가 지키는 것: 다른 프레임·잘못된 요청은 거절, 확인에서 취소하면 다시 시작 없음, 받은 업데이트가 없으면 대화상자도 없음, 상태 변화가 화면에 전달됨.
-  - 메뉴의 '저장했어요 — 재시작' 문구를 '다시 시작'으로 바꿨다.
-- **시험·검증**
-  - 새 `tests/m5-ade-screens-u7-u8.test.mts`(8)과 보안 하네스 1개를 더했다.
-  - 렌더러 스모크 지점 31 빈 프로젝트, 32 업데이트 배너를 더해 32곳이다.
-  - `npm test` 966/966, build 통과. 렌더 대비 다크·라이트 각 32화면 실패 0.
-  - 미리보기 UI 스모크 다크·라이트 각 2회.
-- **남은 것**
-  - B5·F5·F6 배너는 이미 상태 토큰 면이라 구조는 그대로 두었다.
-  - G7(원본 반영 미리보기)은 사본 방식 작업에만 남은 화면이라 문구만 검사 대상이다.
-- **PR**: #16(https://github.com/wonseok-han/elsecrew/pull/16, base feature/ade, #14 위). 0e3b8af9 CI macOS·Windows·website·GitGuardian 통과. #14를 먼저 머지해야 diff가 U7·U8만 남는다.
-
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #14 독립 검토(차단 1·중요 4·경미 3) 반영과 feature/ade 병합 (`orca/ade-screens-u5-u8`)
-검토 `~/Documents/elsecrew-ade-screens-u5-u8-2026-11-26/REVIEW-pr14.md`(대상 dfad3793). 먼저 `origin/feature/ade`(PR #11·#13 포함)를 병합했다. history.md·styles.css 끝에 덧붙인 충돌이라 양쪽을 모두 남겼고, `m5:check:history`에서 누락 0이다.
-
-- **B1 (차단) 설치 동의**: main의 설치 IPC가 `start`를 받으면 다음 순서로 처리한다.
-  - sidecar에서 동의를 기다리는 plan을 직접 읽어, 공급자·planId가 맞지 않으면 거절한다.
-  - main의 기본 대화상자에 쓰기 위치를 적어 묻는다. '설치·업데이트'일 때만 시작을 보내고, 취소하면 plan이 그대로 기다린다.
-  - 시험: 보안 하네스 "installing starts only after main's own box: a page with a valid plan cannot give consent".
-- **I1 재로그인 오안내**: 요청 오류(전송·차단·거절·응답 이상)는 `unreachable`(다시 확인만)로 묶는다. 카드는 `null` 대신 고정 진단 코드를 넘긴다. 일반 실패는 두 에이전트 모두 다시 확인이 주 행동이고, 다시 로그인은 대안이다. 시험: 단위 "PR #14 I1", U5 매핑 시험 갱신.
-- **I2 배지**: 새 실행이 시작되면 그 작업의 이전 질문을 해결로 바꾼다. 50줄로 줄일 때 열린 요청은 남긴다(최대 200). 시간이 잘못된 저장 줄은 복원하지 않는다. 시험: 단위 "PR #14 I2"(실제 피드 함수로 질문 → 60줄 추가 → 새 실행).
-- **I3 이름 조회**: 쪽마다 반영하고, 필요한 이름을 다 찾으면 멈춘다(Map). 시험: "PR #14 I3·minor 1".
-- **I4 이동**: 다른 프로젝트 알림은 전환과 같은 한 동작으로 연다. 막히면 이유를 오류 안내로 보이고, 열리지 않으면 대기를 지운다. 읽음은 실제로 열렸을 때만 한다. 시험: "PR #14 I4".
-- **경미**
-  - 1) 저장 데이터 방어: Map, 잘못된 시각, 이름 `<bdi>`와 80자 상한.
-  - 2) 바로가기 문구를 '팀 역할 열기'로 바꾸고 읽기용 이름에 대상을 넣었다. 프로젝트 팀을 읽기 전에는 내놓지 않는다.
-  - 3) 안내의 확인 버튼을 카드의 '연결 상태 다시 확인'과 같은 것으로 하고, 안내가 보이는 동안 카드 버튼을 숨긴다. 본문 없는 알림은 종류를 한 번만 보인다.
-  - 시험: "PR #14 minor 2·3".
-- **검증**: `npm test` 969/969, build, 렌더러 스모크 다크·라이트(30화면 실패 0).
-
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 화면 통일 U5(에이전트 연결·F11 안내)·U6(알림 패널) (`orca/ade-screens-u5-u8`, 기준 feature/ade e7965d97)
-설계 DESIGN 4.1 U5·U6, 목업 08·12. 범위가 커서 U5+U6(이 PR)과 U7+U8(다음 PR)로 나눈다. 현행 설명은 architecture "에이전트 연결·알림 패널".
-
-- **U5**: `login-guide.ts`(실패 7종 → 어조·주 행동·대안), `recovery-guide.tsx`(F11 공용 틀, U7에서도 씀), 연결 카드(배지·'연결하기/연결 끊기'·'연결 상태 다시 확인'·실패 시 안내), 설치 동의를 확인 대화상자로(첫 초점 취소·주 행동 하나), 역할 바꾸기 바로가기(팀 역할 화면 열기).
-  - 옛 `.m5-provider-login`·`.m5-connection-heading`·`.m5-provider-install button` 규칙(주 행동 색을 덮던 것)을 지우고 U5 구역을 새로 썼다.
-- **U6**: `notification-groups.ts`(`needsAttention`·`attentionCount`·`groupNotifications`), 패널에 '확인 필요/전체' 탭·프로젝트 이름·작업 묶음·해결된 줄 접기, 종 배지는 확인 요청만 셈.
-- **시험**
-  - 새 `tests/m5-ade-screens-u5-u6.test.mts`(10)
-    - 실패 7종 매핑과 다시 로그인 금지 종류, 원문 키는 접힌 정보에만, 버튼 문구 규칙
-    - 설치 동의(첫 초점·주 행동, 안내는 준비만), 역할 바꾸기
-    - 배지 셈, 묶음·접기·최신순, 패널 구조, ko/en 키
-  - 렌더러 스모크 캡처·대비 지점 3곳 추가(28 로그인 안내, 29 설치 동의, 30 알림 패널 → 30곳). 알림은 다시 불러오기 전에 `localStorage`로 두 프로젝트 6줄을 넣어 배지 2·탭·묶음·접기를 확인한다.
-- **검증**
-  - `npm test` 957/957, `pnpm build`, `pnpm m5:test:editor` 69/69
-  - 렌더 대비 다크·라이트 각 30화면 1208개 실패 0
-  - 미리보기 UI 스모크 다크·라이트 각 2회 연속 PASS
-  - 캡처 `~/Documents/elsecrew-ade-screens-u5-u8-2026-11-26/u5-u6/`(actual, compare)
-- **다음**: U7(오류·복구·확인·빈 상태 문구와 금지어 검사)·U8(죽은 CSS, electron 색 2곳, 업데이트 배너)을 이 PR 뒤 다음 PR로 한다.
-
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #11 재확인 3차 B2: 명령 행은 요약만 저장 (`orca/ade-activity-detail`)
-재확인 `~/Documents/elsecrew-ade-activity-detail-2026-11-26/REVIEW-pr11-3.md`: 허용 토큰 방식에서도 짧은 붙임값(`-pabc`), `--pin` 뒤 숫자, 리디렉션 뒤 비밀번호, 파일·호스트·스킴 모양 비밀, 하위 명령 자리의 임의 단어가 남았고, 따옴표 안 공백이 있는 대입으로 시작하는 여러 줄 명령에서 비밀 일부를 프로그램으로 골랐다. 지시(조정자): 저장할 명령 정보를 프로그램 이름·고정 하위 명령·가린 인수 수로 좁힌다.
-
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #15 독립 검토(차단 1·중요 3·경미 2) 반영 (`orca/ade-latency`)
-검토서 `~/Documents/elsecrew-ade-v-2026-11-26/REVIEW-pr15.md`(대상 60e4e0d1). 무결성(projection 손상 검출·승인 전체 재검사·D1 정리)은 유지 판정.
-
-- **B1 거짓 통과 → G6에서 뺌 + 판정 엄격화**: 조정자 지시("빨리 확실하게 못 하면 빼라")대로 `m5:test:latency`를 g6-release·하네스 시험에서 빼고 `pnpm m5:measure:latency`(진단)로 남겼다. fake 공급자에는 승인 큐가 없어 G6 근거로 부족하다. 그래도 `--check`는 `scripts/m5-latency-judge.mjs`로 바꿔 단계별 종료 코드 0·엔진 시작 1회(재시작 없음)·둘째 단계 봉인 시작·시드 완료·요청 표본 수·**표본마다 부하 유지**(실행 중 = 표본 앞뒤로 run이 running, 뒤 검사 중 = 앞뒤로 복사본 검사 중)·클릭 1회를 모두 확인한 뒤에만 목표치를 본다. 시험 `tests/m5-latency-judge.test.mts`(검토서의 거짓 통과 보고서가 FAIL, 조건 하나씩 빠질 때 FAIL).
-- **I1 구간 매칭**: 같은 메서드 시간 창 매칭을 없앴다. 라운드마다 sidecar가 본 같은 메서드 요청 전체(화면 폴링 포함)의 대기·처리를 집계한다(`round.engine`). 파일 열기 시계는 행 찾기(폴더 펼침·스크롤) 뒤, 클릭을 보내기 직전에 시작한다(첫 재측정에서 시계를 탐색 앞에 둬 봉인 시작 p95 588ms가 나왔던 것을 바로잡음). 승인 처리 시간은 fake에서 0.018ms로, 승인 경로(5초 Git 재사용) 개선은 측정으로 입증하지 못했다고 문서·PR에 명시.
-- **I2 계측**: `latency_log.rs`가 채널로 쓰기 스레드에 넘긴다(루프는 파일 I/O를 기다리지 않음, 가득 차면 버리고 `dropped`). 요청 ID·action은 쓰지 않고 메서드는 프로토콜 목록에 있는 이름만(그 밖 `other`). 요청 복제 제거. 시험 `timing_log_writes_only_known_names_and_numbers_off_the_loop`, `a_full_timing_queue_drops_records_instead_of_waiting`.
-- **I3 큰 스트림**: `#acceptChunk`가 청크마다 누적 문자열 전체를 다시 인코딩하던 것을, 그 청크만 인코딩하고 바이트 수·SHA-256(node `createHash`)을 순차 갱신하게 바꿨다(`TextStreamV1.received/digest`). 시험 `task-workspace streams of many chunks settle, each chunk encoded once`(40청크 ~1.9MiB 파일·diff 20쌍, 수정 전 코드에서 실패 확인).
-- **M2**: 작업 공간 경로의 해시 불일치·선언 크기 초과·빈 파일(등록 없음) 시험 `task-workspace streams still refuse a wrong hash, and an empty file opens no stream`.
-- **M1(코드 변경 없음)**: 5초 안 Git 상태만 바뀌면 보기에서 버튼이 잠시 살아 보일 수 있으나 수락·거절은 전체 검사로 거절되고 카드에 오류가 난다. native owner가 필요한 시험이라 이번에 넣지 않았다.
-- **재측정(엄격 판정 PASS, 작업 41·실행 120, 조건별 12회, p50/p95 ms)**: 파일 열기 쉬는 중 66/142·실행 중 67/90·봉인 시작 66/234·뒤 검사 중 69/149, 승인 목록 1.4/19.8, getChat 16~25/≤120. 종료 0/0, 엔진 시작 1/1(둘째 봉인), 부하 유지 12/12·12/12, 계측 버림 0. 증거 `~/Documents/elsecrew-ade-latency-2026-11-26/review-round/`.
-- **검증**: `npm test` 953/953, `pnpm build`, 하네스 시험 9/9, `cargo test -p elsecrew-sidecar --test stdio_process` 16, lib(latency_log·projection) 4, `git diff --check`.
-- **feature/ade(e641cffc, PR #11) 병합 뒤**: `npm test` 959/959, `pnpm build`, `cargo test -p elsecrew-sidecar --locked` lib 923·stdio_process 16 통과. 엄격 판정 재측정은 병합 전 코드에서 했다. CI(run 45816202040) macOS·Windows·website·GitGuardian 통과. history 539줄 → 머지된 PR #11·#12 엔트리를 아카이브로 옮김(보존 검사 누락 0).
-- **ade-stability와 겹치는 곳**: D1 보강(한도 초과 시 그 요청만 실패)은 이번에 바꾼 `electron/sidecar-client.ts`의 `TextStreamV1`(필드 `received`/`digest`로 바뀜)·`#acceptChunk`·`#registerStream`과 `tests/m5-electron-bridge.test.mts`의 작업 공간 스트림 시험 근처다. D2(관측 줄 128KiB)는 겹치지 않는다.
-
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 응답 지연 조사·수정: 파일 열기·승인 목록·getChat (`orca/ade-latency`, 기준 feature/ade 7378332a)
-증상: 주인님 "파일을 열어 보려니까 한참 뒤에 열린다", 11-25 실측 approval list 7초·getChat 10초(권한 카드가 내용을 보이기 전에 사라짐, 통합 검증 D3). 증거·표: `~/Documents/elsecrew-ade-latency-2026-11-26/`.
-
-- **원인 1 — 엔진 재시작(통합 검증 D1)**: main(`electron/sidecar-client.ts`)이 `workspace.file.read`·`workspace.diff.getFile` 응답의 스트림을 등록하고 `blob.chunk`만 정리했다. 작업 공간 청크(`workspace.blob.chunk`)는 정리하지 않아, 작업 파일·diff를 16번쯤 열면 다음 읽기가 `sidecar active stream bound exceeded` → `protocolInvalid` → 엔진 재시작(저장소 확인 포함 약 10초)이 됐다. 재시작은 실행 중인 팀 작업도 끊었다. 7~10초 규모 지연의 정체다. 조정자 결정으로 이 PR에 포함(D1, ade-stability는 하지 않음).
-- **원인 2 — projection 전체 파싱**: `Storage::projection_record`가 레코드 하나를 찾을 때도 네 표 전 행 JSON을 파싱했다. 100ms 루프의 감시 검증과 요청마다 여러 번 불렸다(다른 워커의 쉬는 개발 앱 sidecar 표본: 메인 루프 시간의 52%). 실제 데이터 복사본(프로젝트 19·채팅 40·실행 305, projection 2.5MB)에서 조회 1건 28.7ms → 행 기억 뒤 2.3ms.
-- **원인 3 — 승인 목록·보기**: 750ms마다 오는 목록과 새 요청 보기가 매번 Git 검사 전체와 projection 조회 묶음을 했다(Codex 경로는 목록 한 번에 두 번).
-- **수정**: (1) `workspace.blob.chunk`도 `#acceptChunk`. (2) `ProjectionMemo`: 매 조회마다 모든 행을 읽고 바이트·sequence를 비교해 바뀐 행만 다시 파싱(결과·손상 검출 = 전체 파싱, 변경 토큰 불신). (3) 승인 list/inspect는 `registration_identity_with(viewing)`로 스트리밍과 같은 5초 Git 재사용, 수락·거절은 전체 검사 유지. (4) 계측 `ELSECREW_SIDECAR_TIMING_LOG`, fake 시나리오 `paced-long-stream-read-only`, fake 모드의 봉인 인자 수용(디버그·QA 빌드). (5) `pnpm m5:test:latency`(g6-release, CI 제외).
-- **수정 전후(개발 앱, 임시 프로필, fake 공급자, 작업 41·실행 120 시드, 각 12회, ms, p50/p95)**:
-  - 쉬는 중: 파일 열기 89/219 → 67/147, getChat 60/99 → 16/47
-  - 실행 중: 파일 열기 88/**33,211** → 66/89, 승인 목록 6/**8,895** → 2/29, getChat 58/**16,027** → 18/30 (전: 엔진 재시작 1회, 실행이 끊겨 표본 12개 중 1개만 실행 중 / 후: 재시작 0, 12/12 실행 중)
-  - 봉인 시작 쉬는 중: 파일 열기 89/247 → 67/204, getChat 82/153 → 17/121
-  - 뒤 검사 중: 파일 열기 89/**18,178** → 67/68, getChat 52/73 → 22/38
-  - sidecar 처리 시간 p50: getChat 47.7 → 14.7, 파일 읽기 67 → 42. 남은 파일 읽기 40ms는 git 작업 공간 확인(symbolic-ref·merge-base 프로세스)이다.
-- **검증**: `npm test` 920/920, `pnpm build`, `m5:test:security` 96/96, 새 시험(브리지 40회 작업 공간 읽기 — 수정 없이 실패 확인, projection 기억 = 전체 파싱·바뀐 행만 파싱·손상 검출·롤백 반영), `cargo test -p elsecrew-sidecar --locked` lib 916·stdio_process 16 통과(실패 0). 실제 데이터 복사본 조회 벤치 28.7→2.3ms. 측정기 `--check` 수정본 PASS(전부 목표 안).
-- **최신 feature/ade(e7965d97, PR #12·#13) 병합 뒤**: `npm test` 948/948, `pnpm build`, `pnpm m5:test:latency` PASS(작업 21·실행 40 시드, 조건별 10회: 파일 열기 p95 쉬는 중 143·실행 중 67·봉인 시작 198·뒤 검사 중 69ms, 승인 목록 p95 27ms, getChat p95 ≤86ms, 재시작 0).
-- **위험 경계(독립 검토 대상)**: projection 기억은 저장소 검증 경계다(전 행 비교 유지로 손상 검출 동일). 승인 보기의 Git 재사용은 권한 경계다(보기만, 답은 전체 검사). fake 모드 봉인 인자는 디버그·QA 빌드의 fixture 경로뿐.
-- **함정(재조사 방지)**: 측정기에서 다리로 `readWorkspaceFile`을 직접 부르면 스트림을 화면이 소비하지 않아도 main이 정리하지만(수정 후), 수정 전에는 그 자체가 재시작을 일으킨다. 파일 열기는 화면 트리 클릭으로 잰다. 트리는 가상화돼 보이지 않는 행이 DOM에 없고, Monaco는 공백을 NBSP로 그린다. fake 실행은 60초면 끝난다. 저장소는 EXCLUSIVE라 다른 연결이 쓸 수 없다. 대기 루프에 `pgrep -f '...rustc'`를 쓰면 자기 명령줄과 일치해 영원히 기다린다(`pgrep -x`).
-- **PR**: https://github.com/wonseok-han/elsecrew/pull/15 (`--base feature/ade`). CI(run 45809641599) macOS·Windows·website·GitGuardian 모두 통과.
-- **남은 일**: 실제 Claude 권한 요청으로 D3(카드가 '불러오는 중…' 뒤 2~4초에 사라짐)가 줄었는지 확인(실계정 필요, fake 공급자에는 승인 큐가 없어 승인 경로 처리 시간은 0으로 나옴). 파일 읽기의 git 확인 재사용 검토. Codex 검토 대응.
 ## 프로젝트 요약 (고정)
 터미널을 한 번도 안 열어본 비개발자를 **코딩 에이전트(Claude Code·Codex)가 굴러가는 상태까지** 데려다주는 데스크톱 GUI 앱. 현재 배포 경로는 Tauri 2 + React 19이고, M5는 Electron + React/TypeScript + Monaco와 Rust sidecar의 별도 작업대 골격으로 전환 중이다.
 - 기획 원본: `~/Library/CloudStorage/OneDrive-개인/ObsidianVault/오픈소스/아이디어/후보/에이전트-스타터.md`
@@ -514,7 +335,7 @@ PR #18 머지(68503092) 뒤 WIP(afaaa370)를 그 위로 옮겨 이어 갔다. �
   - 공급자 동시 실행(PR-B): CLI는 같은 설정 폴더의 프로세스끼리 토큰 갱신을 스스로 잠근다(Claude 2.1.328 `.oauth_refresh.lock`, Codex 0.167.2 `auth.lock`, 문자열 근거). sidecar가 직접 하는 Claude 갱신은 그 잠금을 잡지 않으므로, 실행이 살아 있을 때는 하지 않아야 한다.
   - PR-B(2026-11-27): 잠금은 두 종류다. 배타 `<provider>-login.pending`(로그인·설치·엔진의 Claude 갱신)과 실행마다의 `<provider>-run-<id>.pending`(실행·모델 목록·확인). 아래 "공급자 fence 경합(2026-11-12)"의 "모두 같은 잠금 공유"는 이제 배타 쪽에만 해당한다.
   - 같은 프로필을 여러 실행이 쓰면 생기는 것: Claude 프로필 `tmp/`의 다른 실행 소켓(실행 잠금에 기록된 살아 있는 프로세스 것만 인정), 목록과 확인 사이에 사라지는 프로필 항목(건너뜀).
-  - 실행 시작은 엔진 단일 스레드에서 하나에 13~18초 걸린다(실측). 그 시간 동안의 시간 제한은 엔진이 막힌 시간을 빼고 세야 한다(확인 결과 25초 넘으면 다시 확인, Claude 초기화 기한은 1초 넘는 틈만큼 늦춤). Codex는 긴 답이 매우 느리다(1~300 단어 약 290초).
+  - 실행 시작은 ADE 안정화 A(2026-11-27)부터 단계로 돈다: 명령 만들기(서명 확인)는 작업자, 예약·잠금·실행·기록은 루프의 한 걸음, 한 바퀴에 무거운 걸음 하나(`agent_start.rs`). 13~18초의 대부분은 서명 실행 파일을 매번 전체 해시하던 비용이었다(스탬프 비교로 바꿈). 확인 결과 재확인(25초)은 걷어 냈고 Claude 초기화 기한 보정은 다른 긴 점유 때문에 남겼다. 남은 루프 점유의 주원인은 원장 쓰기 한 번마다 이벤트 전체를 재생하는 비용이다(개발 DB 46MB에서 쓰기 약 0.6초, 시작 걸음 3.5~5초). Codex는 긴 답이 매우 느리다(1~300 단어 약 290초).
 - **실제 앱 시험의 함정(2026-11-26, ADE V)**
   - 앱 전용 로그인은 프로필 안에 있다(Codex `…/m5/codex-profile-v1/auth.json`, Claude는 설정 폴더 경로 해시로 구분된 Keychain 항목). 그래서 임시 `--user-data-dir`로는 실제 실행이 안 된다.
   - 개발 앱 창이 다른 창에 완전히 가려지면 macOS Electron이 `hide`를 보내 미리보기가 숨고, rAF도 멈춘다. CDP 측정 중 "뷰가 안 보임"은 이것부터 의심한다(창을 앞으로 가져오면 다시 보인다).
@@ -522,6 +343,7 @@ PR #18 머지(68503092) 뒤 WIP(afaaa370)를 그 위로 옮겨 이어 갔다. �
   - 큰 도구 결과(이미지)가 Claude 출력 한 줄 128KiB를 넘으면 실행이 멈췄다(D2). 이제 세션 모드에서 8MiB까지 읽고 줄여 관측한다. **승인에 쓰는 값은 원문만**: Claude 권한 요청 줄은 줄이지 않고(허용 응답이 입력을 되돌려 보냄), Codex는 메서드별로 명시한 폐기 필드만 줄인다(`item/started`의 `command`·`cwd`가 승인 보완·완료 대조에 쓰임). 큰 줄은 프로세스 전체 2자리로 동시 처리 메모리를 묶는다(`provider_login_io.rs` `LARGE_LINE_SLOTS`). 자리 보유는 총 30초·무진행 10초, 대기는 90초가 상한이며 넘으면 그 연결만 실패한다(`LargeLineLimits`).
   - 권한 카드가 2~4초 만에 사라지던 D3는 PR #15 뒤 실제 Claude로 재현되지 않는다(2026-11-26, 카드 3장 모두 응답까지 유지). Claude CLI SDK 훅 기본 대기는 10분이다.
   - 큰 Write 권한 요청(128KiB 초과)은 통째로 받아 원문으로 승인·되돌려 보낸다. 요청당 4MiB, 대기 합계 16MiB를 넘으면 그 요청만 안내와 함께 거절한다(`claude_approval`).
+  - 8MiB 넘는 세션 줄(ADE 안정화 A)은 끊지 않고 흘려 읽는다(`OversizedLineStream`, 뼈대 8MiB·한 줄 64MiB). 통째로 읽은 줄과 결과 바이트가 같아야 한다(동치 시험). 그 크기의 Claude 권한 요청은 입력 없는 보류 요청(`withheld`)으로 넘겨 거절 안내만 한다. 디스크 보관은 4MiB 정책상 쓸 곳이 없다. Codex 요청·응답은 여전히 실패.
   - 프로젝트 '명령 실행 허용'을 끄면 Claude는 모든 Bash를, Codex는 스레드를 `untrusted`로 시작해 안전한 읽기 외 명령을 묻는다(2026-11-27 결정). Codex 0.171은 `untrusted`를 프로세스 설정으로는 거부하고 `thread/start`로만 받는다. 규칙 제안(`proposedExecpolicyAmendment`)은 읽기만 하고 적용하지 않는다.
   - 큰 도구 입력의 승인 카드는 64KiB 쪽을 모두 불러와 크기·SHA-256이 맞을 때만 허용을 켠다. 엔진도 모든 쪽을 내준 뒤에만 허용한다. 큰 입력 예산은 허용 응답이 다 쓰일 때까지 유지된다.
   - 동시 스트림 16개를 넘으면 엔진이 재시작됐다(D1). 누수는 PR #15, 한도 초과를 그 요청만의 실패로 바꾼 것은 ade-stability.
@@ -911,3 +733,5 @@ PR #18 머지(68503092) 뒤 WIP(afaaa370)를 그 위로 옮겨 이어 갔다. �
 2026-11-26 워크로그 중 `feature/ade`에 머지된 PR #10(토큰·화면 밝기, 검토 반영 포함)·#13(ADE 1차 통합 검증 V, 검토 반영 포함) 엔트리는 같은 날 네 번째 롤오버로 `docs/archive/history-2026-11.md` 맨 위로 옮겼다(머지된 PR 단위).
 
 2026-11-26 워크로그 중 `feature/ade`에 머지된 PR #11(활동 줄 자세히)·#12(화면 통일 U2~U4) 엔트리는 같은 날 롤오버로 `docs/archive/history-2026-11.md` 맨 위로 옮겼다(머지된 PR 단위).
+
+2026-11-26 워크로그 중 `feature/ade`에 머지된 PR #15(응답 지연)~#18(여러 프로젝트 PR-A)의 엔트리 12개는 2026-11-27 PR #25 검토 반영 때 롤오버로 `docs/archive/history-2026-11.md` 맨 위로 옮겼다(엔트리 부분 500줄 초과 → 267줄).

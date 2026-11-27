@@ -2485,7 +2485,7 @@ mod tests {
         let (chat_b, _) = another_task(&mut sidecar, &root.path().join("other"), "build_b");
         let id = |chat: &Value| chat["chatId"].as_str().unwrap().to_owned();
         let reserve = |sidecar: &mut Sidecar, chat: &Value, request: &str| {
-            let response = ask(sidecar, request, "preview.buildReserve", json!({"projectId":chat["projectId"],"chatId":chat["chatId"]}));
+            let response = ask(sidecar, request, "preview.buildReserve", json!({"projectId":chat["projectId"],"chatId":chat["chatId"],"holdId":hold_name(request)}));
             assert!(response.ok, "{response:?}");
             response.result.unwrap()
         };
@@ -2522,6 +2522,176 @@ mod tests {
         assert!(after.ok, "{after:?}");
         // And while that team works, A cannot be reserved.
         assert_eq!(reserve(&mut sidecar, &chat_a, "req_hold_a3")["refusal"], "busy");
+    }
+
+    /// A hold name as main makes one (`pbh_` + 32 hex), from a label.
+    fn hold_name(label: &str) -> String {
+        use sha2::Digest;
+        format!("pbh_{}", &format!("{:x}", sha2::Sha256::digest(label.as_bytes()))[..32])
+    }
+
+    fn reserve_hold(sidecar: &mut Sidecar, chat: &Value, hold: &str, request: &str) -> Value {
+        let response = ask(sidecar, request, "preview.buildReserve", json!({"projectId":chat["projectId"],"chatId":chat["chatId"],"holdId":hold}));
+        assert!(response.ok, "{response:?}");
+        response.result.unwrap()
+    }
+
+    fn restart(root: &tempfile::TempDir, sidecar: Sidecar, label: &str) -> Sidecar {
+        restart_with(root, sidecar, label, || {})
+    }
+
+    /// The engine stops, `while_down` runs, and a new engine starts on the same data.
+    fn restart_with(root: &tempfile::TempDir, sidecar: Sidecar, label: &str, while_down: impl FnOnce()) -> Sidecar {
+        drop(sidecar);
+        while_down();
+        let binary = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("elsecrew-sidecar");
+        let ready = SidecarSession::new(format!("orchestration_fixture_{label}"), AgentRuntime::blocked()).ready.clone();
+        Sidecar::initialize(root.path().join("data.sqlite3"), ready, AgentRuntime::fake(binary, FakeScenario::OrchestratorDelegate), &AtomicBool::new(false)).unwrap()
+    }
+
+    /// Nothing of a build hold refuses the task any more: a team check or
+    /// start and a discard pass the hold gates (the start itself is not run:
+    /// a restarted test engine has no fake agent launcher on every runner).
+    fn assert_released(sidecar: &mut Sidecar, chat: &Value, label: &str) {
+        let id = chat["chatId"].as_str().unwrap();
+        assert!(!sidecar.preview_build_blocks(id), "{label}");
+        let start = sidecar.workflow_request(format!("{label}_start"), "run.startAgent", json!({"chatId": id, "roleId": "coordinator", "inputMessageIds": [], "expectedCapabilityFingerprint": "x"}));
+        assert!(sidecar.preview_build_refusal(&start).is_none(), "{label}: start");
+        let mut discard = sidecar.workflow_request(format!("{label}_discard"), "project.catalog", json!({"action":"inspectChatDiscard"}));
+        for key in ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"] { discard.params[key] = chat[key].clone(); }
+        assert!(sidecar.write_refusal(&discard).is_none(), "{label}: discard");
+    }
+
+    fn sync_holds(sidecar: &mut Sidecar, holds: &[(&str, &Value)], settled: bool, request: &str) -> ResponseV1 {
+        let holds: Vec<_> = holds.iter().map(|(hold, chat)| json!({"holdId": hold, "chatId": chat["chatId"]})).collect();
+        ask(sidecar, request, "preview.buildHolds", json!({"holds": holds, "leftoversSettled": settled}))
+    }
+
+    /// ADE stabilization A: the engine stops and main starts it again while
+    /// main still runs a build (PR #22 kept the hold only in memory). The new
+    /// engine restores the hold before it answers anything: the task's team
+    /// still cannot start. Main's list keeps it; its release frees it.
+    #[test]
+    fn a_build_hold_outlives_an_engine_restart_of_the_same_app() {
+        let (root, mut sidecar, _) = service();
+        let (chat_a, _) = another_task(&mut sidecar, &root.path().join("source"), "restart_a");
+        let id = chat_a["chatId"].as_str().unwrap().to_owned();
+        let hold = hold_name("restart");
+        assert_eq!(reserve_hold(&mut sidecar, &chat_a, &hold, "req_hold_restart")["holdId"], hold.as_str());
+        let file = root.path().join("preview-build-holds-v1.json");
+        assert!(file.exists(), "written before main may start the build");
+        let mut sidecar = restart(&root, sidecar, "restarted");
+        assert!(sidecar.preview_build_blocks(&id), "restored before any request");
+        let refused = start_as(&mut sidecar, &chat_a, "req_team_after_restart");
+        assert_eq!(refused.error.as_ref().map(|e| e.code.as_str()), Some("orchestrationBusy"), "{refused:?}");
+        assert_eq!(reserve_hold(&mut sidecar, &chat_a, &hold_name("other"), "req_hold_again")["refusal"], "busy");
+        // Main's list after the start names it: still held.
+        let synced = sync_holds(&mut sidecar, &[(&hold, &chat_a)], true, "req_sync_restart");
+        assert_eq!(synced.result.unwrap(), json!({"held": 1, "blocking": false}));
+        assert!(sidecar.preview_build_blocks(&id));
+        let released = ask(&mut sidecar, "req_release_restart", "preview.buildRelease", json!({"holdId": hold}));
+        assert_eq!(released.result.unwrap(), json!({"holdId": hold, "released": true}));
+        assert!(!sidecar.preview_build_blocks(&id) && !file.exists());
+        assert_released(&mut sidecar, &chat_a, "req_team_released");
+    }
+
+    /// PR #25 review B1 (fault injection): the engine wrote the hold and
+    /// stopped before main had the answer. Main named the hold, so it still
+    /// releases it — or, if its list after the restart leaves it out, the
+    /// new engine drops it. A reserve asked again with the same name answers
+    /// the same; the name cannot be taken for another task.
+    #[test]
+    fn a_hold_whose_reserve_answer_was_lost_is_released_by_its_name() {
+        let (root, mut sidecar, _) = service();
+        let (chat_a, _) = another_task(&mut sidecar, &root.path().join("source"), "lost_a");
+        let (chat_b, _) = another_task(&mut sidecar, &root.path().join("other"), "lost_b");
+        let id = chat_a["chatId"].as_str().unwrap().to_owned();
+        let hold = hold_name("lost");
+        reserve_hold(&mut sidecar, &chat_a, &hold, "req_hold_lost");
+        // The same request again (a retry): the same answer, nothing new.
+        assert_eq!(reserve_hold(&mut sidecar, &chat_a, &hold, "req_hold_lost_again")["holdId"], hold.as_str());
+        let taken = ask(&mut sidecar, "req_hold_taken", "preview.buildReserve", json!({"projectId":chat_b["projectId"],"chatId":chat_b["chatId"],"holdId":hold}));
+        assert!(!taken.ok, "a name cannot move to another task");
+        // The answer never reached main: the engine stops.
+        let mut sidecar = restart(&root, sidecar, "lost_release");
+        assert!(sidecar.preview_build_blocks(&id));
+        let released = ask(&mut sidecar, "req_release_lost", "preview.buildRelease", json!({"holdId": hold}));
+        assert_eq!(released.result.unwrap(), json!({"holdId": hold, "released": true}));
+        assert!(!sidecar.preview_build_blocks(&id));
+        // Or main's list after the restart, which never held it, drops it.
+        reserve_hold(&mut sidecar, &chat_a, &hold, "req_hold_lost_2");
+        let mut sidecar = restart(&root, sidecar, "lost_sync");
+        assert!(sidecar.preview_build_blocks(&id));
+        assert_eq!(sync_holds(&mut sidecar, &[], true, "req_sync_lost").result.unwrap(), json!({"held": 0, "blocking": false}));
+        assert!(!sidecar.preview_build_blocks(&id));
+        assert_released(&mut sidecar, &chat_a, "req_team_lost");
+    }
+
+    /// PR #25 review B2 (fault injection): a record the new engine cannot
+    /// read, or holds an earlier app run left, keep blocking — every task, or
+    /// the tasks those holds name — with a refusal that says why. Main's list
+    /// brings its own holds back; the block goes only once main says every
+    /// process an earlier build left has ended.
+    #[test]
+    fn holds_a_new_engine_cannot_confirm_keep_blocking_until_the_app_settles_them() {
+        let (root, mut sidecar, _) = service();
+        let (chat_a, _) = another_task(&mut sidecar, &root.path().join("source"), "unknown_a");
+        let (chat_b, _) = another_task(&mut sidecar, &root.path().join("other"), "unknown_b");
+        let a = chat_a["chatId"].as_str().unwrap().to_owned();
+        let b = chat_b["chatId"].as_str().unwrap().to_owned();
+        let file = root.path().join("preview-build-holds-v1.json");
+        let hold = hold_name("unknown");
+        reserve_hold(&mut sidecar, &chat_a, &hold, "req_hold_unknown");
+        // The record is damaged while the engine is down.
+        std::fs::write(&file, b"{damaged").unwrap();
+        let mut sidecar = restart(&root, sidecar, "unknown");
+        for chat in [&a, &b] { assert!(sidecar.preview_build_blocks(chat), "every task: {chat}"); }
+        let refused = start_as(&mut sidecar, &chat_b, "req_team_unknown");
+        assert_eq!(refused.error.as_ref().map(|e| e.code.as_str()), Some("orchestrationBusy"));
+        assert!(refused.error.as_ref().unwrap().detail.contains("from before the engine restarted"), "says why: {refused:?}");
+        let discard = ask_catalog(&mut sidecar, "req_discard_unknown", "inspectChatDiscard", &chat_b, json!({}));
+        assert!(!discard.ok, "writes wait too");
+        // Main still has its build and an earlier build may live: still blocked.
+        assert_eq!(sync_holds(&mut sidecar, &[(&hold, &chat_a)], false, "req_sync_unknown").result.unwrap(), json!({"held": 1, "blocking": true}));
+        assert!(sidecar.preview_build_blocks(&b));
+        // Every earlier process gone: only main's own hold blocks.
+        assert_eq!(sync_holds(&mut sidecar, &[(&hold, &chat_a)], true, "req_sync_unknown_2").result.unwrap(), json!({"held": 1, "blocking": false}));
+        assert!(sidecar.preview_build_blocks(&a) && !sidecar.preview_build_blocks(&b));
+        // An earlier app run's hold (another owner wrote it): it blocks its
+        // task (and tasks whose writes meet it) until settled.
+        let other = elsecrew_core::proctree::ProcIdentity { pid: 1_234_567, start_us: 42 };
+        let earlier = crate::preview_build_holds::Holds { mine: [(hold_name("earlier"), b.clone())].into(), ..Default::default() };
+        let mut sidecar = restart_with(&root, sidecar, "earlier", || {
+            crate::preview_build_holds::HoldFile::with_owner(root.path(), Some(other)).save(&earlier).unwrap();
+        });
+        assert!(sidecar.preview_build_blocks(&b) && !sidecar.preview_build_blocks(&a));
+        assert_eq!(sync_holds(&mut sidecar, &[], false, "req_sync_earlier").result.unwrap(), json!({"held": 0, "blocking": true}));
+        assert!(sidecar.preview_build_blocks(&b), "a leftover may still write");
+        assert_eq!(sync_holds(&mut sidecar, &[], true, "req_sync_earlier_2").result.unwrap(), json!({"held": 0, "blocking": false}));
+        assert!(!sidecar.preview_build_blocks(&b) && !file.exists());
+    }
+
+    /// PR #25 review I1 (fault injection): a release that cannot be written
+    /// is not made: the answer is an error (main sends it again), the hold
+    /// still blocks, also after a restart, and the retry frees it.
+    #[test]
+    fn an_unwritten_release_keeps_the_hold_and_a_retry_frees_it() {
+        let (root, mut sidecar, _) = service();
+        let (chat_a, _) = another_task(&mut sidecar, &root.path().join("source"), "unwritten_a");
+        let id = chat_a["chatId"].as_str().unwrap().to_owned();
+        let hold = hold_name("unwritten");
+        reserve_hold(&mut sidecar, &chat_a, &hold, "req_hold_unwritten");
+        sidecar.build_hold_file.fail_writes.set(true);
+        let failed = ask(&mut sidecar, "req_release_unwritten", "preview.buildRelease", json!({"holdId": hold}));
+        assert!(!failed.ok, "{failed:?}");
+        assert!(sidecar.preview_build_blocks(&id));
+        // A reserve that cannot be written is refused, not held.
+        assert_eq!(reserve_hold(&mut sidecar, &chat_a, &hold_name("unwritten_2"), "req_hold_unwritten_2")["refusal"], "busy");
+        let mut sidecar = restart(&root, sidecar, "unwritten");
+        assert!(sidecar.preview_build_blocks(&id), "still on record");
+        let released = ask(&mut sidecar, "req_release_unwritten_retry", "preview.buildRelease", json!({"holdId": hold}));
+        assert_eq!(released.result.unwrap(), json!({"holdId": hold, "released": true}));
+        assert!(!sidecar.preview_build_blocks(&id));
     }
 
     /// PR #20 review B3: a later team of the same task that waits its turn

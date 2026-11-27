@@ -10,8 +10,16 @@
 // own path (screen, main, engine), not of a provider. It is not a G6 gate:
 // the fake agent has no approval queue, so the approval path itself is not
 // exercised (PR #15 review B1·I1).
+//
+// --starting (ADE stabilization A) measures instead while runs start: two
+// Claude Code and two Codex runs at once beside a working Codex run, with
+// REAL accounts and providers on the development app's own data (run only
+// when no other Elsecrew app uses it; five tiny paid prompts, each run
+// stopped once started; scripts/m5-latency-starting-probe.cjs). File read,
+// approval list and getChat, against a control round with the warm run alone.
+// With --sidecar <binary> the same probe runs another engine build (before).
 import { spawnSync } from "node:child_process";
-import { builtinModules, createRequire } from "node:module";
+import { createRequire } from "node:module";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -33,13 +41,21 @@ const electron = createRequire(import.meta.url)("electron");
 const root = mkdtempSync(join(tmpdir(), "elsecrew-latency-"));
 const out = resolve(option("--out", join(repoRoot, ".artifacts", "m5-latency")));
 mkdirSync(out, { recursive: true });
-const stages = args.includes("--skip-background") ? ["first"] : ["first", "second"];
+const starting = args.includes("--starting");
+const stages = starting ? ["starting"] : args.includes("--skip-background") ? ["first"] : ["first", "second"];
+if (starting) {
+  // The development app's own data: no other engine may be using it.
+  const others = spawnSync("/bin/ps", ["-axo", "args="], { encoding: "utf8" }).stdout.split("\n")
+    .filter(line => /^\S*elsecrew-sidecar --stdio /.test(line.trim()) && line.includes("Application Support/Elsecrew/"));
+  if (others.length) { console.error("another engine uses the development app's data:\n" + others.join("\n")); process.exit(2); }
+}
 const samples = Number(option("--samples", "12")), seedChats = Number(option("--seed-chats", "40")), seedRuns = Number(option("--seed-runs", "120"));
 const exits = {};
 for (const stage of stages) {
   const env = { ...process.env, LATENCY_STAGE: stage, LATENCY_ROOT: root, LATENCY_SAMPLES: String(samples), LATENCY_SEED_CHATS: String(seedChats), LATENCY_SEED_RUNS: String(seedRuns), ...(option("--sidecar") ? { LATENCY_SIDECAR: resolve(option("--sidecar")) } : {}), ...(option("--main") ? { LATENCY_MAIN: resolve(option("--main")) } : {}) };
   delete env.ELECTRON_RUN_AS_NODE;
-  const result = spawnSync(electron, [join(repoRoot, "scripts", "m5-latency-probe.cjs")], { cwd: repoRoot, env, stdio: "inherit" });
+  const probe = stage === "starting" ? "m5-latency-starting-probe.cjs" : "m5-latency-probe.cjs";
+  const result = spawnSync(electron, [join(repoRoot, "scripts", probe)], { cwd: repoRoot, env, stdio: "inherit" });
   exits[stage] = result.status;
   if (result.status !== 0) { console.error(`stage ${stage} exited ${result.status}`); break; }
 }
@@ -70,6 +86,7 @@ const judged = judgeLatency({ stages, exits, reports, samples, seedChats, seedRu
 const engine = Object.values(reports).flatMap(r => (r.rounds ?? []).map(x => ({ stage: r.stage, condition: x.condition, samples: x.samples, loadedSamples: x.loadedSamples, engine: x.engine, slowPhases: x.slowPhases })));
 const summary = { root, status: judged.status, problems: judged.problems, verdicts: judged.verdicts, rows, engine, exits,
   engineStarts: Object.fromEntries(Object.entries(reports).map(([stage, r]) => [stage, r.engineStarts])),
+  starts: reports.starting ? { engine: reports.starting.engine, ms: reports.starting.startsMs, results: (reports.starting.starts ?? []).map(r => ({ runtime: r.runtime, attempt: r.attempt, error: r.error ?? null, at: r.at })) } : undefined,
   seed: { chats: reports.first?.seedChatsDone, runs: reports.first?.seedRunsDone, errors: reports.first?.seedRunErrors ?? [] },
   timingDropped: Object.values(reports).map(r => r.timingDropped ?? null),
   phases: Object.values(reports).map(r => ({ stage: r.stage, slowPhases: summarizePhases(r.phases ?? []) })),
@@ -88,12 +105,6 @@ function summarizePhases(phases) {
 }
 
 async function buildApp() {
-  const { build } = await import("vite");
-  const external = ["electron", "electron/common", ...builtinModules.flatMap(name => [name, `node:${name}`])];
-  const define = { MAIN_WINDOW_VITE_DEV_SERVER_URL: "undefined", MAIN_WINDOW_VITE_NAME: JSON.stringify("main_window") };
-  await build({ configFile: false, root: repoRoot, mode: "production", logLevel: "warn", define,
-    build: { emptyOutDir: false, outDir: ".vite/build", minify: false, lib: { entry: "electron/main.ts", formats: ["cjs"], fileName: () => "main.cjs" }, rollupOptions: { external } } });
-  await build({ configFile: false, root: repoRoot, mode: "production", logLevel: "warn", define,
-    build: { emptyOutDir: false, outDir: ".vite/build", minify: false, rollupOptions: { external, input: "electron/preload.ts", output: { format: "cjs", inlineDynamicImports: true, entryFileNames: "[name].cjs", chunkFileNames: "[name].cjs" } } } });
-  await build({ configFile: join(repoRoot, "electron", "vite.renderer.config.ts"), logLevel: "warn" });
+  const { buildDevBundle } = await import("./m5-build-dev-bundle.mjs");
+  await buildDevBundle();
 }

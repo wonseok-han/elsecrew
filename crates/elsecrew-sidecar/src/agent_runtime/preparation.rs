@@ -16,6 +16,29 @@ pub(crate) use claude::ClaudeToolAdmission;
 #[allow(unused_imports)] // Pending native Claude dispatcher integration.
 #[cfg(target_os = "macos")]
 pub(crate) use claude::ClaudeStart;
+#[cfg(target_os = "macos")]
+pub(crate) use claude::PreparedClaudeLaunch;
+
+/// The slow part of a named-tools Codex launch done ahead, off the engine's
+/// loop (ADE stabilization A): both signed executables pinned and checked.
+/// Arguments and environment are composed at launch from the files as they
+/// are then (PR #25 review I2). Nothing is started or written.
+pub(crate) struct PreparedCodexLaunch {
+    /// The paths they were pinned from: used only for the same paths.
+    executable: std::path::PathBuf,
+    helper: std::path::PathBuf,
+    pins: (crate::provider_executable::PinnedExecutable, crate::provider_executable::PinnedExecutable),
+}
+
+impl PreparedCodexLaunch {
+    pub(crate) fn build(executable: std::path::PathBuf, helper: std::path::PathBuf) -> Result<Self, SidecarError> {
+        let pins = (
+            crate::provider_executable::PinnedExecutable::open_codex_signed(&executable, false)?,
+            crate::provider_executable::PinnedExecutable::open_codex_signed(&helper, true)?,
+        );
+        Ok(Self { executable, helper, pins })
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CodexLaunchMode {
@@ -397,6 +420,7 @@ impl RunReservation {
         executable: &crate::provider_executable::PinnedExecutable,
         helper: &crate::provider_executable::PinnedExecutable,
         cancel: &std::sync::atomic::AtomicBool,
+        prepared: Option<PreparedCodexLaunch>,
     ) -> Result<OwnedTextRun, SidecarError> {
         let failure = || {
             SidecarError::new(
@@ -408,15 +432,16 @@ impl RunReservation {
         let pending_process = process.as_mut().ok_or_else(failure)?;
         pending_process.retain_fence_before_launch(&pending.run_id)?;
         pending.bind_provider_fence(storage, pending_process)?;
-        pending.launch_named_codex_candidate(
+        pending.launch_codex_with_network(
             storage,
             projects,
             pending_process,
-            executable,
-            helper,
+            (executable, helper),
             cancel,
+            CodexLaunchMode::NamedTools,
+            prepared,
         )?;
-        let state = pending.begin_text_candidate(storage, projects, pending_process)?;
+        let state = crate::latency_log::step("launch.codex.begin", || pending.begin_text_candidate(storage, projects, pending_process))?;
         let mut owner = OwnedTextRun::from_prepared(
             reservation.take().ok_or_else(failure)?,
             process.take().ok_or_else(failure)?,
@@ -447,6 +472,7 @@ impl RunReservation {
             (executable, helper),
             cancel,
             CodexLaunchMode::OfflineOuter,
+            None,
         )
     }
 
@@ -468,6 +494,7 @@ impl RunReservation {
             (executable, helper),
             cancel,
             CodexLaunchMode::ProxiedOuter,
+            None,
         )
     }
 
@@ -489,6 +516,7 @@ impl RunReservation {
             (executable, helper),
             cancel,
             CodexLaunchMode::NamedTools,
+            None,
         )
     }
 
@@ -503,6 +531,7 @@ impl RunReservation {
         ),
         cancel: &std::sync::atomic::AtomicBool,
         mode: CodexLaunchMode,
+        prepared: Option<PreparedCodexLaunch>,
     ) -> Result<(), SidecarError> {
         let (executable, helper) = pair;
         use crate::provider_runtime_sandbox::WorkspaceAccess;
@@ -537,7 +566,7 @@ impl RunReservation {
                 crate::provider_profile::verify_runtime_files(&home)
             }
         };
-        verify_profile()?;
+        crate::latency_log::step("launch.codex.profile", || verify_profile())?;
         let expected = ExpectedProfile {
             model: &profile.model_selector,
             reasoning_effort: profile.reasoning_effort.as_deref().ok_or_else(failure)?,
@@ -570,21 +599,36 @@ impl RunReservation {
             }
             crate::provider_login_gate::release(child)
         };
+        if prepared.is_some() && mode != CodexLaunchMode::NamedTools {
+            return Err(failure());
+        }
         if mode == CodexLaunchMode::NamedTools {
-            let command = crate::provider_preflight_session::vendor_launch::CodexCommand::new(
-                executable.revalidate()?,
-                helper.revalidate()?,
-                &home,
-                workspace,
-                &expected,
-                permission,
-            )?;
-            command.launch(process, |child, identities| {
+            let command = match prepared {
+                // Pinned ahead off the loop: only for these very paths;
+                // arguments and environment come from now (PR #25 review I2).
+                Some(prepared) => {
+                    if prepared.executable.as_path() != executable.revalidate()? || prepared.helper.as_path() != helper.revalidate()? {
+                        return Err(failure());
+                    }
+                    crate::provider_preflight_session::vendor_launch::CodexCommand::with_pins(
+                        prepared.pins.0, prepared.pins.1, &home, workspace, &expected, permission,
+                    )?
+                }
+                None => crate::provider_preflight_session::vendor_launch::CodexCommand::new(
+                    executable.revalidate()?,
+                    helper.revalidate()?,
+                    &home,
+                    workspace,
+                    &expected,
+                    permission,
+                )?,
+            };
+            crate::latency_log::step("launch.codex.spawn", || command.launch(process, |child, identities| {
                 self.record_pre_release(storage, projects, identities)
                     .map_err(|_| std::io::Error::other("run identity persistence failed"))?;
                 release(child)
-            })?;
-            self.record_released_or_invalidate(storage, process)
+            }))?;
+            crate::latency_log::step("launch.codex.released", || self.record_released_or_invalidate(storage, process))
         } else if mode == CodexLaunchMode::ProxiedOuter {
             let mut args = crate::provider_preflight_session::discovery_arguments(
                 &home, &expected, permission,
@@ -782,9 +826,9 @@ impl RunReservation {
             process.retain_fence_until_terminal()?;
         }
         let cwd = workspace.cwd().to_path_buf();
-        let transport = crate::provider_preflight_session::BoundTextSession::begin(
+        let transport = crate::latency_log::step("launch.codex.transport", || crate::provider_preflight_session::BoundTextSession::begin(
             process, flow, &workspace, text, output_budget,
-        )?;
+        ))?;
         Ok(RunTextState {
             cwd,
             tools: Default::default(),

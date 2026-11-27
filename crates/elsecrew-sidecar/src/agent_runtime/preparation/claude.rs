@@ -63,6 +63,23 @@ struct ClaudePending {
     accepted: bool,
 }
 
+/// The slow part of a Claude launch done ahead, off the engine's loop (ADE
+/// stabilization A): the executable pinned and its publisher signature
+/// checked. Arguments and environment are composed at launch from the files
+/// as they are then (PR #25 review I2). Nothing is started or written.
+pub(crate) struct PreparedClaudeLaunch {
+    /// The path it was pinned from: the launch uses it only for the same path.
+    executable: PathBuf,
+    pin: crate::provider_executable::PinnedExecutable,
+}
+
+impl PreparedClaudeLaunch {
+    pub(crate) fn build(executable: PathBuf) -> Result<Self, SidecarError> {
+        let pin = crate::provider_executable::PinnedExecutable::open_claude_signed(&executable)?;
+        Ok(Self { executable, pin })
+    }
+}
+
 /// The caller retains reservation/process slots until a fully prepared owner is
 /// returned. Any error leaves those slots available for register_failed_start.
 pub(crate) struct ClaudeStart {
@@ -576,6 +593,22 @@ impl RunReservation {
         cancel: &std::sync::atomic::AtomicBool,
         admit: &mut impl FnMut(&Path, &Path, &str, Option<&str>, crate::provider_claude_session::ToolAccess) -> Result<(), SidecarError>,
     ) -> Result<(), SidecarError> {
+        self.launch_claude_prepared(storage, projects, process, executable, cancel, admit, None)
+    }
+
+    /// `prepared`: the executable pinned ahead (the slow part: the publisher
+    /// signature check and hashing). Every check below runs as before.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn launch_claude_prepared(
+        &self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+        executable: &crate::provider_executable::PinnedExecutable,
+        cancel: &std::sync::atomic::AtomicBool,
+        admit: &mut impl FnMut(&Path, &Path, &str, Option<&str>, crate::provider_claude_session::ToolAccess) -> Result<(), SidecarError>,
+        prepared: Option<PreparedClaudeLaunch>,
+    ) -> Result<(), SidecarError> {
         use crate::provider_claude_session::{launch::ClaudeCommand, ToolAccess};
         use std::sync::atomic::Ordering;
         let failure = || SidecarError::new("agentLaunchRejected", "Claude launch inputs differ");
@@ -591,9 +624,9 @@ impl RunReservation {
             _ => return Err(failure()),
         };
         let address = address_from_chat(&self.run).map_err(|_| failure())?;
-        projects.verify_runtime_file_isolation(storage, &address).map_err(|_| failure())?;
-        self.validate_text_input(storage, projects).map_err(|_| failure())?;
-        let manifest = projects.verify_workspace_for_run(storage, &address).map_err(|_| failure())?;
+        crate::latency_log::step("launch.claude.isolation", || projects.verify_runtime_file_isolation(storage, &address)).map_err(|_| failure())?;
+        crate::latency_log::step("launch.claude.input", || self.validate_text_input(storage, projects)).map_err(|_| failure())?;
+        let manifest = crate::latency_log::step("launch.claude.workspace", || projects.verify_workspace_for_run(storage, &address)).map_err(|_| failure())?;
         let workspace = Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
         let home = process.claude_preflight_home()?;
         let source = Path::new(elsecrew_protocol::project_v1::manifest_source_root(&manifest).ok_or_else(failure)?);
@@ -603,10 +636,18 @@ impl RunReservation {
                     != preflight.requested_launch_policy_digest
             { return Err(failure()); }
         }
-        let command = ClaudeCommand::new(executable.revalidate()?, &home, workspace, source, model, effort, access)?;
-        admit(workspace, &home, model, effort, access)?;
+        let command = match prepared {
+            // Pinned ahead: only for this very executable path; arguments
+            // and environment come from now.
+            Some(prepared) => {
+                if prepared.executable.as_path() != executable.revalidate()? { return Err(failure()); }
+                ClaudeCommand::with_pin(prepared.pin, &home, workspace, source, model, effort, access)?
+            }
+            None => crate::latency_log::step("launch.claude.command", || ClaudeCommand::new(executable.revalidate()?, &home, workspace, source, model, effort, access))?,
+        };
+        crate::latency_log::step("launch.claude.admit", || admit(workspace, &home, model, effort, access))?;
         if cancel.load(Ordering::Acquire) { return Err(failure()); }
-        command.launch(process, |child, identities| {
+        crate::latency_log::step("launch.claude.spawn", || command.launch(process, |child, identities| {
             // Recheck both policy and durable input at the last pre-vendor boundary.
             admit(workspace, &home, model, effort, access).map_err(std::io::Error::other)?;
             executable.revalidate().map_err(std::io::Error::other)?;
@@ -614,8 +655,8 @@ impl RunReservation {
             self.record_pre_release(storage, projects, identities)
                 .map_err(|_| std::io::Error::other("Claude run identity persistence failed"))?;
             crate::provider_login_gate::release(child)
-        })?;
-        self.record_released_or_invalidate(storage, process)
+        }))?;
+        crate::latency_log::step("launch.claude.released", || self.record_released_or_invalidate(storage, process))
     }
 
     pub(crate) fn begin_claude_output(

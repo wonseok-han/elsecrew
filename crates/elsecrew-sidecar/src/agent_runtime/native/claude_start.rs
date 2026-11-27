@@ -59,6 +59,7 @@ impl AgentRuntime {
         ) -> Result<(), SidecarError>,
         prompt_admit: PromptAdmission,
         tool_admit: preparation::ClaudeToolAdmission,
+        prepared: Option<preparation::PreparedClaudeLaunch>,
     ) -> Result<G5Action, SidecarError> {
         let failure = || SidecarError::new("agentLaunchRejected", "Claude start unavailable");
         let pending = reservation.as_ref().ok_or_else(failure)?;
@@ -84,19 +85,20 @@ impl AgentRuntime {
             if !owner.matches_startup_run(&pending.run_id) {
                 owner.retain_fence_before_launch(&pending.run_id)?;
             }
-            pending.bind_provider_fence(storage, owner)?;
-            pending.launch_claude_candidate(
+            crate::latency_log::step("launch.claude.fence", || pending.bind_provider_fence(storage, owner))?;
+            pending.launch_claude_prepared(
                 storage,
                 projects,
                 owner,
                 executable,
                 cancel,
                 launch_admit,
+                prepared,
             )?;
             if cancel.load(Ordering::Acquire) {
                 return Err(failure());
             }
-            self.register_claude_start(storage, projects, reservation, process, prompt_admit, tool_admit)
+            crate::latency_log::step("launch.claude.register", || self.register_claude_start(storage, projects, reservation, process, prompt_admit, tool_admit))
         })();
         if let Err(error) = result {
             // If cleanup registration rejects, caller slots still own the process.

@@ -29,6 +29,7 @@
  *   output folder and nothing it wrote would be recorded by Git (I2·I1).
  */
 import type { ChildProcess, SpawnOptions } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   PREVIEW_BUILD_LOG_MAX_LINES_V1,
   type PreviewBuildIpcRequestV1,
@@ -58,9 +59,13 @@ import {
 
 export interface PreviewBuildSidecarV1 {
   previewBuildPlan(input: { projectId: string; chatId: string }): Promise<PreviewBuildPlanResultV1>;
-  /** The engine's write hold on the task's workspace (PR #22 re-review). */
-  previewBuildReserve(input: { projectId: string; chatId: string }): Promise<{ holdId: string | null; refusal: "busy" | null }>;
+  /** The engine's write hold on the task's workspace (PR #22 re-review),
+   * under a name main chose (PR #25 review B1). */
+  previewBuildReserve(input: { projectId: string; chatId: string; holdId: string }): Promise<{ holdId: string | null; refusal: "busy" | null }>;
   previewBuildRelease(input: { holdId: string }): Promise<{ holdId: string; released: boolean }>;
+  /** Main's own holds after an engine start, and whether an earlier app
+   * run's builds have all ended (PR #25 review B2). */
+  previewBuildHolds(input: { holds: { holdId: string; chatId: string }[]; leftoversSettled: boolean }): Promise<{ held: number; blocking: boolean }>;
 }
 
 /** Where a job may write and what it may never touch: shown in the box and
@@ -91,6 +96,8 @@ export interface PreviewBuildToolsV1 {
 export interface PreviewBuildOptionsV1 {
   enabled: boolean;
   sidecar(): PreviewBuildSidecarV1 | undefined;
+  /** A new hold name (`pbh_` + 32 hex); random unless a test sets it. */
+  newHoldId?(): string;
   /** main's native box; true only for the person's "예". */
   confirm(consent: PreviewBuildConsentV1): Promise<boolean>;
   /** `node` and the package manager, or null when not found on this computer. */
@@ -165,6 +172,12 @@ interface PendingStart { aborted: boolean }
 
 const IDLE_VIEW: PreviewBuildJobViewV1 = { step: null, state: "idle", cursor: 0, lines: [], exitCode: null, outputReady: false, startedAt: null, endedAt: null, leftovers: 0 };
 
+/** How soon a release or hold list that did not reach the engine is tried again. */
+const PREVIEW_BUILD_RELEASE_RETRY_MS = 3_000;
+/** How often main looks again at an earlier app run's build leftovers while
+ * the engine still blocks for them (PR #25 review B2). */
+const PREVIEW_BUILD_LEFTOVER_RECHECK_MS = 10_000;
+
 export class PreviewBuildManagerV1 {
   readonly #options: PreviewBuildOptionsV1;
   readonly #jobs = new Map<string, Job>();
@@ -175,9 +188,73 @@ export class PreviewBuildManagerV1 {
   /** Processes an earlier app run left that could not be ended (re-review
    * B3): kept on record, and no build starts while any lives. */
   #orphans: PreviewRunningRecordV1[] = [];
+  /** Holds main has (reserved, not yet released): hold → task. Sent to each
+   * new engine, which keeps exactly these as this app's (PR #25 review B2). */
+  readonly #holds = new Map<string, string>();
+  /** Holds whose release did not reach an engine (it was stopped or
+   * restarting). The engine keeps holds across its own restarts (ADE
+   * stabilization A), so each is sent again once an engine is ready. */
+  readonly #unreleased = new Set<string>();
+  #retry: ReturnType<typeof setTimeout> | undefined;
+  #recheck: ReturnType<typeof setTimeout> | undefined;
+  /** `recoverLeftovers` has looked at an earlier app run's processes. */
+  #leftoversChecked = false;
+  /** The engine still blocks for holds it could not confirm. */
+  #engineBlocking = false;
 
   constructor(options: PreviewBuildOptionsV1) {
     this.#options = options;
+  }
+
+  /** A (new) engine is ready: it learns main's holds and whether an earlier
+   * run's builds are over, then releases that could not be sent go again. */
+  engineReady(): void {
+    const sidecar = this.#options.sidecar();
+    if (!sidecar) { this.#retryLater(); return; }
+    const leftoversSettled = this.#leftoversChecked && !this.#orphansAlive();
+    void sidecar.previewBuildHolds({ holds: [...this.#holds].map(([holdId, chatId]) => ({ holdId, chatId })), leftoversSettled })
+      .then(result => {
+        this.#engineBlocking = result.blocking;
+        if (result.blocking) this.#recheckLeftovers();
+        const holds = [...this.#unreleased];
+        this.#unreleased.clear();
+        for (const hold of holds) this.#releaseHold(hold);
+      }, () => this.#retryLater());
+  }
+
+  /** For tests and probes (never IPC): releases still to send, holds held,
+   * and whether the engine still blocks for an earlier build. */
+  get unreleasedHolds(): string[] { return [...this.#unreleased]; }
+  get heldHolds(): string[] { return [...this.#holds.keys()]; }
+  get engineBlocking(): boolean { return this.#engineBlocking; }
+
+  #releaseHold(hold: string): void {
+    this.#holds.delete(hold);
+    const sidecar = this.#options.sidecar();
+    if (!sidecar) { this.#keepUnreleased(hold); return; }
+    void sidecar.previewBuildRelease({ holdId: hold }).catch(() => this.#keepUnreleased(hold));
+  }
+
+  /** Kept for the next ready engine, and tried again shortly: a new engine
+   * answers only once its storage check is done. */
+  #keepUnreleased(hold: string): void {
+    this.#unreleased.add(hold);
+    this.#retryLater();
+  }
+
+  #retryLater(): void {
+    if (this.#retry) return;
+    this.#retry = setTimeout(() => { this.#retry = undefined; this.engineReady(); }, PREVIEW_BUILD_RELEASE_RETRY_MS);
+    (this.#retry as { unref?: () => void }).unref?.();
+  }
+
+  /** While the engine blocks for an earlier run's build, look again later:
+   * once its processes are gone, the engine lets go (a safe release only
+   * after no owning process is left). */
+  #recheckLeftovers(): void {
+    if (this.#recheck) return;
+    this.#recheck = setTimeout(() => { this.#recheck = undefined; this.engineReady(); }, PREVIEW_BUILD_LEFTOVER_RECHECK_MS);
+    (this.#recheck as { unref?: () => void }).unref?.();
   }
 
   /** For tests and probes (never IPC): the live leaders' ids. */
@@ -199,6 +276,7 @@ export class PreviewBuildManagerV1 {
       // build starts until it can be (re-review B3).
       this.#orphans = [{ leader: 0, processes: [{ pid: 0, started: "unreadable" }] }];
       this.#options.log("preview build record unreadable");
+      this.#leftoversChecked = true;
       return 0;
     }
     const survivors: PreviewRunningRecordV1[] = [];
@@ -220,6 +298,9 @@ export class PreviewBuildManagerV1 {
     try { this.#options.saveRunning(survivors); } catch { /* best effort */ }
     if (ended) this.#options.log(`preview build leftovers ended: ${ended}`);
     if (survivors.length) this.#options.log(`preview build leftovers remain: ${survivors.reduce((sum, record) => sum + record.processes.length, 0)}`);
+    this.#leftoversChecked = true;
+    // An engine already running learns the outcome now (PR #25 review B2).
+    if (this.#options.sidecar()) this.engineReady();
     return ended;
   }
 
@@ -374,9 +455,18 @@ export class PreviewBuildManagerV1 {
       // runs on the old yes.
       if (pending.aborted || this.#suspended || this.#quitting) return answer("cancelled");
       const sidecar = this.#options.sidecar();
-      let hold: string | null = null;
-      try { hold = sidecar ? (await sidecar.previewBuildReserve({ projectId, chatId })).holdId : null; } catch { hold = null; }
-      if (!hold) return answer("busy");
+      if (!sidecar) return answer("busy");
+      // Main names the hold (PR #25 review B1): an answer lost on the way
+      // back still leaves a name to release.
+      const hold = this.#options.newHoldId?.() ?? `pbh_${randomUUID().replace(/-/g, "")}`;
+      this.#holds.set(hold, chatId);
+      let reserved: { holdId: string | null } | null = null;
+      try { reserved = await sidecar.previewBuildReserve({ projectId, chatId, holdId: hold }); } catch { reserved = null; }
+      if (reserved?.holdId !== hold) {
+        // Refused: nothing held. No answer: perhaps held, so release it by name.
+        if (reserved) this.#holds.delete(hold); else this.#releaseHold(hold);
+        return answer("busy");
+      }
       let handed = false;
       try {
         for (let asked = 1; ; asked++) {
@@ -399,7 +489,7 @@ export class PreviewBuildManagerV1 {
         handed = true;
         return answer("started", base);
       } finally {
-        if (!handed) void this.#options.sidecar()?.previewBuildRelease({ holdId: hold }).catch(() => undefined);
+        if (!handed) this.#releaseHold(hold);
       }
     } finally {
       if (this.#pending.get(key) === pending) this.#pending.delete(key);
@@ -540,7 +630,7 @@ export class PreviewBuildManagerV1 {
     if (job.hold) {
       const hold = job.hold;
       job.hold = null;
-      void this.#options.sidecar()?.previewBuildRelease({ holdId: hold }).catch(() => undefined);
+      this.#releaseHold(hold);
     }
     if (job.temp) {
       const temp = job.temp;

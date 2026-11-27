@@ -350,25 +350,6 @@ impl AgentRuntime {
         match failure { Some(error) => Err(error), None => Ok(Vec::new()) }
     }
 
-    #[allow(dead_code)]
-    /// Drops a start's finished discovery that waited for the engine longer
-    /// than a start may use it (ADE multi-project P5: beside other runs of the
-    /// agent a start can wait behind another's launch), so the caller can
-    /// discover again. A failed one, or one still cleaning up, stays.
-    pub(crate) fn drop_stale_start_discovery(&mut self, request_id: &str) -> bool {
-        let stale_claude = self.pending_claude_discoveries.get(request_id).is_some_and(|pending| {
-            pending.completion.as_ref().is_some_and(|done| done.cleanup.is_none()
-                && done.result.as_ref().is_ok_and(|evidence| !evidence.fresh_for_start()))
-        });
-        let stale_codex = self.pending_discoveries.get(request_id).is_some_and(|pending| {
-            pending.completion.as_ref().is_some_and(|done| done.cleanup.is_none()
-                && done.result.as_ref().is_ok_and(|evidence| !evidence.observation.fresh_for_start()))
-        });
-        if stale_claude { self.pending_claude_discoveries.remove(request_id); }
-        if stale_codex { self.pending_discoveries.remove(request_id); }
-        stale_claude || stale_codex
-    }
-
     pub(crate) fn take_claude_discovery(
         &mut self, storage: &Storage, projects: &ProjectManager, request_id: &str,
     ) -> Option<Result<ScopedClaudeEvidence, SidecarError>> {

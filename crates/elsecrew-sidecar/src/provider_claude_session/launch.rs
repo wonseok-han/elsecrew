@@ -47,7 +47,13 @@ impl ClaudeCommand {
     }
 
     pub(crate) fn new(executable: &Path, home: &Path, workspace: &Path, source: &Path, model: &str, effort: Option<&str>, access: ToolAccess) -> Result<Self, SidecarError> {
-        let executable = PinnedExecutable::open_claude_signed(executable)?;
+        Self::with_pin(PinnedExecutable::open_claude_signed(executable)?, home, workspace, source, model, effort, access)
+    }
+
+    /// The same command from an executable pinned (signature checked) ahead,
+    /// off the engine's loop (ADE stabilization A). Arguments and environment
+    /// are composed here, from the files as they are now (PR #25 review I2).
+    pub(crate) fn with_pin(executable: PinnedExecutable, home: &Path, workspace: &Path, source: &Path, model: &str, effort: Option<&str>, access: ToolAccess) -> Result<Self, SidecarError> {
         let user_home = PathBuf::from(std::env::var_os("HOME").ok_or_else(failure)?);
         if !user_home.is_absolute() || user_home == home || !home.is_absolute() || !workspace.is_absolute()
             || home.starts_with(workspace) || workspace.starts_with(home)

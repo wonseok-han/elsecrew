@@ -61,6 +61,8 @@ pub enum OversizedLineRefusal {
     ProtectedFrame,
     UnknownShape,
     StillOverBound,
+    LongStringKept,
+    OverStreamBound,
 }
 
 impl OversizedLineRefusal {
@@ -72,6 +74,8 @@ impl OversizedLineRefusal {
             Self::ProtectedFrame => "a frame that is never shortened",
             Self::UnknownShape => "no discardable field for this frame",
             Self::StillOverBound => "still over the line bound after shortening",
+            Self::LongStringKept => "a long string where nothing may be shortened",
+            Self::OverStreamBound => "over the streamed line bound",
         }
     }
 }
@@ -91,7 +95,7 @@ pub fn reduce_oversized_line(
         return Err(Refusal::TooManyValues);
     }
     // Duplicate keys are refused before anything is rewritten, as for any frame.
-    let mut root = unique_json::parse(body).map_err(|_| Refusal::NotJson)?;
+    let root = unique_json::parse(body).map_err(|_| Refusal::NotJson)?;
     if policy == OversizedLinePolicy::ClaudeStreamJson && is_claude_permission_request(&root) {
         // Read exactly, never shortened: what the person approves and what
         // the allow reply echoes is the original (2026-11-26 big Write).
@@ -100,10 +104,20 @@ pub fn reduce_oversized_line(
         bytes.push(b'\n');
         return BoundedObservation::new_session_control(bytes).map_err(|_| Refusal::OverRawBound);
     }
+    reduce_root(root, policy, &Longs::none())
+}
+
+/// Applies `policy` to a parsed frame and bounds the result. `longs` names
+/// the strings a streamed line left out (`OversizedLineStream`); none may
+/// remain where the policy keeps text exactly.
+fn reduce_root(mut root: Value, policy: OversizedLinePolicy, longs: &Longs) -> Result<BoundedObservation, OversizedLineRefusal> {
     let object = root.as_object_mut().ok_or(Refusal::UnknownShape)?;
     match policy {
-        OversizedLinePolicy::ClaudeStreamJson => reduce_claude(object)?,
-        OversizedLinePolicy::CodexAppServer => reduce_codex(object)?,
+        OversizedLinePolicy::ClaudeStreamJson => reduce_claude(object, longs)?,
+        OversizedLinePolicy::CodexAppServer => reduce_codex(object, longs)?,
+    }
+    if longs.remains_in(&root) {
+        return Err(Refusal::LongStringKept);
     }
     let mut bytes = serde_json::to_vec(&root).map_err(|_| Refusal::NotJson)?;
     if bytes.len() > PROVIDER_OBSERVATION_LINE_MAX_BYTES {
@@ -144,7 +158,7 @@ fn count_values(body: &[u8]) -> usize {
     count
 }
 
-fn reduce_claude(object: &mut Map<String, Value>) -> Result<(), OversizedLineRefusal> {
+fn reduce_claude(object: &mut Map<String, Value>, longs: &Longs) -> Result<(), OversizedLineRefusal> {
     let kind = object.get("type").and_then(Value::as_str).ok_or(Refusal::UnknownShape)?;
     let subtype = object.get("subtype").and_then(Value::as_str);
     match (kind, subtype) {
@@ -154,13 +168,13 @@ fn reduce_claude(object: &mut Map<String, Value>) -> Result<(), OversizedLineRef
         ("assistant", _) => {
             for (key, value) in object.iter_mut() {
                 if key != "message" {
-                    shorten(value);
+                    shorten(value, longs);
                     continue;
                 }
                 let Some(message) = value.as_object_mut() else { return Err(Refusal::UnknownShape) };
                 for (key, value) in message.iter_mut() {
                     if key != "content" {
-                        shorten(value);
+                        shorten(value, longs);
                         continue;
                     }
                     let Some(blocks) = value.as_array_mut() else { return Err(Refusal::UnknownShape) };
@@ -170,10 +184,10 @@ fn reduce_claude(object: &mut Map<String, Value>) -> Result<(), OversizedLineRef
                             // Public text is kept exactly; its own bound applies later.
                             Some(fields) if is_text => {
                                 for (key, value) in fields.iter_mut() {
-                                    if key != "text" { shorten(value); }
+                                    if key != "text" { shorten(value, longs); }
                                 }
                             }
-                            _ => shorten(block),
+                            _ => shorten(block, longs),
                         }
                     }
                 }
@@ -182,8 +196,8 @@ fn reduce_claude(object: &mut Map<String, Value>) -> Result<(), OversizedLineRef
         }
         // Tool results (`user`) and frames the session ignores.
         _ => {
-            let created = created_line_count(object);
-            for value in object.values_mut() { shorten(value); }
+            let created = created_line_count(object, longs);
+            for value in object.values_mut() { shorten(value, longs); }
             if let Some(result) = object.get_mut("tool_use_result").and_then(Value::as_object_mut) {
                 match created {
                     // Only the count survives: one empty line each, no content.
@@ -201,15 +215,19 @@ fn reduce_claude(object: &mut Map<String, Value>) -> Result<(), OversizedLineRef
 /// The work history counts the lines of a file written whole from the tool
 /// result's `content`. `Some(None)`: that content is dropped and its count
 /// cannot be kept.
-fn created_line_count(object: &Map<String, Value>) -> Option<Option<u64>> {
+fn created_line_count(object: &Map<String, Value>, longs: &Longs) -> Option<Option<u64>> {
     let extra = object.get("tool_use_result")?.as_object()?;
     if extra.get("type")?.as_str()? != "create" { return None; }
     let content = extra.get("content")?.as_str()?;
-    if content.len() <= KEEP_STRING_BYTES { return None; }
-    Some(Some(content.lines().count() as u64).filter(|lines| *lines <= KEPT_LINE_COUNT_MAX))
+    let lines = match longs.get(content) {
+        Some(long) => long.lines(),
+        None if content.len() <= KEEP_STRING_BYTES => return None,
+        None => content.lines().count() as u64,
+    };
+    Some(Some(lines).filter(|lines| *lines <= KEPT_LINE_COUNT_MAX))
 }
 
-fn reduce_codex(object: &mut Map<String, Value>) -> Result<(), OversizedLineRefusal> {
+fn reduce_codex(object: &mut Map<String, Value>, longs: &Longs) -> Result<(), OversizedLineRefusal> {
     // Requests (approvals) and responses carry an id: never shortened.
     if object.contains_key("id") {
         return Err(Refusal::ProtectedFrame);
@@ -223,17 +241,17 @@ fn reduce_codex(object: &mut Map<String, Value>) -> Result<(), OversizedLineRefu
             let item = params.get_mut("item").and_then(Value::as_object_mut).ok_or(Refusal::UnknownShape)?;
             match item.get("type").and_then(Value::as_str) {
                 Some("commandExecution") => {
-                    if let Some(output) = item.get_mut("aggregatedOutput") { shorten_string(output); }
+                    if let Some(output) = item.get_mut("aggregatedOutput") { shorten_string(output, longs); }
                 }
-                Some("fileChange") => shorten_change_diffs(item),
+                Some("fileChange") => shorten_change_diffs(item, longs),
                 _ => return Err(Refusal::UnknownShape),
             }
         }
-        "turn/diff/updated" => shorten_string(params.get_mut("diff").ok_or(Refusal::UnknownShape)?),
+        "turn/diff/updated" => shorten_string(params.get_mut("diff").ok_or(Refusal::UnknownShape)?, longs),
         // Tool output deltas are never shown; message and plan deltas are
         // public text and stay exact (review I4).
         "item/commandExecution/outputDelta" | "item/fileChange/outputDelta" => {
-            shorten_string(params.get_mut("delta").ok_or(Refusal::UnknownShape)?)
+            shorten_string(params.get_mut("delta").ok_or(Refusal::UnknownShape)?, longs)
         }
         _ => return Err(Refusal::UnknownShape),
     }
@@ -243,14 +261,18 @@ fn reduce_codex(object: &mut Map<String, Value>) -> Result<(), OversizedLineRefu
 /// The work history counts each file change's added and removed lines from
 /// its `diff`. A long diff is replaced by one that counts the same, or, when
 /// that would not fit, removed so the count reads as unknown (review M1).
-fn shorten_change_diffs(item: &mut Map<String, Value>) {
+fn shorten_change_diffs(item: &mut Map<String, Value>, longs: &Longs) {
     let Some(changes) = item.get_mut("changes").and_then(Value::as_array_mut) else { return };
     for change in changes {
         let Some(fields) = change.as_object_mut() else { continue };
         let Some(diff) = fields.get("diff").and_then(Value::as_str) else { continue };
-        if diff.len() <= KEEP_STRING_BYTES { continue; }
+        let long = longs.get(diff);
+        if long.is_none() && diff.len() <= KEEP_STRING_BYTES { continue; }
         let kind = fields.get("kind").and_then(|kind| kind.get("type")).and_then(Value::as_str).unwrap_or("");
-        let (added, removed) = crate::provider::vendor_observation::codex_events::stream::diff_counts(kind, diff);
+        let (added, removed) = match long {
+            Some(long) => long.diff_counts(kind),
+            None => crate::provider::vendor_observation::codex_events::stream::diff_counts(kind, diff),
+        };
         if added + removed <= KEPT_LINE_COUNT_MAX {
             // One hunk of bare `+`/`-` lines counts the same for every change kind.
             let compact = format!("@@\n{}{}", "+\n".repeat(added as usize), "-\n".repeat(removed as usize));
@@ -261,8 +283,12 @@ fn shorten_change_diffs(item: &mut Map<String, Value>) {
     }
 }
 
-fn shorten_string(value: &mut Value) {
+fn shorten_string(value: &mut Value, longs: &Longs) {
     if let Value::String(text) = value {
+        if let Some(long) = longs.get(text) {
+            *text = long.shortened();
+            return;
+        }
         if text.len() > KEEP_STRING_BYTES {
             let mut end = KEPT_PREFIX_BYTES;
             while !text.is_char_boundary(end) { end -= 1; }
@@ -273,14 +299,396 @@ fn shorten_string(value: &mut Value) {
     }
 }
 
-fn shorten(value: &mut Value) {
+fn shorten(value: &mut Value, longs: &Longs) {
     match value {
-        Value::String(_) => shorten_string(value),
-        Value::Array(values) => values.iter_mut().for_each(shorten),
-        Value::Object(fields) => fields.values_mut().for_each(shorten),
+        Value::String(_) => shorten_string(value, longs),
+        Value::Array(values) => values.iter_mut().for_each(|value| shorten(value, longs)),
+        Value::Object(fields) => fields.values_mut().for_each(|value| shorten(value, longs)),
         _ => {}
     }
 }
+
+/// The most a single line may stream through `OversizedLineStream` (ADE
+/// stabilization A). It is read, not held: memory stays at the skeleton.
+pub const PROVIDER_SESSION_LINE_STREAM_MAX_BYTES: usize = 64 * 1024 * 1024;
+/// The most a streamed line's skeleton (its structure and kept strings) may
+/// hold. Past `LEAN_FROM_BYTES` only strings of up to `LEAN_KEEP_BYTES` raw
+/// bytes are kept (keys, ids, names), so even `PROVIDER_SESSION_LINE_MAX_VALUES`
+/// of them fit and a permission request still reaches its refusal (PR #25
+/// review I4): 1 MiB + 64K × (130 + separators) < 10 MiB.
+const SKELETON_MAX_BYTES: usize = 10 * 1024 * 1024;
+const LEAN_FROM_BYTES: usize = 1024 * 1024;
+const LEAN_KEEP_BYTES: usize = 128;
+/// Bytes of a left-out string kept for its shortened text.
+const LONG_PREFIX_BYTES: usize = KEPT_PREFIX_BYTES + 4;
+/// How many left-out strings of one line keep their prefix; later ones are
+/// shortened to their size alone. Bounds the summaries' memory (PR #25 review
+/// M1): such a line cannot fit the observation bound anyway unless they are
+/// dropped (a permission request).
+const LONG_PREFIXES_MAX: usize = 4096;
+/// Starts every placeholder; a per-line random nonce follows.
+const LONG_MARK: char = '\u{F8FF}';
+
+/// What a streamed line kept of each string it left out: enough for every
+/// policy above (its shortened text, a new file's line count, a diff's
+/// counts), never the text itself.
+#[derive(Debug, Default)]
+struct LongString {
+    /// The first decoded bytes (`LONG_PREFIX_BYTES`).
+    prefix: Vec<u8>,
+    /// Decoded length in bytes.
+    len: usize,
+    newlines: u64,
+    last: u8,
+    /// The head of the current line (up to five bytes), for diff counts.
+    head: [u8; 5],
+    head_len: u8,
+    /// Whether this string keeps a prefix (only the first
+    /// `LONG_PREFIXES_MAX` of a line do, which bounds their memory).
+    keeps_prefix: bool,
+    /// Whether the text starts like a unified diff (decided on its head).
+    unified: Option<bool>,
+    in_hunk: bool,
+    added: u64,
+    removed: u64,
+}
+
+impl LongString {
+    fn push(&mut self, byte: u8) {
+        if self.keeps_prefix && self.prefix.len() < LONG_PREFIX_BYTES { self.prefix.push(byte); }
+        self.len += 1;
+        self.last = byte;
+        if byte == b'\n' {
+            self.newlines += 1;
+            self.end_line();
+        } else if self.head_len < 5 {
+            self.head[usize::from(self.head_len)] = byte;
+            self.head_len += 1;
+            if self.unified.is_none() && self.head_len == 5 { self.decide_unified(); }
+        }
+    }
+
+    fn head(&self) -> &[u8] {
+        &self.head[..usize::from(self.head_len)]
+    }
+
+    fn decide_unified(&mut self) {
+        if self.unified.is_some() { return; }
+        let head = self.head();
+        let unified = head.starts_with(b"@@") || head.starts_with(b"---") || head.starts_with(b"diff ");
+        self.unified = Some(unified);
+        self.in_hunk = !unified;
+    }
+
+    /// One line of `diff_counts`, judged on its head.
+    fn end_line(&mut self) {
+        self.decide_unified();
+        let head = self.head[..usize::from(self.head_len)].to_vec();
+        self.head_len = 0;
+        if head.starts_with(b"diff ") { self.in_hunk = false; }
+        else if head.starts_with(b"@@") { self.in_hunk = true; }
+        else if self.in_hunk {
+            if head.first() == Some(&b'+') { self.added += 1; } else if head.first() == Some(&b'-') { self.removed += 1; }
+        }
+    }
+
+    /// The end of the text closes its last line, as `str::lines` does.
+    fn finish(&mut self) {
+        if self.len > 0 && self.last != b'\n' { self.end_line(); } else { self.decide_unified(); }
+    }
+
+    /// `str::lines().count()`.
+    fn lines(&self) -> u64 {
+        self.newlines + u64::from(self.len > 0 && self.last != b'\n')
+    }
+
+    /// `codex_events::stream::diff_counts`.
+    fn diff_counts(&self, kind: &str) -> (u64, u64) {
+        match kind {
+            "add" if self.unified != Some(true) => (self.lines(), 0),
+            "delete" if self.unified != Some(true) => (0, self.lines()),
+            _ => (self.added, self.removed),
+        }
+    }
+
+    /// What `shorten_string` makes of the whole text.
+    fn shortened(&self) -> String {
+        let mut end = KEPT_PREFIX_BYTES.min(self.prefix.len());
+        let text = String::from_utf8_lossy(&self.prefix[..]).into_owned();
+        while end > 0 && !text.is_char_boundary(end) { end -= 1; }
+        format!("{}…[{} bytes omitted]", &text[..end], self.len - end)
+    }
+}
+
+/// The strings a streamed line left out, by placeholder.
+struct Longs {
+    mark: String,
+    strings: Vec<LongString>,
+}
+
+impl Longs {
+    fn none() -> Self {
+        Self { mark: String::new(), strings: Vec::new() }
+    }
+
+    fn get(&self, text: &str) -> Option<&LongString> {
+        if self.mark.is_empty() { return None; }
+        let index: usize = text.strip_prefix(self.mark.as_str())?.parse().ok()?;
+        self.strings.get(index)
+    }
+
+    /// Whether any placeholder is still in `value` (somewhere nothing may be
+    /// shortened).
+    fn remains_in(&self, value: &Value) -> bool {
+        if self.mark.is_empty() { return false; }
+        match value {
+            Value::String(text) => text.contains(self.mark.as_str()),
+            Value::Array(values) => values.iter().any(|value| self.remains_in(value)),
+            Value::Object(fields) => fields.iter().any(|(key, value)| key.contains(self.mark.as_str()) || self.remains_in(value)),
+            _ => false,
+        }
+    }
+
+    /// Replaces every placeholder with an empty string.
+    fn drop_all(&self, value: &mut Value) {
+        match value {
+            Value::String(text) if self.get(text).is_some() => text.clear(),
+            Value::Array(values) => values.iter_mut().for_each(|value| self.drop_all(value)),
+            Value::Object(fields) => fields.values_mut().for_each(|value| self.drop_all(value)),
+            _ => {}
+        }
+    }
+}
+
+/// A string being read.
+struct StringScan {
+    /// Raw bytes (with the opening quote) while the decoded text is short.
+    raw: Vec<u8>,
+    stats: LongString,
+    /// An escape in progress: `\` seen, then up to four hex digits of `\u`.
+    escape: Option<Vec<u8>>,
+    /// A high surrogate waiting for its low half.
+    high: Option<u16>,
+    /// The incomplete end of a UTF-8 character in raw text.
+    utf8: Vec<u8>,
+}
+
+/// A session line over `PROVIDER_SESSION_LINE_RAW_MAX_BYTES` (ADE stabilization
+/// A; before, such a line ended the session). The transport feeds it in
+/// pieces as it arrives and never holds it: this keeps the line's structure
+/// and every string of up to `KEEP_STRING_BYTES` exactly, and of each longer
+/// string only what the policies use. Then the same policy as for a line read
+/// whole decides, and a left-out string anywhere the policy keeps text exactly
+/// refuses the line.
+///
+/// A Claude permission request this large cannot be approved: what a person
+/// approves and the reply echoes must be the original (PR #17 review B1), and
+/// inputs over `LARGE_TOOL_INPUT_MAX_BYTES` (4 MiB) are already refused with
+/// guidance. Such a request is handed on with its input withheld; it can only
+/// be declined, and the session carries on. Codex requests and responses (and
+/// Claude's other protected frames) still fail, as before.
+pub struct OversizedLineStream {
+    policy: OversizedLinePolicy,
+    skeleton: Vec<u8>,
+    raw: usize,
+    values: usize,
+    string: Option<StringScan>,
+    longs: Longs,
+    failed: Option<OversizedLineRefusal>,
+}
+
+impl OversizedLineStream {
+    pub fn new(policy: OversizedLinePolicy) -> Self {
+        use std::hash::{BuildHasher, Hasher};
+        // Process-random keys (OS randomness): provider text cannot name a
+        // placeholder it has not seen.
+        let nonce = [0u8, 1].map(|salt| {
+            let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+            hasher.write_u8(salt);
+            hasher.finish()
+        });
+        Self {
+            policy,
+            skeleton: Vec::new(),
+            raw: 0,
+            values: 1,
+            string: None,
+            longs: Longs { mark: format!("{LONG_MARK}{:016x}{:016x}:", nonce[0], nonce[1]), strings: Vec::new() },
+            failed: None,
+        }
+    }
+
+    /// Bytes read so far.
+    pub fn len(&self) -> usize {
+        self.raw
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.raw == 0
+    }
+
+    /// More of the line, without its newline. A refusal is remembered.
+    pub fn feed(&mut self, bytes: &[u8]) -> Result<(), OversizedLineRefusal> {
+        if let Some(refusal) = self.failed { return Err(refusal); }
+        let result = self.feed_inner(bytes);
+        if let Err(refusal) = result { self.failed = Some(refusal); }
+        result
+    }
+
+    fn feed_inner(&mut self, bytes: &[u8]) -> Result<(), OversizedLineRefusal> {
+        self.raw = self.raw.checked_add(bytes.len()).ok_or(Refusal::OverStreamBound)?;
+        if self.raw > PROVIDER_SESSION_LINE_STREAM_MAX_BYTES { return Err(Refusal::OverStreamBound); }
+        let mut start = 0;
+        while start < bytes.len() {
+            if self.string.is_some() {
+                start += self.feed_string(&bytes[start..])?;
+                continue;
+            }
+            // Outside strings: structure, numbers, literals, copied as they are.
+            let rest = &bytes[start..];
+            let end = rest.iter().position(|byte| *byte == b'"').unwrap_or(rest.len());
+            for byte in &rest[..end] {
+                match byte {
+                    b'{' | b'[' | b',' | b':' => self.values += 1,
+                    b'\n' => return Err(Refusal::NotJson),
+                    _ => {}
+                }
+            }
+            if self.values > PROVIDER_SESSION_LINE_MAX_VALUES { return Err(Refusal::TooManyValues); }
+            // Bounded before it grows (PR #25 review M1).
+            if self.skeleton.len() + end > SKELETON_MAX_BYTES { return Err(Refusal::StillOverBound); }
+            self.skeleton.extend_from_slice(&rest[..end]);
+            if end < rest.len() {
+                let stats = LongString { keeps_prefix: self.longs.strings.len() < LONG_PREFIXES_MAX, ..LongString::default() };
+                self.string = Some(StringScan { raw: vec![b'"'], stats, escape: None, high: None, utf8: Vec::new() });
+                start += end + 1;
+            } else {
+                start = bytes.len();
+            }
+            if self.skeleton.len() > SKELETON_MAX_BYTES { return Err(Refusal::StillOverBound); }
+        }
+        Ok(())
+    }
+
+    /// Reads string bytes; returns how many were used (up to and including
+    /// the closing quote).
+    fn feed_string(&mut self, bytes: &[u8]) -> Result<usize, OversizedLineRefusal> {
+        let scan = self.string.as_mut().expect("string in progress");
+        let mut used = 0;
+        for &byte in bytes {
+            used += 1;
+            if scan.raw.len() <= RAW_KEEP_MAX && scan.stats.len <= KEEP_STRING_BYTES { scan.raw.push(byte); }
+            if let Some(escape) = scan.escape.as_mut() {
+                if escape.is_empty() && byte != b'u' {
+                    let decoded = match byte {
+                        b'"' => b'"', b'\\' => b'\\', b'/' => b'/', b'b' => 0x08, b'f' => 0x0c,
+                        b'n' => b'\n', b'r' => b'\r', b't' => b'\t',
+                        _ => return Err(Refusal::NotJson),
+                    };
+                    if scan.high.is_some() { return Err(Refusal::NotJson); }
+                    scan.escape = None;
+                    scan.stats.push(decoded);
+                    continue;
+                }
+                escape.push(byte);
+                if escape.len() < 5 { continue; }
+                let hex = std::str::from_utf8(&escape[1..]).map_err(|_| Refusal::NotJson)?;
+                let unit = u16::from_str_radix(hex, 16).map_err(|_| Refusal::NotJson)?;
+                scan.escape = None;
+                let character = match (scan.high.take(), unit) {
+                    (None, 0xD800..=0xDBFF) => { scan.high = Some(unit); continue; }
+                    (None, 0xDC00..=0xDFFF) => return Err(Refusal::NotJson),
+                    (None, unit) => char::from_u32(u32::from(unit)),
+                    (Some(high), 0xDC00..=0xDFFF) => char::from_u32(0x10000 + ((u32::from(high) - 0xD800) << 10) + (u32::from(unit) - 0xDC00)),
+                    (Some(_), _) => return Err(Refusal::NotJson),
+                }.ok_or(Refusal::NotJson)?;
+                let mut buffer = [0u8; 4];
+                for byte in character.encode_utf8(&mut buffer).bytes() { scan.stats.push(byte); }
+                continue;
+            }
+            if scan.high.is_some() && byte != b'\\' { return Err(Refusal::NotJson); }
+            match byte {
+                b'\\' => {
+                    if !scan.utf8.is_empty() { return Err(Refusal::NotJson); }
+                    scan.escape = Some(Vec::new());
+                }
+                b'"' => {
+                    if !scan.utf8.is_empty() || scan.high.is_some() { return Err(Refusal::NotJson); }
+                    let mut scan = self.string.take().expect("string in progress");
+                    let lean = self.skeleton.len() > LEAN_FROM_BYTES;
+                    let kept = if lean { scan.raw.len() <= LEAN_KEEP_BYTES + 2 && scan.stats.len <= LEAN_KEEP_BYTES } else { scan.stats.len <= KEEP_STRING_BYTES };
+                    let piece = if kept {
+                        // Kept whole, exactly as written; parsed later with the rest.
+                        std::mem::take(&mut scan.raw)
+                    } else {
+                        scan.stats.finish();
+                        let placeholder = format!("\"{}{}\"", self.longs.mark, self.longs.strings.len());
+                        self.longs.strings.push(scan.stats);
+                        placeholder.into_bytes()
+                    };
+                    if self.skeleton.len() + piece.len() > SKELETON_MAX_BYTES { return Err(Refusal::StillOverBound); }
+                    self.skeleton.extend_from_slice(&piece);
+                    return Ok(used);
+                }
+                0x00..=0x1f => return Err(Refusal::NotJson),
+                _ => {
+                    // Raw text must be UTF-8; a character may span two feeds.
+                    scan.utf8.push(byte);
+                    match std::str::from_utf8(&scan.utf8) {
+                        Ok(_) => {
+                            for byte in std::mem::take(&mut scan.utf8) { scan.stats.push(byte); }
+                        }
+                        Err(error) if error.error_len().is_none() && scan.utf8.len() < 4 => {}
+                        Err(_) => return Err(Refusal::NotJson),
+                    }
+                }
+            }
+        }
+        Ok(used)
+    }
+
+    /// The whole line has been fed: the bounded observation the parsers see.
+    pub fn finish(mut self) -> Result<BoundedObservation, OversizedLineRefusal> {
+        if let Some(refusal) = self.failed { return Err(refusal); }
+        if self.string.is_some() { return Err(Refusal::NotJson); }
+        let mut root = unique_json::parse(&self.skeleton).map_err(|_| Refusal::NotJson)?;
+        self.skeleton = Vec::new();
+        if self.policy == OversizedLinePolicy::ClaudeStreamJson && is_claude_permission_request(&root) {
+            // Never approvable at this size: hand on only what a refusal
+            // needs (its id, kind, tool name and use id, and for a hook our
+            // callback and the event name), marked withheld, so it can only be
+            // declined. Nothing of the tool input is kept (PR #25 review I4).
+            let pick = |value: &Value, keys: &[&str]| -> Value {
+                let mut kept = Map::new();
+                if let Some(object) = value.as_object() {
+                    for key in keys {
+                        if let Some(field) = object.get(*key) { kept.insert((*key).to_owned(), field.clone()); }
+                    }
+                }
+                Value::Object(kept)
+            };
+            let request = root.get("request").cloned().unwrap_or(Value::Null);
+            let mut kept_request = pick(&request, &["subtype", "tool_name", "tool_use_id", "callback_id", "agent_id"]);
+            kept_request.as_object_mut().ok_or(Refusal::UnknownShape)?.insert("input".into(),
+                pick(request.get("input").unwrap_or(&Value::Null), &["hook_event_name", "tool_name", "tool_use_id", "agent_id"]));
+            root = Value::Object(Map::from_iter([
+                ("type".to_owned(), root["type"].clone()),
+                ("request_id".to_owned(), root.get("request_id").cloned().unwrap_or(Value::Null)),
+                ("request".to_owned(), kept_request),
+            ]));
+            self.longs.drop_all(&mut root);
+            if self.longs.remains_in(&root) { return Err(Refusal::LongStringKept); }
+            let mut bytes = serde_json::to_vec(&root).map_err(|_| Refusal::NotJson)?;
+            bytes.push(b'\n');
+            return BoundedObservation::new_session_control_withheld(bytes).map_err(|_| Refusal::StillOverBound);
+        }
+        reduce_root(root, self.policy, &self.longs)
+    }
+}
+
+/// Raw bytes of a string kept while it may still be short: a decoded byte
+/// takes at most six raw ones (`\uXXXX`).
+const RAW_KEEP_MAX: usize = 6 * KEEP_STRING_BYTES + 6;
 
 #[cfg(test)]
 mod tests {
@@ -649,5 +1057,144 @@ mod tests {
             }
         }
         assert!(!session.is_closed());
+    }
+
+    /// Feeds a frame to the stream in uneven pieces (some split inside
+    /// escapes and multi-byte characters).
+    fn streamed(frame: &[u8], policy: OversizedLinePolicy) -> Result<BoundedObservation, OversizedLineRefusal> {
+        let body = frame.strip_suffix(b"\n").unwrap_or(frame);
+        let mut stream = OversizedLineStream::new(policy);
+        let mut at = 0;
+        let mut step = 1;
+        while at < body.len() {
+            let end = (at + step).min(body.len());
+            stream.feed(&body[at..end])?;
+            at = end;
+            step = (step * 7 + 3) % 70_001 + 1;
+        }
+        stream.finish()
+    }
+
+    /// ADE stabilization A: a streamed line becomes exactly what the same
+    /// line read whole becomes, for every shortening rule (a long string's
+    /// shortened text, a new file's line count, each kind of diff count,
+    /// escapes and characters split between pieces), and a frame either path
+    /// refuses the other refuses too.
+    #[test]
+    fn a_streamed_line_reduces_to_the_same_bytes_as_a_line_read_whole() {
+        let escaped = format!("한글 \"quote\" \\ tab\t {}\n{}", "😀".repeat(3000), "line\r\n".repeat(2000));
+        let created = json!({"type":"user","uuid":"u2","session_id":"s","parent_tool_use_id":null,
+            "message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_3","content":"done"}]},
+            "tool_use_result":{"type":"create","filePath":"big.txt","content":"line of the new file\n".repeat(10_000)}});
+        let no_trailing = json!({"type":"user","uuid":"u4","tool_use_result":{"type":"create","filePath":"b.txt","content":format!("{}last", "x\n".repeat(5000))}});
+        let unicode = json!({"type":"user","uuid":"u5","message":{"content":[{"type":"tool_result","tool_use_id":"t","content":escaped}]}});
+        let patch = format!("@@ -1,2 +1,3 @@\n{}{} context\n", "+added line\n".repeat(9000), "-removed line\n".repeat(4000));
+        let headed = format!("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n{}", "+new\n-old\n".repeat(3000));
+        let change = json!({"method":"item/completed","params":{"threadId":"t","turnId":"r",
+            "item":{"id":"c","type":"fileChange","status":"completed","changes":[
+                {"path":"src/big.ts","kind":{"type":"update"},"diff":patch},
+                {"path":"src/headed.ts","kind":{"type":"update"},"diff":headed},
+                {"path":"src/new.ts","kind":{"type":"add"},"diff":"new line\n".repeat(12_000)},
+                {"path":"src/gone.ts","kind":{"type":"delete"},"diff":"old line\n".repeat(6_000)},
+                {"path":"src/small.ts","kind":{"type":"update"},"diff":"@@\n+a\n"}]}}});
+        let command = json!({"method":"item/completed","params":{"threadId":"t","turnId":"r",
+            "item":{"id":"i","type":"commandExecution","command":"cat big.log","aggregatedOutput":"B".repeat(300_000),"status":"completed"}}});
+        let delta = json!({"method":"item/commandExecution/outputDelta","params":{"threadId":"t","turnId":"r","itemId":"i","delta":"é".repeat(90_000)}});
+        let assistant = json!({"type":"assistant","uuid":"a1","session_id":"s","parent_tool_use_id":null,
+            "message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"short public text"},
+                {"type":"tool_use","id":"toolu_2","name":"Write","input":{"file_path":"big.txt","content":"x".repeat(200_000)}}]}});
+        for (frame, policy) in [
+            (image_result(148 * 1024), OversizedLinePolicy::ClaudeStreamJson),
+            (created, OversizedLinePolicy::ClaudeStreamJson),
+            (no_trailing, OversizedLinePolicy::ClaudeStreamJson),
+            (unicode, OversizedLinePolicy::ClaudeStreamJson),
+            (assistant, OversizedLinePolicy::ClaudeStreamJson),
+            (change, OversizedLinePolicy::CodexAppServer),
+            (command, OversizedLinePolicy::CodexAppServer),
+            (delta, OversizedLinePolicy::CodexAppServer),
+        ] {
+            let raw = line(&frame);
+            let whole = reduce_oversized_line(&raw, policy).unwrap();
+            let streamed = streamed(&raw, policy).unwrap();
+            assert_eq!(streamed.bytes, whole.bytes, "{}", String::from_utf8_lossy(&whole.bytes));
+            assert!(!streamed.withheld());
+        }
+        // Refused alike: public text over the keep size, protected frames.
+        for (frame, policy) in [
+            (json!({"type":"assistant","uuid":"a","message":{"content":[{"type":"text","text":"y".repeat(200_000)}]}}), OversizedLinePolicy::ClaudeStreamJson),
+            (json!({"type":"result","subtype":"success","result":"r".repeat(200_000)}), OversizedLinePolicy::ClaudeStreamJson),
+            (json!({"type":"control_response","response":{"pad":"p".repeat(200_000)}}), OversizedLinePolicy::ClaudeStreamJson),
+            (json!({"id":3,"method":"item/commandExecution/requestApproval","params":{"pad":"p".repeat(200_000)}}), OversizedLinePolicy::CodexAppServer),
+            (json!({"method":"item/started","params":{"item":{"type":"commandExecution","command":"c".repeat(200_000)}}}), OversizedLinePolicy::CodexAppServer),
+        ] {
+            let raw = line(&frame);
+            assert!(reduce_oversized_line(&raw, policy).is_err());
+            assert!(streamed(&raw, policy).is_err(), "{}", &frame.to_string()[..60]);
+        }
+    }
+
+    /// A line far past the session bound streams through in pieces and keeps
+    /// the session going; memory stays at its skeleton.
+    #[test]
+    fn a_line_past_the_session_bound_streams_through_with_a_bounded_skeleton() {
+        let size = 20 * 1024 * 1024;
+        let head = br#"{"type":"user","uuid":"big","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_9","content":[{"type":"image","source":{"type":"base64","data":""#;
+        let tail = br#""}}]}]}}"#;
+        let mut stream = OversizedLineStream::new(OversizedLinePolicy::ClaudeStreamJson);
+        stream.feed(head).unwrap();
+        let piece = vec![b'A'; 1024 * 1024];
+        for _ in 0..size / piece.len() { stream.feed(&piece).unwrap(); }
+        stream.feed(tail).unwrap();
+        assert!(stream.len() > PROVIDER_SESSION_LINE_RAW_MAX_BYTES);
+        assert!(stream.skeleton.len() < 4096, "the skeleton holds structure only: {}", stream.skeleton.len());
+        let observed = stream.finish().unwrap();
+        let value = observed.json().unwrap();
+        let data = value["message"]["content"][0]["content"][0]["source"]["data"].as_str().unwrap();
+        assert_eq!(data, format!("{}…[{} bytes omitted]", "A".repeat(KEPT_PREFIX_BYTES), size - KEPT_PREFIX_BYTES));
+        assert_eq!(value["message"]["content"][0]["tool_use_id"], "toolu_9");
+        // Past the streamed bound, or with too many small strings to hold.
+        let mut runaway = OversizedLineStream::new(OversizedLinePolicy::ClaudeStreamJson);
+        runaway.feed(head).unwrap();
+        let mut refused = None;
+        for _ in 0..=PROVIDER_SESSION_LINE_STREAM_MAX_BYTES / piece.len() { if let Err(refusal) = runaway.feed(&piece) { refused = Some(refusal); break; } }
+        assert_eq!(refused, Some(OversizedLineRefusal::OverStreamBound));
+        assert!(runaway.feed(b"x").is_err() && runaway.finish().is_err(), "a refusal is final");
+        // Many kept-size strings (PR #25 review I4): past 1 MiB the skeleton
+        // keeps only short ones, so it stays bounded while reading; such a
+        // frame then does not fit the observation bound and is refused at
+        // the end, not halfway.
+        let mut many = OversizedLineStream::new(OversizedLinePolicy::ClaudeStreamJson);
+        many.feed(br#"{"type":"user","items":["#).unwrap();
+        let small = format!("\"{}\",", "s".repeat(4000));
+        for _ in 0..4000 { many.feed(small.as_bytes()).unwrap(); }
+        many.feed(br#""end"]}"#).unwrap();
+        assert!(many.len() > PROVIDER_SESSION_LINE_RAW_MAX_BYTES && many.skeleton.len() < 2 * LEAN_FROM_BYTES, "{}", many.skeleton.len());
+        assert_eq!(many.finish().unwrap_err(), OversizedLineRefusal::StillOverBound);
+    }
+
+    /// Malformed text inside a left-out string is refused like any malformed
+    /// line, even split between pieces.
+    #[test]
+    fn a_streamed_line_with_bad_json_inside_a_long_string_is_refused() {
+        let long = "z".repeat(10_000);
+        for bad in [
+            format!(r#"{{"type":"user","pad":"{long}\q"}}"#),
+            format!(r#"{{"type":"user","pad":"{long}\ud800x"}}"#),
+            format!(r#"{{"type":"user","pad":"{long}\udc00"}}"#),
+            format!("{{\"type\":\"user\",\"pad\":\"{long}\u{1}\"}}"),
+            format!(r#"{{"type":"user","pad":"{long}"#),
+            format!(r#"{{"type":"user","type":"user","pad":"{long}"}}"#),
+        ] {
+            assert!(streamed(bad.as_bytes(), OversizedLinePolicy::ClaudeStreamJson).is_err(), "{}", &bad[bad.len() - 12..]);
+        }
+        let mut invalid_utf8 = format!(r#"{{"type":"user","pad":"{long}"#).into_bytes();
+        invalid_utf8.extend_from_slice(&[0xE2, 0x28, 0xA1]);
+        invalid_utf8.extend_from_slice(b"\"}");
+        assert!(streamed(&invalid_utf8, OversizedLinePolicy::ClaudeStreamJson).is_err());
+        // A placeholder named in provider text is just text: a guess cannot
+        // stand in for a left-out string.
+        let forged = json!({"type":"user","pad":"x".repeat(10_000),"note":format!("{LONG_MARK}0000000000000000000000000000000:0")});
+        let observed = streamed(&line(&forged), OversizedLinePolicy::ClaudeStreamJson).unwrap();
+        assert!(observed.json().unwrap()["note"].as_str().unwrap().starts_with(LONG_MARK));
     }
 }

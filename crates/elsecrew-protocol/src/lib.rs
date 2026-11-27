@@ -82,6 +82,7 @@ pub const METHODS_V1: &[&str] = &[
     "preview.buildPlan",
     "preview.buildReserve",
     "preview.buildRelease",
+    "preview.buildHolds",
 ];
 
 pub const EVENTS_V1: &[&str] = &[

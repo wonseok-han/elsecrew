@@ -125,6 +125,43 @@ impl LatencyLog {
     }
 }
 
+/// Named steps deep inside slow work (a run's start, say) that the loop's own
+/// phases cannot see. Recorded only while the timing log is on; the loop
+/// drains them into the log (`drain_steps`). Fixed names and numbers only.
+static STEPS: std::sync::OnceLock<Option<std::sync::Mutex<Vec<(&'static str, Duration)>>>> = std::sync::OnceLock::new();
+
+fn steps() -> Option<&'static std::sync::Mutex<Vec<(&'static str, Duration)>>> {
+    STEPS.get_or_init(|| std::env::var_os(ENV).map(|_| std::sync::Mutex::new(Vec::new()))).as_ref()
+}
+
+/// Runs `action`, noting it as step `name` when the timing log is on.
+pub(crate) fn step<T>(name: &'static str, action: impl FnOnce() -> T) -> T {
+    let Some(list) = steps() else { return action() };
+    let started = Instant::now();
+    let result = action();
+    if let Ok(mut list) = list.lock() {
+        if list.len() < QUEUE { list.push((name, started.elapsed())); }
+    }
+    result
+}
+
+/// Notes a measured duration (an age, say) as step `name`.
+pub(crate) fn note(name: &'static str, elapsed: Duration) {
+    let Some(list) = steps() else { return };
+    if let Ok(mut list) = list.lock() {
+        if list.len() < QUEUE { list.push((name, elapsed)); }
+    }
+}
+
+impl LatencyLog {
+    /// Moves the noted steps into the log as phases (a step's own floor applies).
+    pub(crate) fn drain_steps(&mut self) {
+        let Some(list) = steps() else { return };
+        let taken = list.lock().map(|mut list| std::mem::take(&mut *list)).unwrap_or_default();
+        for (name, elapsed) in taken { self.phase(name, elapsed); }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

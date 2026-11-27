@@ -69,6 +69,7 @@ export const METHODS_V1 = [
   "preview.buildPlan",
   "preview.buildReserve",
   "preview.buildRelease",
+  "preview.buildHolds",
 ] as const;
 
 export const EVENTS_V1 = [

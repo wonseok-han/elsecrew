@@ -3,6 +3,8 @@
 //! 실제 유료 agent 실행과 원본 적용은 후속 게이트에서 추가한다.
 
 mod agent_runtime;
+#[cfg(target_os = "macos")]
+mod agent_start;
 mod background_check;
 mod orchestration;
 mod orchestration_dispatch;
@@ -23,6 +25,7 @@ mod provider_claude_profile;
 #[cfg(unix)]
 #[allow(dead_code)] // Pin validation is not vendor activation or signature admission.
 mod provider_executable;
+mod preview_build_holds;
 #[cfg(target_os = "macos")]
 #[allow(dead_code)] // Internal gate; executable admission and vendor environment remain separate.
 mod provider_login_gate;
@@ -468,11 +471,18 @@ fn serve_stdio_sealed<R: Read + Send + 'static, W: Write>(
     });
     let runtime_poll_interval = Duration::from_millis(100);
     let mut last_runtime_poll = Instant::now();
+    // A message taken while answering waiting requests together (below).
+    let mut stashed: Option<InputMessage> = None;
+    let mut burst_started: Option<Instant> = None;
     loop {
         // Requests and polling work consume the same interval. Starting a fresh
         // 100ms wait after either would add idle latency to every output batch.
         let wait = runtime_poll_interval.saturating_sub(last_runtime_poll.elapsed());
-        let (line, received) = match receiver.recv_timeout(wait) {
+        let next = match stashed.take() {
+            Some(message) => Ok(message),
+            None => receiver.recv_timeout(wait),
+        };
+        let (line, received) = match next {
             Ok(InputMessage::Line(line, received)) => {
                 queued_bytes.fetch_sub(line.len(), std::sync::atomic::Ordering::AcqRel);
                 (line, received)
@@ -502,6 +512,7 @@ fn serve_stdio_sealed<R: Read + Send + 'static, W: Write>(
             }
             Ok(InputMessage::Error(error)) => return Err(error),
             Err(RecvTimeoutError::Timeout) => {
+                burst_started = None;
                 last_runtime_poll = Instant::now();
                 sidecar.poll_admission();
                 let mut events = latency.measure("watch", || timings.measure("watch", || sidecar.poll_watch_events()));
@@ -510,6 +521,7 @@ fn serve_stdio_sealed<R: Read + Send + 'static, W: Write>(
                 events.extend(runtime_events);
                 write_events(&mut session, &mut output, events)?;
                 latency.measure("maintenance", || timings.measure("maintenance", || sidecar.maintenance_tick()))?;
+                latency.drain_steps();
                 continue;
             }
             Err(RecvTimeoutError::Disconnected) => {
@@ -541,6 +553,22 @@ fn serve_stdio_sealed<R: Read + Send + 'static, W: Write>(
         if sidecar.safe_to_quit() { timings.emit(); }
         write_responses(&mut session, &mut output, handled.response)?;
         write_events(&mut session, &mut output, handled.events)?;
+        // Requests already waiting are answered together, within a short
+        // budget, before the next runtime poll (ADE stabilization A). With
+        // several runs at work a poll costs hundreds of milliseconds (it
+        // records their output); one poll after every request let a steady
+        // stream of light reads queue without bound.
+        let burst = *burst_started.get_or_insert(started);
+        if !sidecar.safe_to_quit() && burst.elapsed() < REQUEST_BURST {
+            match receiver.try_recv() {
+                Ok(message) => {
+                    stashed = Some(message);
+                    continue;
+                }
+                Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected) => {}
+            }
+        }
+        burst_started = None;
         // A busy renderer must not starve agent/watch progression by keeping
         // recv_timeout from expiring. Preserve response-before-event ordering.
         if !sidecar.safe_to_quit() && last_runtime_poll.elapsed() >= runtime_poll_interval {
@@ -552,6 +580,7 @@ fn serve_stdio_sealed<R: Read + Send + 'static, W: Write>(
             write_events(&mut session, &mut output, events)?;
         }
         latency.measure("maintenance", || timings.measure("maintenance", || sidecar.maintenance_tick()))?;
+        latency.drain_steps();
     }
 }
 
@@ -573,6 +602,9 @@ fn write_responses<W: Write>(
 /// count only caps the channel. A loop blocked for several minutes can still
 /// reach the count and stop an in-flight source copy.
 const INPUT_QUEUE_MESSAGES: usize = 1024;
+/// How long waiting requests may be answered together before the loop polls
+/// runs and watches again.
+const REQUEST_BURST: Duration = Duration::from_millis(250);
 const INPUT_QUEUE_BYTES: usize = 8 * 1024 * 1024;
 
 enum InputMessage {
@@ -669,6 +701,8 @@ struct Sidecar {
     deferred_runtime_error: Option<SidecarError>,
     pending_agent_capabilities: BTreeMap<String, RequestV1>,
     pending_agent_starts: BTreeMap<String, PendingAgentStart>,
+    /// Counts starts as they arrive (`PendingAgentStart::arrival`).
+    start_arrivals: u64,
     maintenance_scheduler: storage_lifetime::scheduler::CooperativeScheduler,
     maintenance_poisoned: bool,
     /// The full storage check run on a copy while the app rests.
@@ -678,7 +712,9 @@ struct Sidecar {
     /// re-review): while one is held, that task (and any whose write scope
     /// meets it) cannot start a team run, save, merge or discard; a build
     /// cannot be reserved while such work goes on (work_scope.rs).
-    preview_build_holds: std::collections::BTreeMap<String, String>,
+    preview_build_holds: preview_build_holds::Holds,
+    /// Where those holds are kept across an engine restart (preview_build_holds.rs).
+    build_hold_file: preview_build_holds::HoldFile,
     workflow_requests: BTreeMap<String, (String, String)>,
     workflow_outbound: Vec<EventV1>,
     workflow_roots: BTreeMap<String, String>,
@@ -708,8 +744,15 @@ struct PendingAgentStart {
     #[cfg(target_os = "macos")]
     process: Option<provider_login_process::LoginProcess<'static>>,
     result: Option<Result<chat::G5Action, SidecarError>>,
-    /// How many times this start discovered again because its discovery
-    /// waited too long for the engine (ADE multi-project P5).
+    /// Where this start is (agent_start.rs).
+    #[cfg(target_os = "macos")]
+    stage: agent_start::StartStage,
+    /// Arrival order: the oldest start takes the loop's step first.
+    #[cfg(target_os = "macos")]
+    arrival: u64,
+    /// How many times this start checked the provider again because its
+    /// check got too old while it waited (agent_start.rs `ready_check`).
+    #[cfg(target_os = "macos")]
     rediscoveries: u8,
 }
 
@@ -1127,6 +1170,11 @@ impl Sidecar {
         admission_not_cancelled(cancellation)?;
         storage.register_app_instance(&ready)?;
         admission_not_cancelled(cancellation)?;
+        // Build holds this same app left with an earlier engine, restored
+        // before any request is answered (ADE stabilization A).
+        let build_hold_file = preview_build_holds::HoldFile::in_directory(
+            database_path.parent().unwrap_or_else(|| Path::new(".")),
+        );
         let mut sidecar = Self {
             storage,
             #[cfg(target_os = "macos")]
@@ -1145,8 +1193,10 @@ impl Sidecar {
             deferred_runtime_error: None,
             pending_agent_capabilities: BTreeMap::new(),
             pending_agent_starts: BTreeMap::new(),
+            start_arrivals: 0,
             workflow_chats: Default::default(),
-            preview_build_holds: Default::default(),
+            preview_build_holds: build_hold_file.restore(),
+            build_hold_file,
             workflow_requests: Default::default(),
             workflow_outbound: Vec::new(),
             workflow_roots: Default::default(),
@@ -1991,16 +2041,27 @@ impl Sidecar {
             // The build's write hold (work_scope.rs): reserved before a job
             // starts, released once its processes are proven ended.
             "preview.buildReserve" => {
-                let params = require_exact_params(&request.params, &["projectId", "chatId"]).map_err(invalid_params)?;
+                let params = require_exact_params(&request.params, &["projectId", "chatId", "holdId"]).map_err(invalid_params)?;
                 let project_id = param_string(params, "projectId").map_err(invalid_params)?.to_owned();
                 let chat_id = param_string(params, "chatId").map_err(invalid_params)?.to_owned();
-                self.preview_build_reserve(&project_id, &chat_id)
+                let hold_id = param_string(params, "holdId").map_err(invalid_params)?.to_owned();
+                self.preview_build_reserve(&project_id, &chat_id, &hold_id)
             }
             "preview.buildRelease" => {
                 let params = require_exact_params(&request.params, &["holdId"]).map_err(invalid_params)?;
                 let hold = param_string(params, "holdId").map_err(invalid_params)?.to_owned();
-                let released = self.preview_build_holds.remove(&hold).is_some();
-                Ok(project::ProjectAction { result: serde_json::json!({"holdId": hold, "released": released}), ..project::ProjectAction::default() })
+                self.preview_build_release(&hold)
+            }
+            "preview.buildHolds" => {
+                let params = require_exact_params(&request.params, &["holds", "leftoversSettled"]).map_err(invalid_params)?;
+                let settled = params.get("leftoversSettled").and_then(Value::as_bool)
+                    .ok_or_else(|| invalid_params("leftoversSettled must be a boolean".into()))?;
+                let mut holds = std::collections::BTreeMap::new();
+                for entry in params.get("holds").and_then(Value::as_array).ok_or_else(|| invalid_params("holds must be a list".into()))? {
+                    let entry = require_exact_params(entry, &["holdId", "chatId"]).map_err(invalid_params)?;
+                    holds.insert(param_string(entry, "holdId").map_err(invalid_params)?.to_owned(), param_string(entry, "chatId").map_err(invalid_params)?.to_owned());
+                }
+                self.preview_build_sync(holds, settled)
             }
             "preview.readAsset" => {
                 let params = require_exact_params(
@@ -2883,8 +2944,10 @@ impl Sidecar {
         let input: elsecrew_protocol::agent_adapter_v1::AgentRunStartRequestV1 = serde_json::from_value(request.params.clone())
             .map_err(|_| SidecarError::new("invalidParams", "invalid start request"))?;
         let runtime = self.agent_runtime.begin_scoped_start(&self.storage, &self.projects, &input, &request.request_id)?;
+        self.start_arrivals += 1;
         self.pending_agent_starts.insert(request.request_id.clone(), PendingAgentStart {
-            runtime, request, input, reservation: None, process: None, result: None, rediscoveries: 0,
+            runtime, request, input, reservation: None, process: None, result: None,
+            stage: agent_start::StartStage::Discovering, arrival: self.start_arrivals, rediscoveries: 0,
         });
         Ok(HandledRequest { response: None, events: Vec::new() })
     }
@@ -2903,69 +2966,7 @@ impl Sidecar {
         let mut responses = Vec::new();
         #[cfg(target_os = "macos")]
         {
-        let ids: Vec<_> = self.pending_agent_starts.keys().cloned().collect();
-        for id in ids {
-            let mut pending = self.pending_agent_starts.remove(&id).unwrap();
-            if pending.result.is_none() && pending.rediscoveries < 2
-                && self.agent_runtime.drop_stale_start_discovery(&id)
-            {
-                // Beside other runs of the agent a finished discovery can wait
-                // for the engine longer than a start may use it: discover again.
-                pending.rediscoveries += 1;
-                match self.agent_runtime.begin_scoped_start(&self.storage, &self.projects, &pending.input, &id) {
-                    Ok(_) => { self.pending_agent_starts.insert(id, pending); continue; }
-                    Err(error) => pending.result = Some(Err(error)),
-                }
-            }
-            if pending.result.is_none() {
-                if pending.runtime == "claude-code" {
-                    let Some(observed) = self.agent_runtime.take_claude_discovery(&self.storage, &self.projects, &id) else {
-                        self.pending_agent_starts.insert(id, pending); continue;
-                    };
-                    pending.result = Some(observed.and_then(|observed| {
-                        self.agent_runtime.reserve_scoped_claude_start(&mut self.storage, &self.projects,
-                            &pending.input, &id, &observed, &mut pending.reservation, &mut pending.process)?;
-                        let invalid = || SidecarError::new("agentInputChanged", "Claude reservation unavailable");
-                        let admission = Arc::new(pending.reservation.as_ref().ok_or_else(invalid)?.claude_admission(
-                            &self.storage, &self.projects, pending.process.as_ref().ok_or_else(invalid)?)?);
-                        let prompt_admission = admission.clone();
-                        let tool_admission = admission.clone();
-                        self.agent_runtime.start_reserved_claude(&mut self.storage, &self.projects,
-                            &mut pending.reservation, &mut pending.process, &observed.evidence.executable,
-                            &AtomicBool::new(self.prepared_to_quit),
-                            &mut |workspace, home, model, effort, access| admission.launch(workspace, home, model, effort, access),
-                            Box::new(move |process| prompt_admission.process(process)),
-                            Box::new(move |process, request| tool_admission.tool(process, request)))
-                    }));
-                } else {
-                let Some(observed) = self.agent_runtime.take_scoped_discovery(&self.storage, &self.projects, &id) else {
-                    self.pending_agent_starts.insert(id, pending);
-                    continue;
-                };
-                pending.result = Some(observed.and_then(|observed| {
-                    self.agent_runtime.reserve_scoped_start(
-                        &mut self.storage, &self.projects, &pending.input, &id,
-                        &observed, &mut pending.reservation, &mut pending.process,
-                    )?;
-                    self.agent_runtime.start_reserved_codex(
-                        &mut self.storage, &self.projects, &mut pending.reservation,
-                        &mut pending.process, &observed.evidence.observation,
-                        &observed.evidence.executable, &observed.evidence.helper,
-                        &AtomicBool::new(self.prepared_to_quit),
-                    )
-                }));
-                }
-            }
-            if self.agent_runtime.retain_rejected_start(&mut pending.reservation, &mut pending.process).is_err() {
-                // Keep the original result and both owners; never rerun launch.
-                self.pending_agent_starts.insert(id, pending);
-                continue;
-            }
-            responses.push(match pending.result.take().unwrap() {
-                Ok(action) => { events.extend(action.events); success_response(&pending.request, action.result) },
-                Err(error) => error_response(&pending.request, error.kind(), "requestBlocked", error.detail()),
-            });
-        }
+        self.advance_agent_starts(&mut responses, &mut events);
         let ids: Vec<_> = self.pending_agent_capabilities.keys().cloned().collect();
         for id in ids {
             if self.pending_agent_capabilities[&id].method == "agent.getModelChoices" {
