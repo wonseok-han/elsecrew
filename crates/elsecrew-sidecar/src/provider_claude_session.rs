@@ -611,10 +611,13 @@ impl ControlInitialization {
         if cancel.load(Ordering::Acquire) {
             return Err(initialization_failure("cancellation"));
         }
-        // Runs of one agent start side by side (ADE multi-project P5): another
-        // run's start can hold the engine's one thread for seconds, and that
-        // time is not Claude's to answer in. A gap between ticks moves the
-        // deadline by itself, within a bounded allowance.
+        // The deadline is Claude's time to answer, not the engine's: while the
+        // engine's one loop is held elsewhere the answer may already wait in
+        // the pipe. A gap between ticks moves the deadline by itself, within a
+        // bounded allowance. Starts no longer hold the loop for long (ADE
+        // stabilization A: a few seconds per start, agent_start.rs), but other
+        // long holds remain (an application backup, a large save), so this
+        // stays (it was added for starts in ADE multi-project P5).
         let now = Instant::now();
         if let Some(gap) = self.ticked.map(|ticked| now.saturating_duration_since(ticked)).filter(|gap| *gap > TICK_GAP) {
             let moved = gap.min(STALL_ALLOWANCE.saturating_sub(self.stalled));

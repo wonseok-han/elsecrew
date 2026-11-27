@@ -169,14 +169,33 @@ impl PinnedExecutable {
     /// directories with the same mode and owner; entries added elsewhere in
     /// them (a home folder changes constantly) are not a change of this path.
     pub(crate) fn revalidate(&self) -> Result<&Path, SidecarError> {
-        self.revalidate_with(false)
+        crate::latency_log::step("executable.revalidate", || self.revalidate_with(false))
     }
 
     fn revalidate_with(&self, strict_ancestors: bool) -> Result<&Path, SidecarError> {
         let current = open_file(&self.path)?;
         let old = self.held.metadata().map_err(|_| failure())?;
         let new = current.metadata().map_err(|_| failure())?;
-        if old.dev() != new.dev() || old.ino() != new.ino() || hash(&current)? != self.digest {
+        if old.dev() != new.dev() || old.ino() != new.ino() {
+            return Err(failure());
+        }
+        // A signed pin's bytes were hashed inside the strict window that bound
+        // them to its stamp (identity, size, mode, owner, links, modification
+        // and change times to the nanosecond). Any write changes the change
+        // time, which no caller can set back — the same fact `hash` itself
+        // relies on to notice a write while it reads. So while the path's file
+        // still carries that exact stamp its bytes are the hashed bytes, and
+        // reading 100+ MB again on every check (twenty times per run start,
+        // half a second each) proves nothing more (ADE stabilization A). The
+        // strict window, and every pin without a signature, still hash.
+        #[cfg(any(test, target_os = "macos"))]
+        let stamp_bound = !strict_ancestors
+            && self.signature.as_ref().is_some_and(|binding| {
+                signature_stamp(&new) == binding.executable && signature_stamp(&old) == binding.executable
+            });
+        #[cfg(not(any(test, target_os = "macos")))]
+        let stamp_bound = false;
+        if !stamp_bound && hash(&current)? != self.digest {
             return Err(failure());
         }
         #[cfg(any(test, target_os = "macos"))]
@@ -290,7 +309,15 @@ fn open_file(path: &Path) -> Result<File, SidecarError> {
     Ok(file)
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread read a whole file to hash it.
+    static HASHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn hash(file: &File) -> Result<[u8; 32], SidecarError> {
+    #[cfg(test)]
+    HASHES.with(|count| count.set(count.get() + 1));
     let before = file.metadata().map_err(|_| failure())?;
     let mut reader = file;
     let mut hasher = Sha256::new();
@@ -445,6 +472,44 @@ mod tests {
             .unwrap();
         assert!(PinnedExecutable::open_codex_signed(&host, false).is_err());
         assert!(PinnedExecutable::open_codex_signed(Path::new("/usr/bin/true"), false).is_err());
+    }
+
+    /// ADE stabilization A: a signed pin is checked against the stamp its
+    /// strict window bound to the hashed bytes, without reading the file
+    /// again; any write (in place, a replacement, a changed mode) still fails
+    /// it. A pin without a signature still hashes every time.
+    #[test]
+    fn a_signed_pin_revalidates_by_its_stamp_without_reading_the_file_again() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let nested = root.join("signed");
+        std::fs::create_dir(&nested).unwrap();
+        let file = candidate(&nested);
+        let pin = stable_authenticated_fixture(&file);
+        let hashes = || HASHES.with(std::cell::Cell::get);
+        let before = hashes();
+        for _ in 0..20 { pin.revalidate().unwrap(); }
+        assert_eq!(hashes(), before, "twenty checks, no second read");
+        // A write in place keeps the inode but moves the change time.
+        let mut handle = std::fs::OpenOptions::new().write(true).open(&file).unwrap();
+        std::io::Write::write_all(&mut handle, b"TEST").unwrap();
+        drop(handle);
+        assert!(pin.revalidate().is_err(), "an in-place write is caught");
+        let pin = stable_authenticated_fixture(&file);
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o500)).unwrap();
+        assert!(pin.revalidate().is_err(), "a changed mode is caught");
+        let pin = stable_authenticated_fixture(&file);
+        std::fs::rename(&file, nested.join("old")).unwrap();
+        candidate(&nested);
+        assert!(pin.revalidate().is_err(), "a replacement is caught");
+        // Without a signature: hashed on every check.
+        let plain = root.join("plain");
+        std::fs::create_dir(&plain).unwrap();
+        let unsigned = PinnedExecutable::open(&candidate(&plain), digest()).unwrap();
+        let before = hashes();
+        unsigned.revalidate().unwrap();
+        unsigned.revalidate().unwrap();
+        assert_eq!(hashes(), before + 2);
     }
 
     #[test]

@@ -77,3 +77,40 @@ test("each missing condition fails the check on its own", () => {
   assert.deepEqual(slow.problems, []);
   assert.equal(slow.verdicts.find(v => v.label === "ui-open" && v.condition === "idle")?.pass, false);
 });
+
+// ADE stabilization A: `--starting` (open loop). Only reads sent while a
+// start was pending count; the warm control must hold; a failed start or too
+// few samples fail; a slow read fails its budget.
+function starting(overrides: { warmHeld?: boolean; starts?: unknown[]; startingMs?: number; startingLoaded?: number } = {}) {
+  const measurements = [];
+  for (const condition of ["warm", "starting"]) {
+    for (let index = 0; index < 8; index += 1) {
+      const loaded = condition === "warm" ? overrides.warmHeld !== false : index < (overrides.startingLoaded ?? 8);
+      for (const label of ["getChat", "approval:list", "file:read"]) {
+        measurements.push({ label, condition, ok: true, loaded, totalMs: condition === "starting" ? (overrides.startingMs ?? 120) : 40 });
+      }
+    }
+  }
+  // Reads sent after the starts ended (not counted, however slow).
+  measurements.push({ label: "getChat", condition: "starting", ok: true, loaded: false, totalMs: 99_000 });
+  return {
+    stages: ["starting"], exits: { starting: 0 }, samples: 8, seedChats: 0, seedRuns: 0,
+    reports: { starting: { stage: "starting", status: "DONE", engineStarts: [{}], starts: overrides.starts ?? [{ runtime: "codex" }],
+      rounds: [{ condition: "warm", samples: 8, warmHeld: overrides.warmHeld !== false }, { condition: "starting", samples: 9 }], measurements } },
+  };
+}
+
+test("starting: reads sent while runs start answer within budget; reads after the window do not count", () => {
+  const result = judgeLatency(starting() as never);
+  assert.deepEqual(result.problems, []);
+  assert.equal(result.status, "PASS");
+  assert.equal(result.verdicts.length, 6);
+  assert.ok(result.verdicts.every(v => v.n === 8));
+});
+
+test("starting: a slow read, a failed start, too few samples or a warm run that ended fail", () => {
+  assert.ok(judgeLatency(starting({ startingMs: 1500 }) as never).verdicts.some(v => !v.pass && v.condition === "starting"));
+  failsWith(starting({ starts: [{ runtime: "codex", error: "boom" }] }) as never, /a start failed/);
+  failsWith(starting({ startingLoaded: 3 }) as never, /has 3 of at least 5 samples/);
+  failsWith(starting({ warmHeld: false }) as never, /warm run did not hold/);
+});

@@ -33,9 +33,9 @@ impl DiscoveryEvidence {
         self.observed_from.elapsed() <= Duration::from_secs(30)
     }
 
-    /// See `NamedProfileObservation::fresh_for_start`.
-    pub(crate) fn fresh_for_start(&self) -> bool {
-        self.observed_from.elapsed() <= crate::provider_preflight_session::START_MARGIN
+    /// How old this observation is (the start's timing log notes it).
+    pub(crate) fn age(&self) -> Duration {
+        self.observed_from.elapsed()
     }
 }
 

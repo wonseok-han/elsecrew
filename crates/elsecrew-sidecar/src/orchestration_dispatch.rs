@@ -2534,6 +2534,35 @@ mod tests {
         assert_eq!(reserve(&mut sidecar, &chat_a, "req_hold_a3")["refusal"], "busy");
     }
 
+    /// ADE stabilization A: the engine stops and main starts it again while
+    /// main still runs a build (PR #22 kept the hold only in memory). The new
+    /// engine restores the hold before it answers anything: the task's team
+    /// still cannot start. Main's release then frees it, and the file goes.
+    #[test]
+    fn a_build_hold_outlives_an_engine_restart_of_the_same_app() {
+        let (root, mut sidecar, _) = service();
+        let (chat_a, _) = another_task(&mut sidecar, &root.path().join("source"), "restart_a");
+        let id = chat_a["chatId"].as_str().unwrap().to_owned();
+        let held = ask(&mut sidecar, "req_hold_restart", "preview.buildReserve", json!({"projectId":chat_a["projectId"],"chatId":chat_a["chatId"]}));
+        let hold = held.result.unwrap()["holdId"].as_str().expect("held").to_owned();
+        let file = root.path().join("preview-build-holds-v1.json");
+        assert!(file.exists(), "written before main may start the build");
+        // The engine stops (as a crash: nothing released) and starts again.
+        drop(sidecar);
+        let binary = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("elsecrew-sidecar");
+        let ready = SidecarSession::new("orchestration_fixture_restarted".into(), AgentRuntime::blocked()).ready.clone();
+        let mut sidecar = Sidecar::initialize(root.path().join("data.sqlite3"), ready, AgentRuntime::fake(binary, FakeScenario::OrchestratorDelegate), &AtomicBool::new(false)).unwrap();
+        assert!(sidecar.preview_build_blocks(&id), "restored before any request");
+        let refused = start_as(&mut sidecar, &chat_a, "req_team_after_restart");
+        assert_eq!(refused.error.as_ref().map(|e| e.code.as_str()), Some("orchestrationBusy"), "{refused:?}");
+        assert_eq!(ask(&mut sidecar, "req_hold_again", "preview.buildReserve", json!({"projectId":chat_a["projectId"],"chatId":chat_a["chatId"]})).result.unwrap()["refusal"], "busy");
+        // Main's release (sent again once the new engine is ready) frees it.
+        let released = ask(&mut sidecar, "req_release_restart", "preview.buildRelease", json!({"holdId": hold}));
+        assert_eq!(released.result.unwrap(), json!({"holdId": hold, "released": true}));
+        assert!(!sidecar.preview_build_blocks(&id) && !file.exists());
+        assert!(start_as(&mut sidecar, &chat_a, "req_team_released").ok);
+    }
+
     /// PR #20 review B3: a later team of the same task that waits its turn
     /// starts as its own root, twice in a row, never as a member of an
     /// earlier team (whose root's budget the app counts and would refuse).

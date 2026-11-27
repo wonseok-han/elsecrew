@@ -257,6 +257,7 @@ impl AgentRuntime {
         executable: &crate::provider_executable::PinnedExecutable,
         helper: &crate::provider_executable::PinnedExecutable,
         cancel: &std::sync::atomic::AtomicBool,
+        prepared: Option<preparation::PreparedCodexLaunch>,
     ) -> Result<G5Action, SidecarError> {
         let failure = || SidecarError::new("agentLaunchRejected", "native start unavailable");
         let run_id = reservation.as_ref().ok_or_else(failure)?.run_id.clone();
@@ -284,7 +285,7 @@ impl AgentRuntime {
             "capabilityFingerprint": run["capabilityFingerprint"], "state": "preparing",
         });
         validate_agent_adapter_payload_v1("runAccepted", &accepted).map_err(|_| failure())?;
-        let launch_error = match preparation::RunReservation::prepare_named_owner(
+        let launch_error = match crate::latency_log::step("launch.codex.prepare", || preparation::RunReservation::prepare_named_owner(
             reservation,
             process,
             storage,
@@ -292,7 +293,8 @@ impl AgentRuntime {
             executable,
             helper,
             cancel,
-        ) {
+            prepared,
+        )) {
             Ok(owner) => {
                 let mut slot = Some(owner);
                 match self.register_native_candidate(storage, projects, &mut slot) {

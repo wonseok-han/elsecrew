@@ -167,12 +167,14 @@ function runner(overrides: Partial<PreviewBuildOptionsV1> = {}, planOverrides: P
   const killed: [number, string][] = [];
   const running: unknown[] = [];
   let written = true;
+  /** The engine: answering, stopped (no client), or restarting (requests fail). */
+  let engine: "up" | "down" | "failing" = "up";
   const manager = new PreviewBuildManagerV1({
     enabled: true,
-    sidecar: () => ({
+    sidecar: () => engine === "down" ? undefined : ({
       previewBuildPlan: async ({ chatId }) => ({ ...plan, chatId }),
       previewBuildReserve: async () => { if (reserve === "busy") return { holdId: null, refusal: "busy" as const }; const id = `pbh_${String(holds.length).padStart(32, "0")}`; holds.push(id); return { holdId: id, refusal: null }; },
-      previewBuildRelease: async ({ holdId }) => { released.push(holdId); return { holdId, released: true }; },
+      previewBuildRelease: async ({ holdId }) => { if (engine === "failing") throw new Error("sidecar exited"); released.push(holdId); return { holdId, released: true }; },
     }),
     confirm: async (consent) => { confirms.push(consent); return typeof answer === "function" ? (answer as () => Promise<boolean>)() : answer; },
     findTools: () => tools,
@@ -218,6 +220,7 @@ function runner(overrides: Partial<PreviewBuildOptionsV1> = {}, planOverrides: P
     setPlan(next: Partial<PreviewBuildPlanResultV1>) { plan = { ...plan, ...next }; },
     setTools(next: Partial<typeof tools>) { tools = { ...tools, ...next }; },
     setWritten(value: boolean) { written = value; },
+    setEngine(value: "up" | "down" | "failing") { engine = value; },
   };
 }
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -767,4 +770,37 @@ test("PR #22 re-review B4: a real process's long begin line and the body after i
     }
     assert.ok(job.lines.includes("plain output"), "the stream goes on after the block");
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("ADE stabilization A: a release the engine never got (stopped or restarting) is sent again once an engine is ready", async () => {
+  for (const outage of ["down", "failing"] as const) {
+    const r = runner();
+    assert.equal((await r.ask("start", "c1", { step: "build" })).outcome, "started");
+    assert.equal(r.holds.length, 1);
+    // The engine stops while the build runs; the build ends meanwhile.
+    r.setEngine(outage);
+    r.children[0]!.emit("close", 0);
+    await settle();
+    assert.deepEqual(r.released, [], outage);
+    assert.deepEqual(r.manager.unreleasedHolds, r.holds, `${outage}: kept to send again`);
+    // A new engine is ready (it restored the hold): the release goes out.
+    r.setEngine("up");
+    r.manager.engineReady();
+    await wait(5);
+    assert.deepEqual(r.released, r.holds, outage);
+    assert.deepEqual(r.manager.unreleasedHolds, [], outage);
+  }
+  // Still restarting when asked again: kept, and tried again by itself.
+  const r = runner();
+  await r.ask("start", "c1", { step: "build" });
+  r.setEngine("failing");
+  r.children[0]!.emit("close", 0);
+  await settle();
+  r.manager.engineReady();
+  await wait(5);
+  assert.deepEqual(r.manager.unreleasedHolds, r.holds);
+  r.setEngine("up");
+  await wait(3_200);
+  assert.deepEqual(r.released, r.holds, "the retry sent it");
+  assert.deepEqual(r.manager.unreleasedHolds, []);
 });

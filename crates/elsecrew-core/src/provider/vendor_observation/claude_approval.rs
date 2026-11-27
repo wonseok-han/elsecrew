@@ -289,7 +289,10 @@ impl Permissions {
         // A large input is kept only within its own bound and the process
         // budget; otherwise nothing of it is kept and the request can only be
         // refused, which tells the agent to write in smaller parts.
-        let (tool_input, hold, withheld) = if tool_input.len() <= SMALL_TOOL_INPUT_BYTES {
+        let (tool_input, hold, withheld) = if input.withheld() {
+            // Streamed past the session line bound: nothing of it was kept.
+            (String::new(), None, true)
+        } else if tool_input.len() <= SMALL_TOOL_INPUT_BYTES {
             (tool_input, None, false)
         } else if tool_input.len() <= LARGE_TOOL_INPUT_MAX_BYTES {
             match LargeInputHold::reserve(tool_input.len()) {
@@ -611,5 +614,46 @@ mod tests {
         permissions.observe(&request("b")).unwrap();
         permissions.close();
         assert!(permissions.deny("b", false).is_err());
+    }
+
+    /// ADE stabilization A: a permission request past the session line bound
+    /// streams in (`OversizedLineStream`) and cannot be approved — the
+    /// original is never shortened (PR #17 review B1). It arrives withheld,
+    /// keeps none of its input, and can only be declined, with the guidance to
+    /// write in smaller parts. The session carries on.
+    #[test]
+    fn a_streamed_permission_request_arrives_withheld_and_can_only_be_declined() {
+        use crate::provider::oversized_line::{OversizedLinePolicy, OversizedLineStream, PROVIDER_SESSION_LINE_RAW_MAX_BYTES};
+        let content = "w".repeat(9 * 1024 * 1024);
+        for hook in [false, true] {
+            let value = if hook {
+                json!({"type":"control_request","request_id":"r9","request":{"subtype":"hook_callback","callback_id":PRE_TOOL_CALLBACK,"tool_use_id":"t_r9",
+                    "input":{"session_id":"s","cwd":"/snapshot","hook_event_name":"PreToolUse","tool_name":"Write","tool_use_id":"t_r9",
+                        "tool_input":{"file_path":"big.txt","content":content}}}})
+            } else {
+                json!({"type":"control_request","request_id":"r9","request":{"subtype":"can_use_tool","tool_name":"Write",
+                    "input":{"file_path":"big.txt","content":content},"tool_use_id":"t_r9"}})
+            };
+            let raw = value.to_string().into_bytes();
+            assert!(raw.len() > PROVIDER_SESSION_LINE_RAW_MAX_BYTES);
+            let mut stream = OversizedLineStream::new(OversizedLinePolicy::ClaudeStreamJson);
+            for piece in raw.chunks(64 * 1024) { stream.feed(piece).unwrap(); }
+            let observed = stream.finish().unwrap();
+            assert!(observed.withheld(), "hook {hook}");
+            assert!(observed.byte_len() < 4096, "hook {hook}: nothing of the input is kept");
+            let mut permissions = Permissions::default();
+            permissions.bind_hook_scope("s", "/snapshot");
+            let request = match permissions.observe(&observed).unwrap() {
+                Observation::Requested(request) | Observation::ToolCheck(request) => request,
+                _ => panic!("hook {hook}: expected a request"),
+            };
+            assert!(request.withheld() && request.inspect_input().is_empty(), "hook {hook}");
+            assert!(permissions.allow_once(&request).is_err(), "hook {hook}: never approvable");
+            let denial = permissions.deny("r9", false).unwrap();
+            assert!(denial.as_str().contains("too large for this application to review"), "hook {hook}");
+            // The same frame read whole (not withheld) by an ordinary parser is
+            // not this path: only the stream marks a request withheld.
+            assert!(!BoundedObservation::new(b"{}\n".to_vec()).unwrap().withheld());
+        }
     }
 }

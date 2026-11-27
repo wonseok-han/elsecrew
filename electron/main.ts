@@ -464,7 +464,9 @@ function startSidecar(): SidecarClientV1 {
       { event: head, streamId: event.streamId, seq: event.seq }));
   });
   watchEngineFailure(client);
-  void client.start().catch(() => {
+  // A build release the stopped engine never received is sent again: the
+  // new engine restored that hold (ADE stabilization A).
+  void client.start().then(() => { if (client === sidecar) previewBuildManager.engineReady(); }).catch(() => {
     // getSystemStatus exposes a structured unavailable state. A failure after
     // the engine once worked is restarted by `watchEngineFailure`.
   });

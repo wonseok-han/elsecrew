@@ -133,6 +133,9 @@ impl ProviderId {
 /// Transient vendor output. `Debug` and every public result deliberately omit the bytes.
 pub struct BoundedObservation {
     bytes: Vec<u8>,
+    /// A permission request whose input was too large to keep (a streamed
+    /// line, `oversized_line::OversizedLineStream`): it can only be declined.
+    withheld: bool,
 }
 
 impl fmt::Debug for BoundedObservation {
@@ -156,7 +159,7 @@ impl BoundedObservation {
         {
             return fail("provider observation contains an oversized line");
         }
-        Ok(Self { bytes })
+        Ok(Self { bytes, withheld: false })
     }
 
     /// One session permission request over the line bound, kept whole
@@ -168,7 +171,22 @@ impl BoundedObservation {
         if body.is_empty() || body.len() > oversized_line::PROVIDER_SESSION_LINE_RAW_MAX_BYTES || body.contains(&b'\n') {
             return fail("session permission request is empty or over the session line bound");
         }
-        Ok(Self { bytes })
+        Ok(Self { bytes, withheld: false })
+    }
+
+    /// A session permission request streamed past the session line bound,
+    /// with its long strings left out (ADE stabilization A). Only
+    /// `oversized_line` builds one; the permission parser keeps no input and
+    /// the request can only be declined.
+    pub(crate) fn new_session_control_withheld(bytes: Vec<u8>) -> Result<Self, ProviderError> {
+        let mut observation = Self::new_session_control(bytes)?;
+        observation.withheld = true;
+        Ok(observation)
+    }
+
+    /// Whether this is a request whose input was withheld (see above).
+    pub fn withheld(&self) -> bool {
+        self.withheld
     }
 
     /// Size only, as `Debug` already shows; the bytes themselves stay private.

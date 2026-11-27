@@ -56,6 +56,8 @@ pub(crate) use provider_fence::verify_resolved_provider_fence;
 #[cfg(target_os = "macos")]
 mod discovery;
 #[cfg(target_os = "macos")]
+pub(crate) use discovery::{ScopedClaudeEvidence, ScopedEvidence};
+#[cfg(target_os = "macos")]
 mod model_catalog;
 pub(crate) mod preparation;
 mod reap;

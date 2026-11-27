@@ -4,7 +4,7 @@
 use crate::SidecarError;
 use elsecrew_core::provider::vendor_observation::codex_login::LoginRequest;
 use elsecrew_core::provider::oversized_line::{
-    reduce_oversized_line, OversizedLinePolicy, PROVIDER_SESSION_LINE_RAW_MAX_BYTES,
+    reduce_oversized_line, OversizedLinePolicy, OversizedLineStream, PROVIDER_SESSION_LINE_RAW_MAX_BYTES,
     PROVIDER_SESSION_STREAM_MAX_BYTES,
 };
 use elsecrew_core::provider::{
@@ -28,6 +28,8 @@ use std::time::{Duration, Instant};
 /// `PROVIDER_SESSION_LINE_MAX_VALUES` values) and a 128 KiB result, so about
 /// 24 MiB per slot at worst, 48 MiB for both. Every other connection holds at
 /// most the 128 KiB bound plus one read (192 KiB) before it must wait.
+/// A line past 8 MiB streams instead (`OversizedLineStream`): its skeleton is
+/// bounded like a held line, and its long strings are counted, not held.
 pub(crate) const LARGE_LINE_SLOTS: usize = 2;
 static LARGE_LINES_HELD: AtomicUsize = AtomicUsize::new(0);
 #[cfg(test)]
@@ -92,6 +94,7 @@ struct HeldLine {
     _slot: LargeLineSlot,
     since: Instant,
     progress: Instant,
+    /// Bytes received on the connection when the line last grew.
     len: usize,
 }
 
@@ -145,8 +148,12 @@ pub(crate) struct LoginIo {
     /// How much of `pending` is already known to hold no newline, so a long
     /// line is scanned once rather than again on every read.
     scanned: usize,
-    /// Held while `pending` is over the observation line bound.
+    /// Held while `pending` is over the observation line bound (or a line
+    /// streams, below).
     large_line: Option<HeldLine>,
+    /// A session line past `PROVIDER_SESSION_LINE_RAW_MAX_BYTES`, read on
+    /// without being held (ADE stabilization A; `OversizedLineStream`).
+    streaming: Option<OversizedLineStream>,
     /// Since when this connection has waited for a slot.
     slot_wait: Option<Instant>,
     limits: LargeLineLimits,
@@ -283,6 +290,7 @@ impl LoginIo {
     fn drop_pending(&mut self) {
         self.pending = Vec::new();
         self.scanned = 0;
+        self.streaming = None;
         self.large_line = None;
         self.slot_wait = None;
     }
@@ -433,6 +441,7 @@ impl LoginIo {
             session_lines: None,
             scanned: 0,
             large_line: None,
+            streaming: None,
             slot_wait: None,
             limits: LARGE_LINE_LIMITS,
         })
@@ -650,12 +659,44 @@ impl LoginIo {
             } else {
                 PROVIDER_OBSERVATION_LINE_MAX_BYTES
             };
-            let found = self.pending[self.scanned..].iter().position(|byte| *byte == b'\n');
+            if let Some(stream) = self.streaming.as_mut() {
+                // A streamed line: feed what arrived, up to its newline.
+                let newline = self.pending.iter().position(|byte| *byte == b'\n');
+                let take = newline.unwrap_or(self.pending.len());
+                stream.feed(&self.pending[..take]).map_err(|refusal| refuse_line(true, refusal.as_str()))?;
+                let rest = match newline {
+                    Some(end) => self.pending.split_off(end + 1),
+                    None => Vec::new(),
+                };
+                self.pending = rest;
+                self.scanned = 0;
+                if newline.is_some() {
+                    let stream = self.streaming.take().ok_or_else(failure)?;
+                    if self.pending.len() <= PROVIDER_OBSERVATION_LINE_MAX_BYTES {
+                        self.large_line = None;
+                    }
+                    return stream.finish().map(Some).map_err(|refusal| refuse_line(true, refusal.as_str()));
+                }
+            }
+            let found = if self.streaming.is_some() { None } else { self.pending[self.scanned..].iter().position(|byte| *byte == b'\n') };
             if let Some(offset) = found {
                 let end = self.scanned + offset;
                 self.scanned = 0;
-                if end == 0 || end > line_limit {
+                if end == 0 {
                     return Err(refuse_line(self.session_lines.is_some(), "over the session line bound"));
+                }
+                if end > line_limit {
+                    // One read brought the rest of a line past the session
+                    // bound with its newline: stream it, as below.
+                    let policy = self.session_lines.ok_or_else(|| refuse_line(false, "over the line bound"))?;
+                    let mut stream = OversizedLineStream::new(policy);
+                    stream.feed(&self.pending[..end]).map_err(|refusal| refuse_line(true, refusal.as_str()))?;
+                    let rest = self.pending.split_off(end + 1);
+                    self.pending = rest;
+                    if self.pending.len() <= PROVIDER_OBSERVATION_LINE_MAX_BYTES {
+                        self.large_line = None;
+                    }
+                    return stream.finish().map(Some).map_err(|refusal| refuse_line(true, refusal.as_str()));
                 }
                 // Take the line without copying it; only what follows is moved.
                 let rest = self.pending.split_off(end + 1);
@@ -674,8 +715,15 @@ impl LoginIo {
                     .map_err(|_| failure());
             }
             self.scanned = self.pending.len();
-            if self.pending.len() > line_limit {
-                return Err(refuse_line(self.session_lines.is_some(), "over the session line bound"));
+            if self.pending.len() > line_limit && self.streaming.is_none() {
+                // A session line past 8 MiB is read on without being held
+                // (ADE stabilization A); any other exchange still fails.
+                let policy = self.session_lines.ok_or_else(|| refuse_line(false, "over the line bound"))?;
+                let mut stream = OversizedLineStream::new(policy);
+                stream.feed(&self.pending).map_err(|refusal| refuse_line(true, refusal.as_str()))?;
+                self.pending = Vec::new();
+                self.scanned = 0;
+                self.streaming = Some(stream);
             }
             // Past the observation bound a line needs one of the process-wide
             // slots; without one, read nothing more until a slot is free.
@@ -687,7 +735,7 @@ impl LoginIo {
                     Some(slot) => {
                         let now = Instant::now();
                         self.slot_wait = None;
-                        self.large_line = Some(HeldLine { _slot: slot, since: now, progress: now, len: self.pending.len() });
+                        self.large_line = Some(HeldLine { _slot: slot, since: now, progress: now, len: self.received });
                     }
                     None => {
                         let since = *self.slot_wait.get_or_insert_with(Instant::now);
@@ -711,8 +759,8 @@ impl LoginIo {
                     }
                     self.pending.extend_from_slice(&chunk[..count]);
                     if let Some(held) = self.large_line.as_mut() {
-                        if self.pending.len() > held.len {
-                            held.len = self.pending.len();
+                        if self.received > held.len {
+                            held.len = self.received;
                             held.progress = Instant::now();
                         }
                         if held.since.elapsed() > self.limits.hold {
@@ -1199,6 +1247,40 @@ mod tests {
         let mut io = LoginIo::attach(&mut child.0).unwrap();
         assert!(io.receive(Duration::from_secs(5), &cancel).is_err());
         assert!(io.failed);
+    }
+
+    /// ADE stabilization A: lines past the 8 MiB session bound no longer end
+    /// the session. A 20 MiB image result streams through shortened, a 12 MiB
+    /// permission request arrives withheld (it can only be declined), and the
+    /// next ordinary frame still reads; nothing of the long text is held.
+    #[test]
+    fn a_session_streams_lines_past_the_session_bound_and_keeps_going() {
+        let _slots = LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let cancel = AtomicBool::new(false);
+        let script = "printf '{\"type\":\"user\",\"uuid\":\"big\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_9\",\"content\":[{\"type\":\"image\",\"source\":{\"data\":\"'; \
+            head -c 20971520 /dev/zero | tr '\\0' A; printf '\"}}]}]}}\\n'; \
+            printf '{\"type\":\"control_request\",\"request_id\":\"r9\",\"request\":{\"subtype\":\"can_use_tool\",\"tool_name\":\"Write\",\"tool_use_id\":\"t9\",\"input\":{\"file_path\":\"big.txt\",\"content\":\"'; \
+            head -c 12582912 /dev/zero | tr '\\0' w; printf '\"}}}\\n'; \
+            printf '{\"type\":\"user\",\"uuid\":\"last\"}\\n'; read hold";
+        let mut child = fixture(Some(script));
+        let mut io = LoginIo::attach(&mut child.0).unwrap();
+        io.admit_session_lines(OversizedLinePolicy::ClaudeStreamJson).unwrap();
+        let image = io.receive(Duration::from_secs(20), &cancel).unwrap();
+        assert!(image.byte_len() < 2048 && !image.withheld(), "shortened to {} bytes", image.byte_len());
+        let mut projection = elsecrew_core::provider::vendor_observation::claude_events::SessionProjection::new("s").unwrap();
+        assert!(projection.project(&image).is_ok());
+        assert!(io.pending.len() <= 64 * 1024, "the long line was not held: {}", io.pending.capacity());
+        let request = io.receive(Duration::from_secs(20), &cancel).unwrap();
+        assert!(request.withheld() && request.byte_len() < 1024);
+        let last = io.receive(Duration::from_secs(5), &cancel).unwrap();
+        assert_eq!(last.byte_len(), b"{\"type\":\"user\",\"uuid\":\"last\"}\n".len());
+        assert!(io.received > 32 * 1024 * 1024);
+        assert!(!io.failed && io.large_line.is_none() && io.streaming.is_none());
+        assert_eq!(LARGE_LINES_HELD.load(Ordering::Acquire), 0, "the slot was returned");
+        // Outside a session the same line still fails.
+        let mut child = fixture(Some("head -c 9000000 /dev/zero | tr '\\0' x; printf '\\n'; read hold"));
+        let mut io = LoginIo::attach(&mut child.0).unwrap();
+        assert!(io.receive(Duration::from_secs(5), &cancel).is_err());
     }
 
     #[test]

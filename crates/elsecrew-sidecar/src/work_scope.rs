@@ -186,7 +186,14 @@ impl Sidecar {
         } else {
             let hold = format!("pbh_{}", uuid::Uuid::new_v4().simple());
             self.preview_build_holds.insert(hold.clone(), chat_id.to_owned());
-            serde_json::json!({"holdId": hold, "refusal": Value::Null})
+            // Written before main may start the build: an engine restart
+            // must find it (preview_build_holds.rs). Unwritten, it is refused.
+            if self.build_hold_file.save(&self.preview_build_holds).is_err() {
+                self.preview_build_holds.remove(&hold);
+                serde_json::json!({"holdId": Value::Null, "refusal": "busy"})
+            } else {
+                serde_json::json!({"holdId": hold, "refusal": Value::Null})
+            }
         };
         Ok(project::ProjectAction { result, ..project::ProjectAction::default() })
     }

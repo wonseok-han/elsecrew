@@ -165,6 +165,9 @@ interface PendingStart { aborted: boolean }
 
 const IDLE_VIEW: PreviewBuildJobViewV1 = { step: null, state: "idle", cursor: 0, lines: [], exitCode: null, outputReady: false, startedAt: null, endedAt: null, leftovers: 0 };
 
+/** How soon a release that did not reach the engine is tried again. */
+const PREVIEW_BUILD_RELEASE_RETRY_MS = 3_000;
+
 export class PreviewBuildManagerV1 {
   readonly #options: PreviewBuildOptionsV1;
   readonly #jobs = new Map<string, Job>();
@@ -175,9 +178,39 @@ export class PreviewBuildManagerV1 {
   /** Processes an earlier app run left that could not be ended (re-review
    * B3): kept on record, and no build starts while any lives. */
   #orphans: PreviewRunningRecordV1[] = [];
+  /** Holds whose release did not reach an engine (it was stopped or
+   * restarting). The engine keeps holds across its own restarts (ADE
+   * stabilization A), so each is sent again once an engine is ready. */
+  readonly #unreleased = new Set<string>();
+  #retry: ReturnType<typeof setTimeout> | undefined;
 
   constructor(options: PreviewBuildOptionsV1) {
     this.#options = options;
+  }
+
+  /** A (new) engine is ready: releases that could not be sent are sent again. */
+  engineReady(): void {
+    const holds = [...this.#unreleased];
+    this.#unreleased.clear();
+    for (const hold of holds) this.#releaseHold(hold);
+  }
+
+  /** For tests and probes (never IPC): releases still to send. */
+  get unreleasedHolds(): string[] { return [...this.#unreleased]; }
+
+  #releaseHold(hold: string): void {
+    const sidecar = this.#options.sidecar();
+    if (!sidecar) { this.#keepUnreleased(hold); return; }
+    void sidecar.previewBuildRelease({ holdId: hold }).catch(() => this.#keepUnreleased(hold));
+  }
+
+  /** Kept for the next ready engine, and tried again shortly: a new engine
+   * answers only once its storage check is done. */
+  #keepUnreleased(hold: string): void {
+    this.#unreleased.add(hold);
+    if (this.#retry) return;
+    this.#retry = setTimeout(() => { this.#retry = undefined; this.engineReady(); }, PREVIEW_BUILD_RELEASE_RETRY_MS);
+    (this.#retry as { unref?: () => void }).unref?.();
   }
 
   /** For tests and probes (never IPC): the live leaders' ids. */
@@ -399,7 +432,7 @@ export class PreviewBuildManagerV1 {
         handed = true;
         return answer("started", base);
       } finally {
-        if (!handed) void this.#options.sidecar()?.previewBuildRelease({ holdId: hold }).catch(() => undefined);
+        if (!handed) this.#releaseHold(hold);
       }
     } finally {
       if (this.#pending.get(key) === pending) this.#pending.delete(key);
@@ -540,7 +573,7 @@ export class PreviewBuildManagerV1 {
     if (job.hold) {
       const hold = job.hold;
       job.hold = null;
-      void this.#options.sidecar()?.previewBuildRelease({ holdId: hold }).catch(() => undefined);
+      this.#releaseHold(hold);
     }
     if (job.temp) {
       const temp = job.temp;
