@@ -1586,8 +1586,15 @@ mod tests {
         let manifest = data.join("worktree-manifests-v1").join(format!("{}.json", chat["worktreeId"].as_str().unwrap()));
         let mut ready = sidecar.ready.clone();
         ready.sidecar_instance_id = "closed_mid_run_reopened".into();
-        drop(sidecar);
         let gone = |identity: &ProcIdentity| matches!(SystemProcTable.probe(*identity), ProbeResult::Gone);
+        // The agent is at work when the engine goes. Checked before the
+        // engine is dropped: the fixture launcher's output goes to the
+        // engine's pipe, so once the engine is gone its next write ends it
+        // (SIGPIPE), and a busy machine could let that happen before a check
+        // made after the drop (ADE stabilization B). What survives the engine
+        // for good is the independent descendant case below.
+        assert!(!identities.iter().all(gone), "{case}: the agent was at work when the engine went");
+        drop(sidecar);
         let binary = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("elsecrew-sidecar");
         let open = |ready: &ReadyPayloadV1| Sidecar::initialize(
             root.path().join(elsecrew_protocol::lifecycle_v1::SQLITE_FILE_V1),
@@ -1605,9 +1612,10 @@ mod tests {
                 assert!(Instant::now() < deadline, "agent processes outlived the closed engine");
                 std::thread::sleep(Duration::from_millis(10));
             }
-        } else {
-            // The engine died without stopping its agent.
-            assert!(!identities.iter().all(gone));
+        } else if let Some((_, identity)) = &last_descendant {
+            // The engine died without stopping its agent: what it started on
+            // its own outlives it.
+            assert!(!gone(identity), "{case}");
         }
         if case == "marked by an older version" {
             agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(true));

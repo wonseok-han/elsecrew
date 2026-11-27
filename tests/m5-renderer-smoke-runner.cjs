@@ -1211,7 +1211,11 @@ app.whenReady().then(async () => {
     const confirmBox = document.querySelector('.m5-first-chat-confirm');
     if (send.getBoundingClientRect().bottom > innerHeight || confirmBox.getBoundingClientRect().bottom > send.getBoundingClientRect().top) throw new Error('send or the first-task yes is out of view');
     if (!send.disabled) throw new Error('send must wait for the first-task yes (Q9)');
-    confirmBox.querySelector('input').click();
+    // The yes opens once the project's permissions are read; a click before that is
+    // lost (a slow CI runner timed out here, run 45854467204). Wait, then answer.
+    await ${waitFor("!document.querySelector('.m5-first-chat-confirm input').disabled", "first-task yes ready")};
+    if (!document.querySelector('.m5-new-chat-dialog [type=submit]').disabled) throw new Error('send must wait for the first-task yes (Q9)');
+    document.querySelector('.m5-first-chat-confirm input').click();
     await ${waitFor("!document.querySelector('.m5-new-chat-dialog [type=submit]').disabled", "send after the first-task yes")};
     document.querySelector('.m5-new-chat-dialog header button').click();
     await ${waitFor("!document.querySelector('.m5-new-chat-dialog').open", "first-task window closed")};

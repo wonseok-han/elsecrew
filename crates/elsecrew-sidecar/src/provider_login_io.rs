@@ -701,7 +701,15 @@ impl LoginIo {
             // A session reads larger pieces so a multi-megabyte line arrives in
             // a few polls; other exchanges keep the small read.
             let mut chunk = [0u8; 64 * 1024];
-            let size = if self.session_lines.is_some() { chunk.len() } else { 4096 };
+            let mut size = if self.session_lines.is_some() { chunk.len() } else { 4096 };
+            // Without a slot a read never crosses the observation bound: the
+            // check above must see a line that reaches it. A short read (a
+            // busy machine) once left 120 KiB here, and the next 64 KiB read
+            // finished a 150 KiB line that was then parsed without a slot
+            // (flaky `a_session_waiting_too_long_for_a_slot_fails_alone`).
+            if self.session_lines.is_some() && self.large_line.is_none() && self.pending.len() < PROVIDER_OBSERVATION_LINE_MAX_BYTES {
+                size = size.min(PROVIDER_OBSERVATION_LINE_MAX_BYTES - self.pending.len());
+            }
             match self.output.read(&mut chunk[..size]) {
                 Ok(0) => return Err(failure()), // including partial-frame EOF
                 Ok(count) => {
@@ -1100,6 +1108,45 @@ mod tests {
             assert!(io.large_line.is_some() && !io.failed);
         }
         drop(stuck);
+        assert_eq!(LARGE_LINES_HELD.load(Ordering::Acquire), 0);
+    }
+
+    /// ADE stabilization B: 120 KiB of a line arrive first, then the rest at
+    /// once. A read that crossed the bound used to finish the line there and
+    /// hand it over without a slot; now the read stops at the bound, the
+    /// slot check sees the line, and with no slot free the line waits and
+    /// then fails alone.
+    #[test]
+    fn a_line_that_crosses_the_bound_in_one_read_still_needs_a_slot() {
+        let _slots = LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let held: Vec<_> = (0..LARGE_LINE_SLOTS).map(|_| LargeLineSlot::try_take().unwrap()).collect();
+        let cancel = AtomicBool::new(false);
+        let script = "printf '{\"type\":\"user\",\"pad\":\"'; head -c 122880 /dev/zero | tr '\\0' A; /bin/sleep 0.5; \
+                      head -c 30000 /dev/zero | tr '\\0' A; printf '\"}\\n'; read hold";
+        let mut child = fixture(Some(script));
+        let mut io = LoginIo::attach(&mut child.0).unwrap();
+        io.admit_session_lines(OversizedLinePolicy::ClaudeStreamJson).unwrap();
+        io.set_large_line_limits(Duration::from_secs(30), Duration::from_secs(10), Duration::from_millis(300));
+        let started = Instant::now();
+        // Drain the first part completely while the provider pauses.
+        while started.elapsed() < Duration::from_millis(350) {
+            assert!(io.poll_observed(&cancel, &mut || Ok(())).unwrap().is_none());
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(io.pending.len() > 120 * 1024 && io.pending.len() < PROVIDER_OBSERVATION_LINE_MAX_BYTES, "{}", io.pending.len());
+        loop {
+            assert!(started.elapsed() < Duration::from_secs(10), "the line never gave up");
+            match io.poll_observed(&cancel, &mut || Ok(())) {
+                Ok(None) => {
+                    assert!(io.pending.len() <= PROVIDER_OBSERVATION_LINE_MAX_BYTES, "read past the bound without a slot");
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Ok(Some(_)) => panic!("a line over the bound was handed over without a slot"),
+                Err(_) => break,
+            }
+        }
+        assert!(io.failed && io.large_line.is_none());
+        drop(held);
         assert_eq!(LARGE_LINES_HELD.load(Ordering::Acquire), 0);
     }
 

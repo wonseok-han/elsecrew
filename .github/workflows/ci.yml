@@ -85,3 +85,42 @@ jobs:
           name: baseline-harness-${{ matrix.os }}
           path: .artifacts/m5-harness/*.json
           if-no-files-found: warn
+
+  # sidecar 전체 시험(위 하네스는 공용 코어·protocol만 돈다, PR #4·#18 보고).
+  # 한 job이면 macOS 3코어에서 30분 가까이 걸려 넷으로 나눈다. 2026-11-27 로컬
+  # 시험별 시간(CPU 초): storage::tests 1953(compaction_writer_v10 592 +
+  # reopen_projection 295), chat::tests 971, 나머지 약 770(project::tests 420,
+  # 통합 시험 stdio_process 포함). 이름 필터와 --skip이 정확히 나누므로 빠지는
+  # 시험도 겹치는 시험도 없다. 시험이 늘면 묶음을 이 표대로 다시 나눈다.
+  # macOS만: 상당수 시험이 macOS 전용(cfg)이고 Windows 실제 실행은 꺼져 있다.
+  sidecar:
+    name: sidecar (macos, ${{ matrix.shard.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - { name: storage-a, filter: "storage::tests::compaction_writer_v10 storage::tests::reopen_projection" }
+          - { name: storage-b, filter: "storage::tests --skip storage::tests::compaction_writer_v10 --skip storage::tests::reopen_projection" }
+          - { name: chat, filter: "chat::tests" }
+          - { name: rest, filter: "--skip storage::tests --skip chat::tests" }
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: 3
+      CARGO_INCREMENTAL: 0
+      RUST_TEST_THREADS: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: sidecar-macos
+
+      # lib 시험이 같은 target의 sidecar 실행 파일을 띄운다(sidecar_binary()).
+      - name: sidecar 실행 파일
+        run: cargo build -p elsecrew-sidecar --locked --bin elsecrew-sidecar
+
+      - name: sidecar 시험 (${{ matrix.shard.name }})
+        run: cargo test -p elsecrew-sidecar --locked -- ${{ matrix.shard.filter }}

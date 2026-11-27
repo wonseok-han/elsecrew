@@ -431,15 +431,38 @@ fn existing_reservation_error(directory: &Dir, name: &str) -> SidecarError {
 }
 
 fn lock_exclusive(file: &File) -> Result<(), SidecarError> {
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+    lock_exclusive_settled(file, LOCK_SETTLE)
+}
+
+/// How long a contended lock is asked again before its holder counts as a
+/// live owner.
+const LOCK_SETTLE: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// A `flock` belongs to the open file, and a child this process is starting
+/// with fork-then-exec (any `pre_exec` launch: the gate, the Claude launcher,
+/// a sign-in) shares every open file until its exec closes them. A probe
+/// whose file was open at that moment stays locked by the child for that
+/// short window after the probe itself closed it, and the next probe of the
+/// same hold read that as a live owner (flaky `a_sign_in_hold_*` tests, ADE
+/// stabilization B). A real owner (a run, a check) holds its lock for the
+/// whole of its work, so a lock still contended after `settle` is busy.
+fn lock_exclusive_settled(file: &File, settle: std::time::Duration) -> Result<(), SidecarError> {
+    let deadline = std::time::Instant::now() + settle;
+    loop {
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return Ok(());
+        }
+        if std::io::Error::last_os_error().raw_os_error() != Some(libc::EWOULDBLOCK) {
+            return Err(failure());
+        }
         // A live owner holds it (a run, a check): busy, not a recovery case;
         // reporting recovery here left the profile looking fenced and
         // blocked quitting (review M37).
-        return Err(
-            if std::io::Error::last_os_error().raw_os_error() == Some(libc::EWOULDBLOCK) { busy() } else { failure() },
-        );
+        if std::time::Instant::now() >= deadline {
+            return Err(busy());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
     }
-    Ok(())
 }
 
 /// Recovery by proof only (asked for by the user or retried by the app).
@@ -1800,6 +1823,60 @@ mod tests {
         let mut run = LoginProcess::reserve(&binding).unwrap();
         assert!(with_credentials_reserved::<()>(&binding, || panic!("must not enter")).is_err());
         run.finish().unwrap();
+    }
+
+    /// ADE stabilization B: a child this process starts with fork-then-exec
+    /// copies every open file, a probe's locked hold included, until its
+    /// exec. The next probe must not take that moment for a live owner; a
+    /// lock someone really keeps is still busy.
+    #[cfg(unix)]
+    #[test]
+    fn a_lock_copied_into_a_starting_child_is_not_a_live_owner() {
+        use std::io::Read;
+        use std::os::unix::process::CommandExt;
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("hold.pending");
+        std::fs::write(&path, b"hold\n").unwrap();
+        let open = || File::from_std(std::fs::File::open(&path).unwrap());
+        let probe = open();
+        lock_exclusive(&probe).unwrap();
+        // The child signals once it is forked, then waits 50 ms before exec.
+        let (mut forked, signal) = std::os::unix::net::UnixStream::pair().unwrap();
+        let signal_fd = std::os::fd::AsRawFd::as_raw_fd(&signal);
+        let starter = std::thread::spawn(move || {
+            let mut command = std::process::Command::new("/usr/bin/true");
+            unsafe {
+                command.pre_exec(move || {
+                    libc::write(signal_fd, b"f".as_ptr().cast(), 1);
+                    libc::usleep(50_000);
+                    Ok(())
+                });
+            }
+            let status = command.status().unwrap();
+            drop(signal);
+            status
+        });
+        let mut byte = [0u8; 1];
+        forked.read_exact(&mut byte).unwrap();
+        // The probe is done; only the starting child's copy holds the lock now.
+        drop(probe);
+        let next = open();
+        assert_eq!(
+            lock_exclusive_settled(&next, std::time::Duration::ZERO).err().map(|error| error.kind()),
+            Some("providerBusy"),
+            "the copied lock is real for a moment"
+        );
+        lock_exclusive(&next).unwrap();
+        assert!(starter.join().unwrap().success());
+        drop(next);
+        // A lock that is kept stays busy.
+        let owner = open();
+        lock_exclusive(&owner).unwrap();
+        let started = std::time::Instant::now();
+        assert_eq!(lock_exclusive(&open()).err().map(|error| error.kind()), Some("providerBusy"));
+        assert!(started.elapsed() >= LOCK_SETTLE);
+        drop(owner);
+        lock_exclusive(&open()).unwrap();
     }
 
     #[test]
