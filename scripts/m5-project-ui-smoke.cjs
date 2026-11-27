@@ -190,6 +190,12 @@ app.on('browser-window-created', (_event, window) => {
       throw new Error('UI condition timeout: '+predicate+'\n'+await run('document.body.innerText'));
     };
     try {
+      // The checks use the wide layout (task list beside the story). A smaller screen (a CI runner's)
+      // shrinks the 1280 px window below the 1100 px band and folds the list into a rail: zoom out so
+      // the page is 1280 CSS px wide. ELSECREW_SMOKE_NARROW=1 shrinks the window to try this locally.
+      if (process.env.ELSECREW_SMOKE_NARROW === '1') { window.setSize(1000, 760); await new Promise(r => setTimeout(r, 300)); }
+      const cssWidth = await run('innerWidth');
+      if (cssWidth < 1280) window.webContents.setZoomFactor(cssWidth / 1280);
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='프로젝트 선택'&&!b.disabled)`);
       if (measureMemory) {
         await sampleMemory();
