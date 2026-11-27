@@ -46,7 +46,7 @@ const stages = starting ? ["starting"] : args.includes("--skip-background") ? ["
 if (starting) {
   // The development app's own data: no other engine may be using it.
   const others = spawnSync("/bin/ps", ["-axo", "args="], { encoding: "utf8" }).stdout.split("\n")
-    .filter(line => /elsecrew-sidecar --stdio/.test(line) && line.includes("Application Support/Elsecrew/"));
+    .filter(line => /^\S*elsecrew-sidecar --stdio /.test(line.trim()) && line.includes("Application Support/Elsecrew/"));
   if (others.length) { console.error("another engine uses the development app's data:\n" + others.join("\n")); process.exit(2); }
 }
 const samples = Number(option("--samples", "12")), seedChats = Number(option("--seed-chats", "40")), seedRuns = Number(option("--seed-runs", "120"));

@@ -34,6 +34,18 @@ dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [picks.shift(
 dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
 // The development app's own data, as `pnpm start` uses it.
 app.setPath('userData', path.join(os.homedir(), 'Library', 'Application Support', 'Elsecrew'));
+// The engine's own diagnostics (fixed names, never provider text) beside the
+// report: why a run failed is otherwise not kept anywhere.
+const spawnProcess = cp.spawn;
+cp.spawn = function (command, args, options) {
+  const engine = typeof command === 'string' && path.basename(command) === 'elsecrew-sidecar' && args?.[0] === '--stdio';
+  // ELSECREW_REAL_SIDECAR: another engine build (a saved baseline, say).
+  const child = Reflect.apply(spawnProcess, this, [engine && process.env.ELSECREW_REAL_SIDECAR ? process.env.ELSECREW_REAL_SIDECAR : command, args, options]);
+  if (engine) {
+    child.stderr?.on('data', chunk => fs.appendFileSync(path.join(report, 'engine-stderr.log'), chunk));
+  }
+  return child;
+};
 
 const log = [];
 const note = (stage, detail) => { const line = { at: new Date().toISOString(), stage, ...detail }; log.push(line); console.log(JSON.stringify(line)); };
