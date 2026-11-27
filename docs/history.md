@@ -12,7 +12,7 @@
 - **양방향 쓰기 예약**: 엔진 `preview.buildReserve`/`buildRelease`(준비 능력 다섯 개 묶음). 보류 중 그 작업과 `WriteScope`가 겹치는 작업의 확인·시작은 팀 기록 전에 `orchestrationBusy`, 팀 루프는 대기, 저장·합치기·버리기는 `busy_chats`로 막힘. 팀이 일하거나 기다리면 보류 거절. main은 동의 뒤 보류를 먼저 걸고 프로세스가 모두 끝나야 푼다. 시험: Rust `a_build_and_a_team_never_write_one_workspace_together`, TS `PR #22 re-review: the engine's write hold is taken before anything runs, kept while anything of the job lives, released after`.
   - 함정: 시작 거절을 `handle_agent_request_inner`에만 두면 `orchestration::begin`이 먼저 기록돼 같은 메시지로 다시 시작할 수 없다("already has an orchestration"). 거절은 `handle_agent_request` 맨 앞에도 둔다.
 - **2단계 표**: T-D17·T-D18에 1단계 재검토 방식 연결, T-D20(팀과 서버의 동시 쓰기, 공존 여부 열린 결정).
-- **검증**: `npm test` 1043/1043, `pnpm build`, `cargo test` core 267·protocol 75·sidecar 970·통합 16 실패 0(첫 전체 실행에서 `claude_project_consent_auto_approves_and_still_rejects_outside_files`가 부하 중 15초 기한으로 1회 실패, 단독·재실행 통과 — 이번 변경과 무관한 시간 흔들림), 실제 앱 합성(좁은 sandbox 안 실제 `npm install`·`vite build`) PASS 11/11 `~/Documents/elsecrew-ade-preview-build-2026-11-27/review2-synthetic/`.
+- **검증**: `npm test` 1043/1043, `pnpm build`, `cargo test` core 267·protocol 75·sidecar 970·통합 16 실패 0(첫 전체 실행에서 `claude_project_consent_auto_approves_and_still_rejects_outside_files`가 부하 중 15초 기한으로 1회 실패, 단독·재실행 통과 — 이번 변경과 무관한 시간 흔들림), 실제 앱 합성(좁은 sandbox 안 실제 `npm install`·`vite build`) PASS 11/11 `~/Documents/elsecrew-ade-preview-build-2026-11-27/review2-synthetic/`. CI(7a2e3c0e) macOS·Windows·website·GitGuardian 통과.
 
 ### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #22 검토(차단 4·중요 2·경미 2) 반영 (`orca/ade-preview-build`)
 검토 `~/Documents/elsecrew-ade-preview-build-2026-11-27/REVIEW-pr22.md`(대상 a3e4c1fe). 현행 설명은 architecture "빌드해서 보기"를 새로 썼다.
