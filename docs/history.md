@@ -26,6 +26,7 @@
   - 실행 중 엔진 루프는 거의 쉬지 않았다(런타임 폴링 76%·요청 23%, 폴링 1회 중앙값 325ms). Codex 1~300이 601초였다(기준 엔진 단독 Codex 343초, PR #20 때 약 300초). Codex는 폴링 한 번에 실행당 한 프레임만 읽고(`advance_text_candidate`), 폴링 비용은 실행 수에 비례한다(실행당 약 0.17초). 기준 쪽은 Codex 하나가 70초에 실패해 나머지가 혼자 돌았고(초당 약 4.5프레임, 폴링 0.2초), 이번 쪽은 Codex 둘이 끝까지 함께 돌아 실행당 초당 2.2프레임(폴링 0.34초)이었다. 루프 런타임 점유는 둘 다 30초 중 22~24초로 같아 이번 변경의 회귀가 아니라 부하 차이로 본다. 폴링 비용의 큰 몫은 원장 쓰기다(후속).
 - **시험**: architecture 절의 목록(sidecar 6·core 4·Node 3). 검증: `cargo test --workspace` core 271·protocol 75 통과, sidecar 단위 973 통과·3 실패(로그인 잠금 복구 2·Claude 승인 1, 다른 워커의 전체 시험과 동시 실행 중 부하성, 단독 재실행 모두 통과), 통합 16 통과. `npm test` 1046/1046, `pnpm build`.
 - **겹치는 파일(안정화 B 확인 필요)**: 부하성 실패 3건(`chat/tests.rs` 로그인 잠금 시험, `chat/tests/claude_native.rs`)은 B의 안정화 범위. 내가 고친 시험 파일은 `tests.rs`·`orchestration_dispatch.rs`(시험 추가)·`tests/m5-preview-build.test.mts`·`tests/m5-latency-judge.test.mts`.
+- **PR #25**(base `feature/ade`): CI(e41a8e89) macOS·Windows·website·GitGuardian 통과. Codex 검토는 조정자가 붙인다.
 - **다음 할 일**: 원장 쓰기 증분화(쓰기마다 전체 재생 제거) — 시작·출력 모두의 루프 점유 주원인. Codex 실행 중 `cleanExit` 실패 원인(stderr 기록으로 재현 시 확인). Windows는 실행 경로 비활성이라 미검증.
 
 ### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #22 재검토(B1~B4 부분 해소·동시 쓰기) 반영 (`orca/ade-preview-build`)
