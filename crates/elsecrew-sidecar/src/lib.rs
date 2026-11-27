@@ -674,6 +674,11 @@ struct Sidecar {
     /// The full storage check run on a copy while the app rests.
     background_check: background_check::BackgroundCheck,
     workflow_chats: std::collections::BTreeSet<String>,
+    /// Build-then-preview jobs main runs in a task's workspace (PR #22
+    /// re-review): while one is held, that task (and any whose write scope
+    /// meets it) cannot start a team run, save, merge or discard; a build
+    /// cannot be reserved while such work goes on (work_scope.rs).
+    preview_build_holds: std::collections::BTreeMap<String, String>,
     workflow_requests: BTreeMap<String, (String, String)>,
     workflow_outbound: Vec<EventV1>,
     workflow_roots: BTreeMap<String, String>,
@@ -1141,6 +1146,7 @@ impl Sidecar {
             pending_agent_capabilities: BTreeMap::new(),
             pending_agent_starts: BTreeMap::new(),
             workflow_chats: Default::default(),
+            preview_build_holds: Default::default(),
             workflow_requests: Default::default(),
             workflow_outbound: Vec::new(),
             workflow_roots: Default::default(),
@@ -1982,6 +1988,20 @@ impl Sidecar {
                     param_string(params, "chatId").map_err(invalid_params)?,
                 )
             }
+            // The build's write hold (work_scope.rs): reserved before a job
+            // starts, released once its processes are proven ended.
+            "preview.buildReserve" => {
+                let params = require_exact_params(&request.params, &["projectId", "chatId"]).map_err(invalid_params)?;
+                let project_id = param_string(params, "projectId").map_err(invalid_params)?.to_owned();
+                let chat_id = param_string(params, "chatId").map_err(invalid_params)?.to_owned();
+                self.preview_build_reserve(&project_id, &chat_id)
+            }
+            "preview.buildRelease" => {
+                let params = require_exact_params(&request.params, &["holdId"]).map_err(invalid_params)?;
+                let hold = param_string(params, "holdId").map_err(invalid_params)?.to_owned();
+                let released = self.preview_build_holds.remove(&hold).is_some();
+                Ok(project::ProjectAction { result: serde_json::json!({"holdId": hold, "released": released}), ..project::ProjectAction::default() })
+            }
             "preview.readAsset" => {
                 let params = require_exact_params(
                     &request.params,
@@ -2549,6 +2569,9 @@ impl Sidecar {
 
     fn handle_agent_request_inner(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
         use elsecrew_protocol::agent_adapter_v1::AgentRunStartRequestV1;
+        if let Some(held) = self.preview_build_refusal(&request) {
+            return Ok(held);
+        }
         self.require_provider_connection(&request)?;
         // The team loop sends its checks and starts here directly, past the
         // outer admission: an installation in progress holds them as well

@@ -12,7 +12,7 @@
  */
 import { exactKeys, fail, requireObject } from "./project-v1.ts";
 
-export const PREVIEW_METHODS_V1 = ["preview.resolve", "preview.readAsset", "preview.buildPlan"] as const;
+export const PREVIEW_METHODS_V1 = ["preview.resolve", "preview.readAsset", "preview.buildPlan", "preview.buildReserve", "preview.buildRelease"] as const;
 export const PREVIEW_ASSET_MAX_BYTES_V1 = 5 * 1024 * 1024;
 export const PREVIEW_ASSET_CHUNK_BYTES_V1 = 512 * 1024;
 export const PREVIEW_PATH_MAX_BYTES_V1 = 1024;
@@ -400,7 +400,7 @@ export interface M5PreviewBridgeV1 {
 export type PreviewPackageManagerV1 = "npm" | "pnpm" | "yarn";
 export const PREVIEW_BUILD_REFUSALS_V1 = [
   "noPackage", "noBuildScript", "invalidPackage", "unsupportedManager", "unsupportedWorkspace",
-  "unsafeOutput", "dependenciesNotIgnored", "outputNotIgnored",
+  "unsafeOutput", "dependenciesNotIgnored", "outputNotIgnored", "linkedInput", "unsupportedSettings",
 ] as const;
 export type PreviewBuildRefusalV1 = (typeof PREVIEW_BUILD_REFUSALS_V1)[number];
 
@@ -423,6 +423,44 @@ export interface PreviewBuildPlanResultV1 extends PreviewWorkspaceRefV1 {
   /** SHA-256 over the folder and every input file (PR #22 review B1): main
    * runs only while it is the one the person agreed to. */
   fingerprint: string | null;
+  /** The folder's device:inode, shown with its path (re-review B1). */
+  folderIdentity: string | null;
+  /** Every input file there is, with its SHA-256: exactly what the
+   * fingerprint stands for, and shown in the box (re-review B1). */
+  inputs: { name: string; sha256: string }[] | null;
+}
+
+export interface PreviewBuildReserveRequestV1 { projectId: string; chatId: string }
+export interface PreviewBuildReserveResultV1 { holdId: string | null; refusal: "busy" | null }
+export interface PreviewBuildReleaseRequestV1 { holdId: string }
+export interface PreviewBuildReleaseResultV1 { holdId: string; released: boolean }
+const HOLD_ID = /^pbh_[0-9a-f]{32}$/;
+export function validatePreviewBuildReserveRequestV1(value: unknown): PreviewBuildReserveRequestV1 {
+  const object = requireObject(value, "preview build reserve request");
+  exactKeys(object, ["projectId", "chatId"]);
+  return { projectId: id(object.projectId, "projectId"), chatId: id(object.chatId, "chatId") };
+}
+export function validatePreviewBuildReserveResultV1(value: unknown): PreviewBuildReserveResultV1 {
+  const object = requireObject(value, "preview build reserve result");
+  exactKeys(object, ["holdId", "refusal"]);
+  if (object.holdId === null) {
+    if (object.refusal !== "busy") fail("an unheld reserve says why");
+    return { holdId: null, refusal: "busy" };
+  }
+  if (typeof object.holdId !== "string" || !HOLD_ID.test(object.holdId) || object.refusal !== null) fail("build hold is invalid");
+  return { holdId: object.holdId as string, refusal: null };
+}
+export function validatePreviewBuildReleaseRequestV1(value: unknown): PreviewBuildReleaseRequestV1 {
+  const object = requireObject(value, "preview build release request");
+  exactKeys(object, ["holdId"]);
+  if (typeof object.holdId !== "string" || !HOLD_ID.test(object.holdId)) fail("holdId is invalid");
+  return { holdId: object.holdId as string };
+}
+export function validatePreviewBuildReleaseResultV1(value: unknown, request: PreviewBuildReleaseRequestV1): PreviewBuildReleaseResultV1 {
+  const object = requireObject(value, "preview build release result");
+  exactKeys(object, ["holdId", "released"]);
+  if (object.holdId !== request.holdId || typeof object.released !== "boolean") fail("build release is invalid");
+  return { holdId: request.holdId, released: object.released as boolean };
 }
 
 /** The sidecar's output folder rule (`safe_output_dir`): plain segments inside the workspace. */
@@ -440,18 +478,19 @@ export function validatePreviewBuildPlanRequestV1(value: unknown): PreviewBuildP
 
 export function validatePreviewBuildPlanResultV1(value: unknown, request: PreviewBuildPlanRequestV1): PreviewBuildPlanResultV1 {
   const object = requireObject(value, "preview build plan");
-  exactKeys(object, ["chatId", "projectId", "worktreeId", "workspaceIdentity", "refusal", "workspacePath", "packageManager", "lockfile", "buildScript", "buildHooks", "dependencies", "dependencyCount", "yarnBerry", "outputDir", "needsInstall", "fingerprint"]);
+  exactKeys(object, ["chatId", "projectId", "worktreeId", "workspaceIdentity", "refusal", "workspacePath", "packageManager", "lockfile", "buildScript", "buildHooks", "dependencies", "dependencyCount", "yarnBerry", "outputDir", "needsInstall", "fingerprint", "folderIdentity", "inputs"]);
   if (object.chatId !== request.chatId || object.projectId !== request.projectId) fail("preview build plan answered another chat");
   const ref = { chatId: request.chatId, projectId: request.projectId, worktreeId: id(object.worktreeId, "worktreeId"), workspaceIdentity: id(object.workspaceIdentity, "workspaceIdentity") };
   if (typeof object.lockfile !== "boolean" || typeof object.needsInstall !== "boolean" || typeof object.yarnBerry !== "boolean") fail("preview build flags are invalid");
   if (object.refusal !== null) {
     if (typeof object.refusal !== "string" || !(PREVIEW_BUILD_REFUSALS_V1 as readonly string[]).includes(object.refusal)) fail("preview build refusal is invalid");
     if (object.workspacePath !== null || object.packageManager !== null || object.buildScript !== null || object.outputDir !== null || object.lockfile || object.needsInstall
-      || object.buildHooks !== null || object.dependencies !== null || object.dependencyCount !== null || object.yarnBerry || object.fingerprint !== null) {
+      || object.buildHooks !== null || object.dependencies !== null || object.dependencyCount !== null || object.yarnBerry || object.fingerprint !== null
+      || object.folderIdentity !== null || object.inputs !== null) {
       fail("a refused build plan carries no plan");
     }
     return { ...ref, refusal: object.refusal as PreviewBuildRefusalV1, workspacePath: null, packageManager: null, lockfile: false, buildScript: null,
-      buildHooks: null, dependencies: null, dependencyCount: null, yarnBerry: false, outputDir: null, needsInstall: false, fingerprint: null };
+      buildHooks: null, dependencies: null, dependencyCount: null, yarnBerry: false, outputDir: null, needsInstall: false, fingerprint: null, folderIdentity: null, inputs: null };
   }
   const hooks = object.buildHooks;
   if (!Array.isArray(hooks) || hooks.length > 2 || hooks.some(hook => {
@@ -464,6 +503,13 @@ export function validatePreviewBuildPlanResultV1(value: unknown, request: Previe
   const count = object.dependencyCount;
   if (typeof count !== "number" || !Number.isSafeInteger(count) || count < dependencies.length) fail("dependencyCount is invalid");
   if (typeof object.fingerprint !== "string" || !/^[0-9a-f]{64}$/.test(object.fingerprint)) fail("fingerprint is invalid");
+  if (typeof object.folderIdentity !== "string" || !/^\d+:\d+$/.test(object.folderIdentity)) fail("folderIdentity is invalid");
+  const inputs = object.inputs;
+  if (!Array.isArray(inputs) || inputs.length === 0 || inputs.length > 16 || inputs.some(entry => {
+    const input = requireObject(entry, "build input");
+    exactKeys(input, ["name", "sha256"]);
+    return typeof input.name !== "string" || !/^[A-Za-z0-9._-]{1,40}$/.test(input.name) || typeof input.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(input.sha256);
+  }) || !inputs.some(entry => (entry as { name: string }).name === "package.json")) fail("inputs are invalid");
   const path = object.workspacePath;
   if (typeof path !== "string" || !path.startsWith("/") && !/^[A-Za-z]:\\/.test(path) || path.length > 4096 || /[\u0000-\u001f\u007f]/u.test(path)) fail("workspacePath is invalid");
   if (object.packageManager !== "npm" && object.packageManager !== "pnpm" && object.packageManager !== "yarn") fail("packageManager is invalid");
@@ -475,6 +521,7 @@ export function validatePreviewBuildPlanResultV1(value: unknown, request: Previe
     lockfile: object.lockfile as boolean, buildScript: script as string, buildHooks: hooks as { name: string; script: string }[],
     dependencies: dependencies as string[], dependencyCount: count as number, yarnBerry: object.yarnBerry as boolean,
     outputDir: object.outputDir as string, needsInstall: object.needsInstall as boolean, fingerprint: object.fingerprint as string,
+    folderIdentity: object.folderIdentity as string, inputs: inputs as { name: string; sha256: string }[],
   };
 }
 

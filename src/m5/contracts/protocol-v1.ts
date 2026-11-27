@@ -67,6 +67,8 @@ export const METHODS_V1 = [
   "preview.resolve",
   "preview.readAsset",
   "preview.buildPlan",
+  "preview.buildReserve",
+  "preview.buildRelease",
 ] as const;
 
 export const EVENTS_V1 = [

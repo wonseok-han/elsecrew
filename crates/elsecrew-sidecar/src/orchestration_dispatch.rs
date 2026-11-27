@@ -99,6 +99,9 @@ impl Sidecar {
         &mut self,
         request: RequestV1,
     ) -> Result<HandledRequest, SidecarError> {
+        if let Some(held) = self.preview_build_refusal(&request) {
+            return Ok(held);
+        }
         self.require_provider_connection(&request)?;
         if request.method == "run.startAgent" {
             validate_agent_adapter_payload_v1("runStartRequest", &request.params)
@@ -795,6 +798,14 @@ impl Sidecar {
                 Some((_, _, attempt)) => *attempt,
                 None => 0,
             };
+            // A build of this task's workspace holds it (PR #22 re-review):
+            // the team waits, it does not stop.
+            if self.preview_build_blocks(&chat) {
+                let now = std::time::Instant::now();
+                let (since, _, attempt) = self.workflow_busy.get(&chat).copied().unwrap_or((None, now, 0));
+                self.workflow_busy.insert(chat.clone(), (since, now + WORKFLOW_BUSY_RETRY * 2, attempt));
+                continue;
+            }
             // An installation in progress: no check or start until it ends,
             // and the team does not stop (PR #20 review B1).
             #[cfg(target_os = "macos")]
@@ -2468,6 +2479,59 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(has_run(&sidecar, &b));
+    }
+
+    /// PR #22 re-review: a build and a team never write one workspace
+    /// together. A build's hold keeps that task's team (and a task of the
+    /// same repository) from checking or starting, and its saves and
+    /// discards wait; a task of another repository goes on. A build cannot
+    /// be reserved while a team works or waits on the task or a task whose
+    /// writes meet it. Released, the team starts.
+    #[test]
+    fn a_build_and_a_team_never_write_one_workspace_together() {
+        let (root, mut sidecar, _) = service();
+        let (chat_a, _) = another_task(&mut sidecar, &root.path().join("source"), "build_a");
+        let (chat_c, _) = another_task(&mut sidecar, &root.path().join("source"), "build_c");
+        let (chat_b, _) = another_task(&mut sidecar, &root.path().join("other"), "build_b");
+        let id = |chat: &Value| chat["chatId"].as_str().unwrap().to_owned();
+        let reserve = |sidecar: &mut Sidecar, chat: &Value, request: &str| {
+            let response = ask(sidecar, request, "preview.buildReserve", json!({"projectId":chat["projectId"],"chatId":chat["chatId"]}));
+            assert!(response.ok, "{response:?}");
+            response.result.unwrap()
+        };
+        let held = reserve(&mut sidecar, &chat_a, "req_hold_a");
+        let hold = held["holdId"].as_str().expect("held").to_owned();
+        assert!(hold.starts_with("pbh_"));
+        // The task itself and a task of the same repository: no team start, no check.
+        for (chat, label) in [(&chat_a, "a"), (&chat_c, "c")] {
+            let refused = start_as(&mut sidecar, chat, &format!("req_team_{label}"));
+            assert_eq!(refused.error.as_ref().map(|e| e.code.as_str()), Some("orchestrationBusy"), "{label}: {refused:?}");
+            let check = sidecar.workflow_request(format!("req_cap_{label}"), "agent.getCapabilities", json!({"runtime":"claude-code","refresh":true,"chatId":id(chat),"roleId":"coordinator"}));
+            let held = sidecar.handle_agent_request_inner(check).unwrap().response.unwrap();
+            assert_eq!(held.error.as_ref().map(|e| e.code.as_str()), Some("orchestrationBusy"), "{label}: the team loop's own check is held too");
+            assert!(sidecar.preview_build_blocks(&id(chat)));
+        }
+        assert!(!has_run(&sidecar, &id(&chat_a)) && !has_run(&sidecar, &id(&chat_c)));
+        // Its workspace's discard (a write) waits as for a working team.
+        let discard = ask_catalog(&mut sidecar, "req_discard_a", "inspectChatDiscard", &chat_a, json!({}));
+        assert_eq!(refused_with(&discard), Some("requestBlocked"), "{discard:?}");
+        // A second build of the task, or of one whose writes meet it: refused.
+        assert_eq!(reserve(&mut sidecar, &chat_a, "req_hold_a2")["refusal"], "busy");
+        assert_eq!(reserve(&mut sidecar, &chat_c, "req_hold_c"), json!({"holdId": null, "refusal": "busy"}));
+        // Another repository goes on.
+        assert!(!sidecar.preview_build_blocks(&id(&chat_b)));
+        // A team working (or waiting) on B: no build of B.
+        sidecar.workflow_chats.insert(id(&chat_b));
+        assert_eq!(reserve(&mut sidecar, &chat_b, "req_hold_b")["refusal"], "busy");
+        sidecar.workflow_chats.remove(&id(&chat_b));
+        // Released: A's team starts.
+        let released = ask(&mut sidecar, "req_release_a", "preview.buildRelease", json!({"holdId": hold}));
+        assert_eq!(released.result.unwrap(), json!({"holdId": hold, "released": true}));
+        assert!(!sidecar.preview_build_blocks(&id(&chat_a)));
+        let after = start_as(&mut sidecar, &chat_a, "req_team_a_after");
+        assert!(after.ok, "{after:?}");
+        // And while that team works, A cannot be reserved.
+        assert_eq!(reserve(&mut sidecar, &chat_a, "req_hold_a3")["refusal"], "busy");
     }
 
     /// PR #20 review B3: a later team of the same task that waits its turn

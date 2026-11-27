@@ -62,34 +62,57 @@ function profilePath(path: string): string {
 
 export interface PreviewSandboxPlacesV1 {
   workspace: string;
-  home: string;
-  /** The real folder above the user's temporary folder (`/private/var/folders/…/…`). */
-  tempRoot: string;
-  /** Never read nor written: the app's own data, keys. */
+  /** This job's own temporary folder (its TMPDIR). */
+  temp: string;
+  /** The package manager's caches, exact folders (`previewBuildCaches`). */
+  caches: readonly string[];
+  /** Never read nor written (`previewBuildHiddenPaths`, plus real targets). */
   hidden: readonly string[];
+}
+
+/** The one package manager's cache folders a job may write (re-review B2):
+ * not `~/Library/Caches` or `~/.cache` as a whole. */
+export function previewBuildCaches(manager: PreviewPackageManagerV1, yarnBerry: boolean, home: string): string[] {
+  switch (manager) {
+    case "npm": return [`${home}/.npm/_cacache`, `${home}/.npm/_logs`];
+    case "pnpm": return [`${home}/Library/pnpm/store`, `${home}/Library/Caches/pnpm`];
+    case "yarn": return yarnBerry ? [`${home}/.yarn/berry/cache`] : [`${home}/Library/Caches/Yarn`];
+  }
+}
+
+/** Key, sign-in and app places a job may never read nor write (re-review
+ * B2). The host adds each one's real target when it leads elsewhere. */
+export function previewBuildHiddenPaths(home: string, appData: readonly string[]): string[] {
+  return [
+    ...appData,
+    `${home}/.ssh`, `${home}/.aws`, `${home}/.config/gh`, `${home}/.config/gcloud`, `${home}/.azure`, `${home}/.kube`,
+    `${home}/.docker`, `${home}/.gnupg`, `${home}/.netrc`, `${home}/.git-credentials`, `${home}/.config/git/credentials`,
+    `${home}/.password-store`, `${home}/Library/Keychains`, `${home}/.claude`, `${home}/.codex`,
+  ];
 }
 
 /**
  * The macOS sandbox (`sandbox-exec`) a build or an installation runs in
- * (PR #22 review B2). Writing: only the workspace, the temporary folders and
- * the package managers' caches. Reading: everything the person can read,
- * except the app's own data and key folders. Network: only for installing.
- * Everything the job starts inherits it.
+ * (PR #22 review B2, re-review B2). Writing: only this workspace, this
+ * job's own temporary folder and the package manager's exact cache folders
+ * (a missing parent such as `~/.npm` may be created, nothing else in it).
+ * Reading: everything the person can read, except the hidden places.
+ * Network: only for installing. Everything the job starts inherits it.
  */
 export function previewBuildSandboxProfile(step: PreviewBuildStepV1, places: PreviewSandboxPlacesV1): string {
-  const home = places.home;
-  const writable = [
-    places.workspace, places.tempRoot, "/private/tmp",
-    `${home}/.npm`, `${home}/Library/Caches`, `${home}/.cache`, `${home}/Library/pnpm`, `${home}/.local/share/pnpm`,
-    `${home}/.pnpm-store`, `${home}/.yarn`,
-  ];
-  const hidden = [...places.hidden, `${home}/.ssh`, `${home}/.aws`, `${home}/.gnupg`, `${home}/Library/Keychains`];
+  const writable = [places.workspace, places.temp, ...places.caches];
+  // A cache's missing parents below the home folder (`~/.npm`, `~/.yarn/berry`) may be created; nothing else in them.
+  const parents = [...new Set(places.caches.flatMap(cache => {
+    const parts = cache.split("/");
+    return parts.slice(3, -1).map((_, index) => parts.slice(0, index + 4).join("/"));
+  }))];
   return [
     "(version 1)",
     "(allow default)",
     "(deny file-write*)",
     `(allow file-write* ${writable.map(path => `(subpath ${profilePath(path)})`).join(" ")} (literal "/dev/null") (literal "/dev/zero") (regex #"^/dev/tty") (subpath "/dev/fd"))`,
-    `(deny file-read* file-write* ${hidden.map(path => `(subpath ${profilePath(path)})`).join(" ")})`,
+    ...(parents.length ? [`(allow file-write-create ${parents.map(path => `(literal ${profilePath(path)})`).join(" ")})`] : []),
+    `(deny file-read* file-write* ${places.hidden.map(path => `(subpath ${profilePath(path)})`).join(" ")})`,
     ...(step === "build" ? ["(deny network*)"] : []),
   ].join("\n");
 }
@@ -160,8 +183,12 @@ const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u00
 const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f]/g;
 /** What a hidden line becomes. */
 export const PREVIEW_LOG_HIDDEN = "(가림)";
-const BLOCK_BEGIN = /-----BEGIN [A-Z0-9 ]+-----/;
-const BLOCK_END = /-----END [A-Z0-9 ]+-----/;
+const BEGIN_MARK = "-----BEGIN ";
+const END_MARK = "-----END ";
+/** What a line too long to keep says about a block, from its whole text. */
+const LONG_PLAIN = "\u0000long";
+const LONG_OPENS = "\u0000long-opens-block";
+const LONG_CLOSES = "\u0000long-closes-block";
 /** Key material with no name: a long unbroken run of base64 with upper,
  * lower case and digits, and at most two slashes (a path has more; a
  * lowercase commit hash is not a key). */
@@ -172,24 +199,30 @@ function hasKeyMaterial(line: string): boolean {
 
 /**
  * One output stream's lines as they are kept and shown (PR #22 review B4,
- * the PR #11 rule, fail closed). Stateful: a PEM block (`-----BEGIN … -----`
- * to `-----END … -----`) is hidden whole, every line of it, however it is
- * split. A line with nameless key material, or one too long to keep whole,
- * is hidden rather than cut. Everything else is masked with `maskSecrets`.
+ * re-review B4; the PR #11 rule, fail closed). Stateful: once a block
+ * begins (`-----BEGIN `), every line is hidden until a line ends it
+ * (`-----END `) or the stream ends — however long the lines are, however
+ * they were split: the last marker on a line decides. A line with nameless
+ * key material, or one too long to keep whole, is hidden rather than cut.
+ * Everything else is masked with `maskSecrets`.
  */
 export class PreviewLogMasker {
   #inBlock = false;
+  /** Whether a block is open now (tests). */
+  get inBlock(): boolean { return this.#inBlock; }
   line(raw: string): string {
-    const frames = raw.replace(ANSI, "").split("\r");
+    if (raw === LONG_OPENS) { this.#inBlock = true; return PREVIEW_LOG_HIDDEN; }
+    if (raw === LONG_CLOSES) { this.#inBlock = false; return PREVIEW_LOG_HIDDEN; }
+    if (raw === LONG_PLAIN) return PREVIEW_LOG_HIDDEN;
+    const plain = raw.replace(ANSI, "");
+    const begin = plain.lastIndexOf(BEGIN_MARK);
+    const end = plain.lastIndexOf(END_MARK);
+    if (this.#inBlock || begin >= 0) {
+      if (begin >= 0 || end >= 0) this.#inBlock = begin > end;
+      return PREVIEW_LOG_HIDDEN;
+    }
+    const frames = plain.split("\r");
     const line = (frames.reverse().find(frame => frame.trim().length > 0) ?? "").replace(CONTROL, "").replace(/\t/g, "  ");
-    if (this.#inBlock) {
-      if (BLOCK_END.test(line)) this.#inBlock = false;
-      return PREVIEW_LOG_HIDDEN;
-    }
-    if (BLOCK_BEGIN.test(line)) {
-      this.#inBlock = !BLOCK_END.test(line.slice(line.search(BLOCK_BEGIN) + 10));
-      return PREVIEW_LOG_HIDDEN;
-    }
     // An escaped block inside one line (a JSON key file's "-----BEGIN…\n…").
     if (/BEGIN [A-Z ]*(?:PRIVATE )?KEY/.test(line) || hasKeyMaterial(line) || line.length > PREVIEW_BUILD_LINE_MAX_CHARS_V1) return PREVIEW_LOG_HIDDEN;
     return maskSecrets(line);
@@ -203,39 +236,64 @@ export function previewBuildLine(raw: string): string {
 }
 
 /** Splits a stream into whole lines; the rest waits for more. A line that
- * grows past the bound is never cut in two (a secret could straddle the
- * cut): it becomes one hidden line and the rest of it is dropped. */
+ * grows past the bound is never kept or cut (a secret could straddle the
+ * cut): it is read to its end only to learn whether it leaves a block open,
+ * and becomes one hidden line that tells the masker so (re-review B4). */
 export class PreviewLineSplitter {
   #pending = "";
-  #dropping = false;
+  #long: { last: "begin" | "end" | null; carry: string } | null = null;
+  #scan(part: string): void {
+    const long = this.#long!;
+    const text = long.carry + part;
+    const begin = text.lastIndexOf(BEGIN_MARK);
+    const end = text.lastIndexOf(END_MARK);
+    if (begin >= 0 || end >= 0) long.last = begin > end ? "begin" : "end";
+    long.carry = text.slice(-16);
+  }
+  #marker(): string {
+    const last = this.#long?.last ?? null;
+    this.#long = null;
+    return last === "begin" ? LONG_OPENS : last === "end" ? LONG_CLOSES : LONG_PLAIN;
+  }
   push(chunk: string): string[] {
     const out: string[] = [];
     let text = chunk;
-    if (this.#dropping) {
+    while (text.length > 0) {
       const newline = text.indexOf("\n");
-      if (newline < 0) return out;
-      this.#dropping = false;
-      text = text.slice(newline + 1);
-    }
-    this.#pending += text;
-    const parts = this.#pending.split("\n");
-    this.#pending = parts.pop() ?? "";
-    out.push(...parts.map(part => part.length > PREVIEW_BUILD_PENDING_MAX_CHARS ? PREVIEW_LOG_HIDDEN_LONG : part));
-    if (this.#pending.length > PREVIEW_BUILD_PENDING_MAX_CHARS) {
-      out.push(PREVIEW_LOG_HIDDEN_LONG);
+      if (this.#long) {
+        this.#scan(newline < 0 ? text : text.slice(0, newline));
+        if (newline < 0) return out;
+        out.push(this.#marker());
+        text = text.slice(newline + 1);
+        continue;
+      }
+      if (newline < 0) {
+        this.#pending += text;
+        if (this.#pending.length > PREVIEW_BUILD_PENDING_MAX_CHARS) {
+          this.#long = { last: null, carry: "" };
+          this.#scan(this.#pending);
+          this.#pending = "";
+        }
+        return out;
+      }
+      const line = this.#pending + text.slice(0, newline);
       this.#pending = "";
-      this.#dropping = true;
+      text = text.slice(newline + 1);
+      if (line.length > PREVIEW_BUILD_PENDING_MAX_CHARS) {
+        this.#long = { last: null, carry: "" };
+        this.#scan(line);
+        out.push(this.#marker());
+      } else out.push(line);
     }
     return out;
   }
   flush(): string[] {
+    if (this.#long) return [this.#marker()];
     const rest = this.#pending;
     this.#pending = "";
     return rest.length > 0 ? [rest] : [];
   }
 }
-/** Marks a line too long to keep (it reaches the masker as itself: hidden). */
-const PREVIEW_LOG_HIDDEN_LONG = "x".repeat(PREVIEW_BUILD_LINE_MAX_CHARS_V1 + 1);
 
 /** The kept log's file name: no project or chat name in it. */
 export function previewBuildLogName(projectId: string, chatId: string): string {
@@ -256,6 +314,16 @@ export interface PreviewBuildConsentV1 {
   hooks: { name: string; script: string }[];
   dependencies: string[];
   dependencyCount: number;
+  /** The folder's device:inode (with `folder`). */
+  folderIdentity: string;
+  /** Every input file and its SHA-256: what the fingerprint stands for. */
+  inputs: { name: string; sha256: string }[];
+  /** The person's own package manager settings files that apply. */
+  userConfigs: string[];
+  /** Where it may write besides the workspace and its own temporary folder. */
+  caches: string[];
+  /** What it may never read nor write. */
+  hidden: string[];
   /** Asked again: what was agreed changed before it ran. */
   changed: boolean;
 }
@@ -263,20 +331,27 @@ export function previewBuildConsentBox(consent: PreviewBuildConsentV1, korean: b
   const install = consent.step === "install";
   const line = (text: string) => previewBuildLine(text);
   const more = consent.dependencyCount - consent.dependencies.length;
+  // Every input the fingerprint stands for, by name and hash (re-review B1).
+  const inputs = consent.inputs.map(input => `${input.name} (${input.sha256.slice(0, 16)})`).join(", ");
+  const list = (items: readonly string[]) => items.join(", ");
   if (korean) {
     const packages = `${consent.dependencies.join(", ")}${more > 0 ? ` 외 ${more}개` : ""}`;
     return {
       message: `${consent.changed ? "내용이 바뀌어 다시 확인해요. " : ""}${install ? "필요한 프로그램을 설치할까요? (인터넷 사용)" : "이 작업을 빌드할까요?"}`,
       detail: [
         install
-          ? `인터넷에서 아래 꾸러미(와 그것들이 쓰는 꾸러미)를 내려받아 작업 공간 안(node_modules)에 설치해요. 꾸러미의 설치 스크립트는 실행하지 않아요.`
+          ? "인터넷에서 아래 꾸러미(와 그것들이 쓰는 꾸러미)를 내려받아 작업 공간 안(node_modules)에 설치해요. 꾸러미의 설치 스크립트는 실행하지 않아요."
           : "이 작업의 코드가 내 컴퓨터에서 실행돼요(미리보기의 보호 화면 밖). 믿을 수 있는 작업일 때만 진행하세요.",
-        "실행 중에는 작업 공간·임시 폴더·꾸러미 캐시에만 쓸 수 있고, 앱 데이터와 키 폴더(~/.ssh 등)는 읽을 수 없어요. 그 밖의 내 파일은 읽을 수 있어요." + (install ? "" : " 빌드 중에는 인터넷을 쓸 수 없어요."),
+        `쓸 수 있는 곳: 이 작업 공간, 이 ${install ? "설치" : "빌드"} 전용 임시 폴더, ${list(consent.caches)}.`,
+        `읽지도 쓰지도 못하는 곳: ${list(consent.hidden)}.`,
+        `그 밖의 내 파일은 읽을 수 있어요.${install ? "" : " 빌드 중에는 인터넷을 쓸 수 없어요."}`,
         "", `실행할 명령: ${consent.command}`,
         ...(consent.buildScript ? [`빌드 스크립트: ${line(consent.buildScript)}`] : []),
         ...consent.hooks.map(hook => `함께 실행: ${hook.name} — ${line(hook.script)}`),
         ...(install ? [`꾸러미 ${consent.dependencyCount}개: ${packages}`] : []),
-        `프로그램: ${consent.program}`, `위치: ${consent.folder}`,
+        `확인한 파일: ${inputs}`,
+        ...(consent.userConfigs.length ? [`적용되는 내 설정: ${list(consent.userConfigs)}`] : []),
+        `프로그램: ${consent.program}`, `위치: ${consent.folder} (폴더 ${consent.folderIdentity})`,
       ].join("\n"),
       buttons: ["취소", install ? "설치" : "빌드"],
     };
@@ -288,12 +363,16 @@ export function previewBuildConsentBox(consent: PreviewBuildConsentV1, korean: b
       install
         ? "Downloads the packages below (and those they use) from the internet into the workspace (node_modules). Their install scripts are not run."
         : "This task's code runs on your computer (outside the preview's protection). Continue only if you trust this work.",
-      "While it runs it can write only to the workspace, temporary folders and package caches, and cannot read the app's data or key folders (~/.ssh and others). It can read your other files." + (install ? "" : " A build cannot use the internet."),
+      `It can write only to: this workspace, a temporary folder of this ${install ? "installation" : "build"} only, ${list(consent.caches)}.`,
+      `It can neither read nor write: ${list(consent.hidden)}.`,
+      `It can read your other files.${install ? "" : " A build cannot use the internet."}`,
       "", `Command: ${consent.command}`,
       ...(consent.buildScript ? [`Build script: ${line(consent.buildScript)}`] : []),
       ...consent.hooks.map(hook => `Also runs: ${hook.name} — ${line(hook.script)}`),
       ...(install ? [`${consent.dependencyCount} packages: ${packages}`] : []),
-      `Program: ${consent.program}`, `Folder: ${consent.folder}`,
+      `Files checked: ${inputs}`,
+      ...(consent.userConfigs.length ? [`Your settings that apply: ${list(consent.userConfigs)}`] : []),
+      `Program: ${consent.program}`, `Folder: ${consent.folder} (folder ${consent.folderIdentity})`,
     ].join("\n"),
     buttons: ["Cancel", install ? "Install" : "Build"],
   };

@@ -70,11 +70,16 @@ test("log lines: colours and progress frames off, secrets masked, bounded", () =
 
 test("main's consent box shows the exact command, program and folder; the network for installing", () => {
   const consent = { step: "install" as const, command: "npm ci --ignore-scripts --no-audit --no-fund", program: "/opt/homebrew/bin/npm", folder: "/Users/me/elsecrew/workspaces/app/t1",
-    buildScript: null, hooks: [], dependencies: ["react", "vite"], dependencyCount: 12, changed: false };
+    buildScript: null, hooks: [], dependencies: ["react", "vite"], dependencyCount: 12, changed: false, folderIdentity: "16777232:4242",
+    inputs: [{ name: "package.json", sha256: "ab".repeat(32) }, { name: "package-lock.json", sha256: "cd".repeat(32) }], userConfigs: ["~/.npmrc"],
+    caches: ["/Users/me/.npm/_cacache"], hidden: ["/Users/me/.ssh", "/Users/me/Library/Keychains"] };
   const ko = previewBuildConsentBox(consent, true);
   assert.match(ko.message, /인터넷/);
   for (const shown of ["실행할 명령: npm ci --ignore-scripts --no-audit --no-fund", "프로그램: /opt/homebrew/bin/npm", "위치: /Users/me/elsecrew/workspaces/app/t1",
-    "꾸러미 12개: react, vite 외 10개", "설치 스크립트는 실행하지 않아요", "그 밖의 내 파일은 읽을 수 있어요"]) assert.ok(ko.detail.includes(shown), shown);
+    "꾸러미 12개: react, vite 외 10개", "설치 스크립트는 실행하지 않아요", "그 밖의 내 파일은 읽을 수 있어요",
+    // PR #22 re-review B1·B2: every input and its hash, the folder's identity, the person's settings, and the sandbox's own lists.
+    `확인한 파일: package.json (${"ab".repeat(8)}), package-lock.json (${"cd".repeat(8)})`, "(폴더 16777232:4242)", "적용되는 내 설정: ~/.npmrc",
+    "쓸 수 있는 곳: 이 작업 공간, 이 설치 전용 임시 폴더, /Users/me/.npm/_cacache.", "읽지도 쓰지도 못하는 곳: /Users/me/.ssh, /Users/me/Library/Keychains."]) assert.ok(ko.detail.includes(shown), shown);
   assert.deepEqual(ko.buttons, ["취소", "설치"]);
   // PR #22 review B2: no claim that the output stays inside; what the sandbox allows is said plainly.
   const build = previewBuildConsentBox({ ...consent, step: "build", command: "npm run build", buildScript: "vite build", hooks: [{ name: "postbuild", script: "node copy.js" }] }, false);
@@ -101,18 +106,20 @@ test("a build output's paths and a single-page app's routes", () => {
 });
 
 test("the sidecar's plan and the IPC are strict: the page names no folder or command", () => {
-  assert.deepEqual([...PREVIEW_METHODS_V1], ["preview.resolve", "preview.readAsset", "preview.buildPlan"]);
+  assert.deepEqual([...PREVIEW_METHODS_V1], ["preview.resolve", "preview.readAsset", "preview.buildPlan", "preview.buildReserve", "preview.buildRelease"]);
   const request = { projectId: "p", chatId: "c" };
   const plan = { chatId: "c", projectId: "p", worktreeId: "w", workspaceIdentity: "i", refusal: null, workspacePath: "/Users/me/ws", packageManager: "npm", lockfile: true, buildScript: "vite build",
-    buildHooks: [{ name: "prebuild", script: "x" }], dependencies: ["react"], dependencyCount: 1, yarnBerry: false, outputDir: "dist", needsInstall: false, fingerprint: "f".repeat(64) };
+    buildHooks: [{ name: "prebuild", script: "x" }], dependencies: ["react"], dependencyCount: 1, yarnBerry: false, outputDir: "dist", needsInstall: false, fingerprint: "f".repeat(64),
+    folderIdentity: "1:2", inputs: [{ name: "package.json", sha256: "e".repeat(64) }] };
   assert.equal(validatePreviewBuildPlanResultV1(plan, request).outputDir, "dist");
   for (const bad of [
     { ...plan, chatId: "other" }, { ...plan, workspacePath: "relative" }, { ...plan, outputDir: "../out" }, { ...plan, outputDir: ".git" },
     { ...plan, outputDir: "src" }, { ...plan, packageManager: "bun" }, { ...plan, refusal: "noPackage" }, { ...plan, extra: 1 }, { ...plan, refusal: "nope" },
     { ...plan, fingerprint: "short" }, { ...plan, buildHooks: [{ name: "preinstall", script: "x" }] }, { ...plan, dependencyCount: 0 },
+    { ...plan, inputs: [] }, { ...plan, inputs: [{ name: "../x", sha256: "e".repeat(64) }] }, { ...plan, folderIdentity: "x" },
   ]) assert.throws(() => validatePreviewBuildPlanResultV1(bad, request), JSON.stringify(bad));
   const refused = { ...plan, refusal: "outputNotIgnored", workspacePath: null, packageManager: null, lockfile: false, buildScript: null, outputDir: null, needsInstall: false,
-    buildHooks: null, dependencies: null, dependencyCount: null, fingerprint: null };
+    buildHooks: null, dependencies: null, dependencyCount: null, fingerprint: null, folderIdentity: null, inputs: null };
   assert.equal(validatePreviewBuildPlanResultV1(refused, request).refusal, "outputNotIgnored");
   assert.ok(isPreviewOutputDirV1("out/web") && !isPreviewOutputDirV1("node_modules/x") && !isPreviewOutputDirV1("a/../b"));
 
@@ -147,8 +154,14 @@ function runner(overrides: Partial<PreviewBuildOptionsV1> = {}, planOverrides: P
   const confirms: unknown[] = [];
   let answer = true;
   let plan: PreviewBuildPlanResultV1 = { chatId: "c1", projectId: "p", worktreeId: "w", workspaceIdentity: "i1", refusal: null, workspacePath: "/ws/one", packageManager: "npm", lockfile: true,
-    buildScript: "vite build", buildHooks: [], dependencies: ["react", "vite"], dependencyCount: 2, yarnBerry: false, outputDir: "dist", needsInstall: false, fingerprint: "a".repeat(64), ...planOverrides };
-  let tools = { program: "/bin/npm", pathDirs: ["/bin"], identity: "npm-1" };
+    buildScript: "vite build", buildHooks: [], dependencies: ["react", "vite"], dependencyCount: 2, yarnBerry: false, outputDir: "dist", needsInstall: false, fingerprint: "a".repeat(64),
+    folderIdentity: "1:2", inputs: [{ name: "package.json", sha256: "b".repeat(64) }], ...planOverrides };
+  let tools = { program: "/bin/npm", pathDirs: ["/bin"], identity: "npm-1", userConfigs: [] as string[] };
+  const holds: string[] = [];
+  const released: string[] = [];
+  const temps: string[] = [];
+  let reserve: "ok" | "busy" = "ok";
+  let records: unknown = null;
   /** Processes "alive" now, by pid → start time (the fake process table). */
   const table = new Map<number, { ppid: number; pgid: number; started: string }>();
   const killed: [number, string][] = [];
@@ -156,16 +169,23 @@ function runner(overrides: Partial<PreviewBuildOptionsV1> = {}, planOverrides: P
   let written = true;
   const manager = new PreviewBuildManagerV1({
     enabled: true,
-    sidecar: () => ({ previewBuildPlan: async ({ chatId }) => ({ ...plan, chatId }) }),
+    sidecar: () => ({
+      previewBuildPlan: async ({ chatId }) => ({ ...plan, chatId }),
+      previewBuildReserve: async () => { if (reserve === "busy") return { holdId: null, refusal: "busy" as const }; const id = `pbh_${String(holds.length).padStart(32, "0")}`; holds.push(id); return { holdId: id, refusal: null }; },
+      previewBuildRelease: async ({ holdId }) => { released.push(holdId); return { holdId, released: true }; },
+    }),
     confirm: async (consent) => { confirms.push(consent); return typeof answer === "function" ? (answer as () => Promise<boolean>)() : answer; },
     findTools: () => tools,
     isWorkspaceFolder: () => true,
-    confine: (_step, _workspace, program, args) => ({ program: "/usr/bin/sandbox-exec", args: ["-p", "(profile)", program, ...args] }),
+    places: () => ({ caches: ["/Users/me/.npm/_cacache"], hidden: ["/Users/me/.ssh"] }),
+    makeTemp: () => { const temp = `/tmp/elsecrew-build-${temps.length}`; temps.push(temp); return temp; },
+    removeTemp: (path) => { temps.splice(temps.indexOf(path), 1); },
+    confine: (_step, _workspace, _temp, _places, program, args) => ({ program: "/usr/bin/sandbox-exec", args: ["-p", "(profile)", program, ...args] }),
     killProcess: (pid, started, signal) => { if (table.get(pid)?.started === started) { killed.push([pid, signal]); if (started !== "immortal") table.delete(pid); } },
     processes: () => [...table].map(([pid, entry]) => ({ pid, ...entry })),
     isAlive: (pid, started) => table.get(pid)?.started === started,
     saveRunning: (records) => { running.push(records); },
-    loadRunning: () => [],
+    loadRunning: () => { if (records instanceof Error) throw records; return records as never; },
     outputWritten: () => written,
     spawn: (program, args, options) => {
       spawns.push({ program, args, cwd: options.cwd });
@@ -191,7 +211,9 @@ function runner(overrides: Partial<PreviewBuildOptionsV1> = {}, planOverrides: P
   const ask = (action: "start" | "cancel" | "status" | "plan", chatId = "c1", extra: Record<string, unknown> = {}) =>
     manager.request({ action, projectId: "p", chatId, ...extra } as never) as Promise<{ outcome?: string; job: PreviewBuildJobViewV1; plan?: unknown }>;
   return {
-    manager, spawns, children, kills, logs, confirms, ask, table, killed, running,
+    manager, spawns, children, kills, logs, confirms, ask, table, killed, running, holds, released, temps,
+    setReserve(value: "ok" | "busy") { reserve = value; },
+    setRecords(value: unknown) { records = value; },
     setAnswer(value: boolean | (() => Promise<boolean>)) { answer = value as boolean; },
     setPlan(next: Partial<PreviewBuildPlanResultV1>) { plan = { ...plan, ...next }; },
     setTools(next: Partial<typeof tools>) { tools = { ...tools, ...next }; },
@@ -438,7 +460,8 @@ import { mkdtempSync, readFileSync, readdirSync, writeFileSync, existsSync, rmSy
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { spawn as realSpawn, spawnSync } from "node:child_process";
-import { PreviewLogMasker, previewBuildSandboxProfile } from "../electron/preview-build-policy.ts";
+import { PreviewLogMasker, previewBuildCaches, previewBuildHiddenPaths, previewBuildSandboxProfile } from "../electron/preview-build-policy.ts";
+import { hiddenWithTargets } from "../electron/preview-build-host.ts";
 
 /** Synthetic secrets only (as in tests/fixtures/m5/secret-mask-cases.json). */
 const FAKE = {
@@ -479,10 +502,13 @@ test("PR #22 review B4: what a real build prints reaches neither the page nor th
     writeFileSync(script, `const t = ${JSON.stringify(text)}; for (let i = 0; i < t.length; i += 7) { (i % 2 ? process.stderr : process.stdout).write(t.slice(i, i + 7)); } process.stdout.write("\\n");`);
     const logs = join(dir, "logs");
     const plan = { chatId: "c1", projectId: "p", worktreeId: "w", workspaceIdentity: "i1", refusal: null, workspacePath: dir, packageManager: "npm" as const, lockfile: true,
-      buildScript: "x", buildHooks: [], dependencies: [], dependencyCount: 0, yarnBerry: false, outputDir: "dist", needsInstall: false, fingerprint: "a".repeat(64) };
+      buildScript: "x", buildHooks: [], dependencies: [], dependencyCount: 0, yarnBerry: false, outputDir: "dist", needsInstall: false, fingerprint: "a".repeat(64),
+      folderIdentity: "1:2", inputs: [{ name: "package.json", sha256: "b".repeat(64) }] };
     const manager = new PreviewBuildManagerV1({
-      enabled: true, sidecar: () => ({ previewBuildPlan: async () => plan }), confirm: async () => true,
-      findTools: () => ({ program: process.execPath, pathDirs: [], identity: "node" }), isWorkspaceFolder: () => true,
+      enabled: true, confirm: async () => true,
+      sidecar: () => ({ previewBuildPlan: async () => plan, previewBuildReserve: async () => ({ holdId: `pbh_${"0".repeat(32)}`, refusal: null }), previewBuildRelease: async ({ holdId }) => ({ holdId, released: true }) }),
+      findTools: () => ({ program: process.execPath, pathDirs: [], identity: "node", userConfigs: [] }), isWorkspaceFolder: () => true,
+      places: () => ({ caches: [], hidden: [] }), makeTemp: () => dir, removeTemp: () => undefined,
       // The real program, not npm: node printing the secrets.
       confine: () => ({ program: process.execPath, args: [script] }),
       spawn: (program, args, options) => realSpawn(program, args, { ...options, detached: false }),
@@ -512,39 +538,233 @@ test("PR #22 review B4: what a real build prints reaches neither the page nor th
 // ---------------------------------------------------------------------------
 // PR #22 review B2: the sandbox.
 
-test("PR #22 review B2: the sandbox profile writes only inside, hides the app's data and keys, and cuts the network for building", () => {
-  const places = { workspace: "/Users/me/elsecrew/workspaces/app/t1", home: "/Users/me", tempRoot: "/private/var/folders/ab/cd", hidden: ["/Users/me/Library/Application Support/Elsecrew"] };
+test("PR #22 re-review B2: the profile writes only this workspace, this job's temporary folder and the exact caches; hides keys and the app", () => {
+  const places = { workspace: "/Users/me/elsecrew/workspaces/app/t1", temp: "/private/var/folders/ab/cd/T/elsecrew-build-x1",
+    caches: previewBuildCaches("npm", false, "/Users/me"), hidden: previewBuildHiddenPaths("/Users/me", ["/Users/me/Library/Application Support/Elsecrew"]) };
   const build = previewBuildSandboxProfile("build", places);
   assert.match(build, /\(deny file-write\*\)/);
-  assert.ok(build.includes('(subpath "/Users/me/elsecrew/workspaces/app/t1")') && build.includes('(subpath "/Users/me/.npm")'));
-  assert.ok(build.includes('(deny file-read* file-write* (subpath "/Users/me/Library/Application Support/Elsecrew")') && build.includes('(subpath "/Users/me/.ssh")'));
+  for (const allowed of [places.workspace, places.temp, "/Users/me/.npm/_cacache", "/Users/me/.npm/_logs"]) assert.ok(build.includes(`(subpath "${allowed}")`), allowed);
+  // No longer: the whole cache folders, the whole temporary root, /private/tmp.
+  for (const wide of ['(subpath "/Users/me/Library/Caches")', '(subpath "/Users/me/.cache")', '(subpath "/private/tmp")', '(subpath "/private/var/folders/ab/cd")', '(subpath "/Users/me/.npm")']) assert.ok(!build.includes(wide), wide);
+  assert.ok(build.includes('(allow file-write-create (literal "/Users/me/.npm"))'), "only the missing parent may be made");
+  for (const hidden of ["/Users/me/.ssh", "/Users/me/.aws", "/Users/me/.config/gh", "/Users/me/Library/Keychains", "/Users/me/.netrc", "/Users/me/.claude", "/Users/me/.codex", "/Users/me/Library/Application Support/Elsecrew"]) {
+    assert.ok(build.includes(`(subpath "${hidden}")`) && places.hidden.includes(hidden), hidden);
+  }
   assert.match(build, /\(deny network\*\)/);
   assert.doesNotMatch(previewBuildSandboxProfile("install", places), /deny network/);
+  assert.deepEqual(previewBuildCaches("pnpm", false, "/h"), ["/h/Library/pnpm/store", "/h/Library/Caches/pnpm"]);
+  assert.deepEqual(previewBuildCaches("yarn", true, "/h"), ["/h/.yarn/berry/cache"]);
   for (const bad of ['/a"b', "/a\\b", "relative", "/a\nb"]) assert.throws(() => previewBuildSandboxProfile("build", { ...places, workspace: bad }));
 });
 
-test("PR #22 review B2: under the real sandbox a build cannot write outside, read the app's data or reach the network (macOS)", { skip: process.platform !== "darwin" || !existsSync("/usr/bin/sandbox-exec") }, () => {
+test("PR #22 re-review B2: under the real sandbox every key and app place is refused (also through a link's real target), and only the exact places are writable (macOS)", { skip: process.platform !== "darwin" || !existsSync("/usr/bin/sandbox-exec") }, () => {
   const root = realpathSync(mkdtempSync(join(homedir(), ".elsecrew-sbx-test-")));
   try {
+    // A home of its own (the profile only knows the paths it is given).
+    const home = join(root, "home");
     const workspace = join(root, "ws");
+    const temps = join(root, "tmp");
+    const temp = join(temps, "elsecrew-build-a");
+    const otherTemp = join(temps, "other");
     const app = join(root, "app-data");
-    spawnSync("/bin/mkdir", ["-p", workspace, app]);
-    writeFileSync(join(app, "secret.txt"), "app secret");
-    const profile = previewBuildSandboxProfile("build", { workspace, home: realpathSync(homedir()), tempRoot: realpathSync(join(tmpdir(), "..")), hidden: [app] });
-    const script = `
-      const fs = require("fs"); const out = {};
-      const tryIt = (name, run) => { try { run(); out[name] = "ok"; } catch (e) { out[name] = e.code || String(e); } };
-      tryIt("inside", () => fs.writeFileSync(${JSON.stringify(join(workspace, "in.txt"))}, "x"));
-      tryIt("outside", () => fs.writeFileSync(${JSON.stringify(join(root, "out.txt"))}, "x"));
-      tryIt("readApp", () => fs.readFileSync(${JSON.stringify(join(app, "secret.txt"))}));
-      require("net").connect(80, "1.1.1.1").on("error", e => { out.net = e.code; console.log(JSON.stringify(out)); }).on("connect", () => { out.net = "ok"; console.log(JSON.stringify(out)); process.exit(0); });
-      setTimeout(() => { out.net ??= "timeout"; console.log(JSON.stringify(out)); process.exit(0); }, 3000);`;
+    const keyTarget = join(root, "elsewhere-keys");
+    for (const dir of [workspace, temp, otherTemp, app, keyTarget, join(home, ".aws"), join(home, ".config/gh"), join(home, "Library/Keychains"), join(home, ".npm"), join(home, "Library/Caches/other"), join(home, ".claude")]) spawnSync("/bin/mkdir", ["-p", dir]);
+    writeFileSync(join(keyTarget, "id_ed25519"), "FAKEKEY");
+    // ~/.ssh is a link to a folder elsewhere: refused by its name and by its real target.
+    spawnSync("/bin/ln", ["-s", keyTarget, join(home, ".ssh")]);
+    for (const [path, text] of [[join(home, ".aws/credentials"), "x"], [join(home, ".config/gh/hosts.yml"), "x"], [join(home, "Library/Keychains/login.keychain-db"), "x"], [join(home, ".netrc"), "x"], [join(home, ".claude/.credentials.json"), "x"], [join(app, "secret.txt"), "x"]]) writeFileSync(path, text);
+    const hidden = hiddenWithTargets(previewBuildHiddenPaths(home, [app]));
+    assert.ok(hidden.includes(keyTarget), "the link's real target is hidden too");
+    const profile = previewBuildSandboxProfile("build", { workspace, temp, caches: previewBuildCaches("npm", false, home), hidden });
+    const checks: Record<string, [string, "read" | "write"]> = {
+      sshByName: [join(home, ".ssh/id_ed25519"), "read"], sshByTarget: [join(keyTarget, "id_ed25519"), "read"],
+      aws: [join(home, ".aws/credentials"), "read"], gh: [join(home, ".config/gh/hosts.yml"), "read"], keychain: [join(home, "Library/Keychains/login.keychain-db"), "read"],
+      netrc: [join(home, ".netrc"), "read"], claude: [join(home, ".claude/.credentials.json"), "read"], app: [join(app, "secret.txt"), "read"],
+      writeSsh: [join(keyTarget, "new"), "write"], writeHome: [join(home, "x.txt"), "write"], writeOtherCache: [join(home, "Library/Caches/other/x"), "write"],
+      writeOtherTemp: [join(otherTemp, "x"), "write"], writeNpmRoot: [join(home, ".npm/x"), "write"],
+      workspace: [join(workspace, "x"), "write"], temp: [join(temp, "x"), "write"], npmCache: [join(home, ".npm/_cacache/x"), "write"],
+    };
+    const script = `const fs = require("fs"); const out = {};
+      for (const [name, [path, how]] of Object.entries(${JSON.stringify(checks)})) {
+        try { if (how === "read") fs.readFileSync(path); else { fs.mkdirSync(require("path").dirname(path), { recursive: true }); fs.writeFileSync(path, "x"); } out[name] = "ok"; } catch (e) { out[name] = e.code || String(e); }
+      }
+      console.log(JSON.stringify(out));`;
     const run = spawnSync("/usr/bin/sandbox-exec", ["-p", profile, process.execPath, "-e", script], { cwd: workspace, encoding: "utf8" });
     const out = JSON.parse(run.stdout.trim().split("\n").at(-1)!) as Record<string, string>;
-    assert.equal(out.inside, "ok");
-    assert.equal(out.outside, "EPERM");
-    assert.equal(out.readApp, "EPERM");
-    assert.notEqual(out.net, "ok");
-    assert.ok(!existsSync(join(root, "out.txt")));
+    for (const name of ["sshByName", "sshByTarget", "aws", "gh", "keychain", "netrc", "claude", "app", "writeSsh", "writeHome", "writeOtherCache", "writeOtherTemp", "writeNpmRoot"]) {
+      assert.equal(out[name], "EPERM", `${name}: ${out[name]}`);
+    }
+    for (const name of ["workspace", "temp", "npmCache"]) assert.equal(out[name], "ok", `${name}: ${out[name]}`);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---------------------------------------------------------------------------
+// PR #22 re-review.
+
+test("PR #22 re-review B1: a second reading that shows anything else — even with the same fingerprint — is asked again", async () => {
+  // Only the shown script differs; the fingerprint is the same (the race the review found).
+  const r = runner();
+  const answers: (() => boolean)[] = [() => { r.setPlan({ buildScript: "vite build && curl evil" }); return true; }, () => false];
+  r.setAnswer(async () => answers.shift()!());
+  assert.equal((await r.ask("start", "c1", { step: "build" })).outcome, "changed");
+  assert.equal(r.spawns.length, 0);
+  assert.equal((r.confirms[1] as { buildScript: string }).buildScript, "vite build && curl evil", "the second box shows what would run now");
+  // A settings file of the person's own that appears, or an input's hash: asked again too.
+  for (const change of [{ tools: { userConfigs: ["~/.npmrc"], identity: "npm-1#npmrc" } }, { plan: { inputs: [{ name: "package.json", sha256: "c".repeat(64) }] } }]) {
+    const t = runner();
+    const more: (() => boolean)[] = [() => { if (change.plan) t.setPlan(change.plan); if (change.tools) t.setTools(change.tools); return true; }, () => false];
+    t.setAnswer(async () => more.shift()!());
+    assert.equal((await t.ask("start", "c1", { step: "build" })).outcome, "changed", JSON.stringify(change));
+    assert.equal(t.spawns.length, 0);
+  }
+  // What the box was given: every input and hash, the folder's identity, the sandbox's lists.
+  const shown = runner().confirms;
+  const u = runner();
+  await u.ask("start", "c1", { step: "build" });
+  assert.deepEqual(Object.keys(u.confirms[0] as object).sort(), ["buildScript", "caches", "changed", "command", "dependencies", "dependencyCount", "folder", "folderIdentity", "hidden", "hooks", "inputs", "program", "step", "userConfigs"]);
+  assert.deepEqual((u.confirms[0] as { inputs: unknown }).inputs, [{ name: "package.json", sha256: "b".repeat(64) }]);
+  assert.equal(shown.length, 0);
+});
+
+test("PR #22 re-review: the engine's write hold is taken before anything runs, kept while anything of the job lives, released after", async () => {
+  // A team works on the task (or one whose writes meet it): nothing runs.
+  const busy = runner();
+  busy.setReserve("busy");
+  assert.equal((await busy.ask("start", "c1", { step: "build" })).outcome, "busy");
+  assert.equal(busy.spawns.length, 0);
+  // Changed after the hold: nothing runs and the hold goes back.
+  const changed = runner();
+  const answers: (() => boolean)[] = [() => { changed.setPlan({ fingerprint: "9".repeat(64) }); return true; }, () => false];
+  changed.setAnswer(async () => answers.shift()!());
+  assert.equal((await changed.ask("start", "c1", { step: "build" })).outcome, "changed");
+  await wait(5);
+  assert.deepEqual(changed.released, changed.holds);
+  // Held while it runs; its own temporary folder; both go when it ends.
+  const r = runner();
+  await r.ask("start", "c1", { step: "build" });
+  assert.equal(r.holds.length, 1);
+  assert.deepEqual(r.released, []);
+  assert.equal(r.temps.length, 1);
+  r.children[0]!.emit("close", 0);
+  await settle();
+  assert.deepEqual(r.released, r.holds);
+  assert.deepEqual(r.temps, []);
+  // A job that leaves a process alive keeps the workspace held.
+  const k = runner();
+  await k.ask("start", "c1", { step: "build" });
+  k.table.set(800, { ppid: 100, pgid: 800, started: "immortal" });
+  await wait(20);
+  k.children[0]!.emit("close", 0);
+  await settle();
+  assert.deepEqual(k.released, [], "still held: a process of the build may still write");
+  k.table.delete(800);
+  assert.equal((await k.ask("start", "c1", { step: "build" })).outcome, "started");
+  await wait(5);
+  assert.deepEqual(k.released, [k.holds[0]], "the first hold went once its process was gone");
+});
+
+test("PR #22 re-review B3: what the next start cannot end stays on record and blocks building; the group is ended unless its number is someone else's", async () => {
+  // Signalling fails for a live process: the record stays, starts wait.
+  const failing = runner({ killProcess: () => { throw new Error("EPERM"); } });
+  failing.setRecords([{ leader: 900, leaderStarted: "t900", processes: [{ pid: 901, started: "t901" }] }]);
+  failing.table.set(901, { ppid: 1, pgid: 900, started: "t901" });
+  failing.manager.recoverLeftovers();
+  assert.ok(JSON.stringify(failing.running.at(-1)).includes("901"), "kept on record");
+  assert.equal((await failing.ask("start", "c1", { step: "build" })).outcome, "leftovers");
+  failing.table.delete(901);
+  assert.equal((await failing.ask("start", "c1", { step: "build" })).outcome, "started", "gone: building again");
+
+  // The leader is gone: every member of its group is ended, also one never seen.
+  const group = runner();
+  group.setRecords([{ leader: 910, leaderStarted: "t910", processes: [{ pid: 911, started: "t911" }] }]);
+  group.table.set(911, { ppid: 1, pgid: 910, started: "t911" });
+  group.table.set(912, { ppid: 911, pgid: 910, started: "t912-unseen" });
+  assert.equal(group.manager.recoverLeftovers(), 2);
+  assert.ok(!group.table.has(911) && !group.table.has(912));
+
+  // The group's number belongs to another process now: its group is not touched.
+  const reused = runner();
+  reused.setRecords([{ leader: 920, leaderStarted: "t920", processes: [] }]);
+  reused.table.set(920, { ppid: 1, pgid: 920, started: "someone-else" });
+  reused.table.set(921, { ppid: 920, pgid: 920, started: "t921" });
+  assert.equal(reused.manager.recoverLeftovers(), 0);
+  assert.ok(reused.table.has(920) && reused.table.has(921));
+
+  // A record that cannot be read: nothing starts (it may name live processes).
+  const unreadable = runner();
+  unreadable.setRecords(new Error("bad json"));
+  unreadable.manager.recoverLeftovers();
+  assert.equal((await unreadable.ask("start", "c1", { step: "build" })).outcome, "leftovers");
+
+  // While running: after the leader ended, its number used by another group is not signalled.
+  const live = runner();
+  await live.ask("start", "c1", { step: "build" });
+  await wait(20);
+  live.table.set(100, { ppid: 1, pgid: 100, started: "another-process" });
+  live.kills.length = 0;
+  await live.ask("cancel", "c1");
+  assert.deepEqual(live.kills, [], "the group number is someone else's now");
+});
+
+test("PR #22 re-review B4: a block begun on a line too long to keep hides every line after it until its end, however the lines come", () => {
+  const body = ["FAKEBODYALPHA0001", "FAKEBODYBRAVO0002", "FAKEBODYCHARLIE003"];
+  const longBegin = `${"x".repeat(70_000)} -----BEGIN OPENSSH PRIVATE KEY-----`;
+  for (const pieces of [
+    [`${longBegin}\n${body.join("\n")}\n-----END OPENSSH PRIVATE KEY-----\nafter\n`],
+    // The begin marker far into a line that already overflowed, split mid-marker.
+    [`${"y".repeat(70_000)}`, "zz -----BEG", "IN RSA PRIVATE KEY-----\n", `${body[0]}\n${body[1]}\n`, `${body[2]}\n-----END RSA PRIVATE KEY-----\nafter\n`],
+    // No end: the stream ends inside the block.
+    [`${longBegin}\n${body.join("\n")}\n`],
+  ]) {
+    const split = new PreviewLineSplitter();
+    const mask = new PreviewLogMasker();
+    const out = [...pieces.flatMap(piece => split.push(piece)), ...split.flush()].map(line => mask.line(line));
+    const text = out.join("\n");
+    assert.ok(!text.includes("FAKEBODY") && !text.includes("x".repeat(40)), text.slice(0, 200));
+    if (pieces.join("").includes("after")) assert.equal(out.at(-1), "after", "the block ends at its END line");
+  }
+  // The last marker on a line decides: a line that ends a block and begins another keeps hiding.
+  const mask = new PreviewLogMasker();
+  mask.line("-----BEGIN A KEY-----");
+  mask.line("-----END A KEY----- -----BEGIN B KEY-----");
+  assert.equal(mask.inBlock, true);
+  assert.equal(mask.line("FAKEBODYDELTA"), "(가림)");
+});
+
+test("PR #22 re-review B4: a real process's long begin line and the body after it reach neither the page nor the disk", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "elsecrew-build-log-"));
+  try {
+    const body = Array.from({ length: 5 }, (_, index) => `FAKEBODYLINE${index}QWERTYUIOPASDFG`);
+    const script = join(dir, "print.js");
+    // One stream, in pieces: a begin line too long to keep, then a short body.
+    writeFileSync(script, `const t = ${JSON.stringify(`${"q".repeat(80_000)} -----BEGIN PRIVATE KEY-----\n${body.join("\n")}\n-----END PRIVATE KEY-----\nplain output\n`)}; for (let i = 0; i < t.length; i += 4096) process.stdout.write(t.slice(i, i + 4096));`);
+    const logs = join(dir, "logs");
+    const plan = { chatId: "c1", projectId: "p", worktreeId: "w", workspaceIdentity: "i1", refusal: null, workspacePath: dir, packageManager: "npm" as const, lockfile: true,
+      buildScript: "x", buildHooks: [], dependencies: [], dependencyCount: 0, yarnBerry: false, outputDir: "dist", needsInstall: false, fingerprint: "a".repeat(64),
+      folderIdentity: "1:2", inputs: [{ name: "package.json", sha256: "b".repeat(64) }] };
+    const manager = new PreviewBuildManagerV1({
+      enabled: true, confirm: async () => true,
+      sidecar: () => ({ previewBuildPlan: async () => plan, previewBuildReserve: async () => ({ holdId: `pbh_${"0".repeat(32)}`, refusal: null }), previewBuildRelease: async ({ holdId }) => ({ holdId, released: true }) }),
+      findTools: () => ({ program: process.execPath, pathDirs: [], identity: "node", userConfigs: [] }), isWorkspaceFolder: () => true,
+      places: () => ({ caches: [], hidden: [] }), makeTemp: () => dir, removeTemp: () => undefined,
+      confine: () => ({ program: process.execPath, args: [script] }),
+      spawn: (program, args, options) => realSpawn(program, args, { ...options, detached: false }),
+      killGroup: () => undefined, killProcess: () => undefined, processes: () => [], isAlive: () => false,
+      saveRunning: () => undefined, loadRunning: () => null, outputWritten: () => false,
+      environment: {}, writeLog: (name, text) => { spawnSync(process.execPath, ["-e", "require('fs').mkdirSync(process.argv[1],{recursive:true})", logs]); writeFileSync(join(logs, name), text); },
+      log: () => undefined, pipeGraceMs: 200,
+    });
+    assert.equal((await manager.request({ action: "start", projectId: "p", chatId: "c1", step: "build" }) as { outcome: string }).outcome, "started");
+    let job: { state: string; lines: string[] } = { state: "running", lines: [] };
+    for (let i = 0; i < 100 && job.state === "running"; i++) {
+      await wait(50);
+      job = (await manager.request({ action: "status", projectId: "p", chatId: "c1", cursor: 0 }) as { job: typeof job }).job;
+    }
+    const disk = readFileSync(join(logs, readdirSync(logs)[0]!));
+    for (const line of body) for (const piece of [line, line.slice(0, 12), line.slice(-12)]) {
+      assert.ok(!job.lines.join("\n").includes(piece), `page: ${piece}`);
+      assert.equal(disk.indexOf(Buffer.from(piece)), -1, `disk: ${piece}`);
+    }
+    assert.ok(job.lines.includes("plain output"), "the stream goes on after the block");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

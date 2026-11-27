@@ -20,7 +20,7 @@
 //!   fixed argument lists.
 
 use super::*;
-use super::preview::{preview_chat_address, regular_file};
+use super::preview::preview_chat_address;
 use elsecrew_protocol::preview_v1::preview_path_refusal_v1;
 
 const PACKAGE_JSON_MAX_BYTES: u64 = 256 * 1024;
@@ -167,46 +167,64 @@ pub(crate) fn safe_output_dir(raw: &str) -> Option<String> {
     preview_path_refusal_v1(&format!("{trimmed}/index.html")).is_none().then(|| trimmed.to_string())
 }
 
-fn read_small_file(root: &Dir, path: &str, limit: u64) -> Result<Option<Vec<u8>>, &'static str> {
-    let Ok((parent, name)) = open_parent_capability(root, path) else { return Ok(None) };
-    let Ok(file) = open_real_file_at(&parent, &name) else { return Ok(None) };
-    let declared = file.metadata().map(|metadata| metadata.len()).unwrap_or(u64::MAX);
-    if declared > limit {
-        return Err("invalidPackage");
-    }
-    let mut file = file;
-    let mut bytes = Vec::new();
-    Read::by_ref(&mut file).take(limit + 1).read_to_end(&mut bytes).map_err(|_| "invalidPackage")?;
-    if bytes.len() as u64 > limit {
-        return Err("invalidPackage");
-    }
-    Ok(Some(bytes))
+/// One input file as read once through the verified handle (PR #22
+/// re-review B1): the bytes the plan's facts are made from are the bytes
+/// its fingerprint stands for. A name that is a link, a folder or anything
+/// but a regular file is refused, never taken as absent.
+#[derive(Debug)]
+pub(crate) struct PlanInput {
+    pub name: &'static str,
+    pub bytes: Vec<u8>,
+    pub sha256: String,
 }
 
-/// The SHA-256 of a regular file read through the verified handle, streamed;
-/// `None` when it is absent (or a link: links are not followed and count as absent).
-fn file_digest(root: &Dir, path: &str) -> Result<Option<String>, &'static str> {
-    let Ok((parent, name)) = open_parent_capability(root, path) else { return Ok(None) };
-    let Ok(file) = open_real_file_at(&parent, &name) else { return Ok(None) };
-    let mut file = file;
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0u8; 64 * 1024];
-    let mut total = 0u64;
-    loop {
-        let read = file.read(&mut buffer).map_err(|_| "invalidPackage")?;
-        if read == 0 { break; }
-        total += read as u64;
-        if total > FINGERPRINT_FILE_MAX_BYTES { return Err("invalidPackage"); }
-        hasher.update(&buffer[..read]);
+fn read_inputs(root: &Dir) -> Result<Vec<PlanInput>, &'static str> {
+    let mut inputs = Vec::new();
+    for name in FINGERPRINT_FILES {
+        match root.symlink_metadata(name) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return Err("linkedInput"),
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => return Err("linkedInput"),
+            Ok(_) => {}
+        }
+        let file = open_real_file_at(root, name).map_err(|_| "linkedInput")?;
+        let mut file = file;
+        let mut bytes = Vec::new();
+        Read::by_ref(&mut file).take(FINGERPRINT_FILE_MAX_BYTES + 1).read_to_end(&mut bytes).map_err(|_| "invalidPackage")?;
+        if bytes.len() as u64 > FINGERPRINT_FILE_MAX_BYTES {
+            return Err("invalidPackage");
+        }
+        let sha256 = format!("{:x}", Sha256::digest(&bytes));
+        inputs.push(PlanInput { name, bytes, sha256 });
     }
-    Ok(Some(format!("{:x}", hasher.finalize())))
+    Ok(inputs)
 }
 
-/// One value for everything the consent box stands for: the workspace
-/// folder (its path and identity) and each input file's bytes or absence.
-pub(crate) fn plan_fingerprint(path: &str, identity: &str, files: &[(&str, Option<String>)]) -> String {
+/// Settings that would run code the box does not name (PR #22 re-review B1):
+/// Yarn's own program or plugins, pnpm's hook file, npm's shell or Node
+/// options. A workspace with any of them is not built here.
+pub(crate) fn unsupported_settings(inputs: &[PlanInput]) -> bool {
+    let text = |name: &str| inputs.iter().find(|input| input.name == name).map(|input| String::from_utf8_lossy(&input.bytes).to_string());
+    let has_key = |text: &str, keys: &[&str]| text.lines().any(|line| {
+        let line = line.trim_start().trim_start_matches(['"', '\'']);
+        keys.iter().any(|key| line.strip_prefix(key).is_some_and(|rest| {
+            let rest = rest.trim_start_matches(['"', '\'']);
+            rest.starts_with(char::is_whitespace) || rest.starts_with(':') || rest.starts_with('=')
+        }))
+    });
+    inputs.iter().any(|input| input.name == ".pnpmfile.cjs")
+        || text(".yarnrc.yml").is_some_and(|text| has_key(&text, &["yarnPath", "plugins", "injectEnvironmentFiles"]))
+        || text(".yarnrc").is_some_and(|text| has_key(&text, &["yarn-path", "yarnPath"]))
+        || text(".npmrc").is_some_and(|text| has_key(&text, &["script-shell", "node-options", "onload-script", "pnpmfile", "global-pnpmfile", "ignore-scripts", "shell", "git", "node-gyp", "init-module"]))
+        || text("pnpm-workspace.yaml").is_some_and(|text| has_key(&text, &["pnpmfile", "pnpmfilePath", "globalPnpmfile", "configDependencies"]))
+}
+
+/// One value for everything the consent box shows: the workspace folder (its
+/// path and identity) and every input file there is, with its SHA-256. A file
+/// added or removed changes the list, so the value.
+pub(crate) fn plan_fingerprint(path: &str, identity: &str, files: &[(&str, &str)]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"elsecrew-preview-build-plan-v1\0");
+    hasher.update(b"elsecrew-preview-build-plan-v2\0");
     hasher.update(path.as_bytes());
     hasher.update(b"\0");
     hasher.update(identity.as_bytes());
@@ -214,7 +232,7 @@ pub(crate) fn plan_fingerprint(path: &str, identity: &str, files: &[(&str, Optio
         hasher.update(b"\0");
         hasher.update(name.as_bytes());
         hasher.update(b"=");
-        hasher.update(digest.as_deref().unwrap_or("absent").as_bytes());
+        hasher.update(digest.as_bytes());
     }
     format!("{:x}", hasher.finalize())
 }
@@ -231,24 +249,27 @@ impl ProjectManager {
             storage, &address, "active", WorkspaceLockAdmission::Ready,
         )?;
         let shown = |text: &str| text.chars().take(BUILD_SCRIPT_SHOWN_CHARS).collect::<String>();
-        let answer = |refusal: Option<&str>, plan: Option<(&str, &BuildFacts, bool, &str)>| ProjectAction {
+        struct Plan<'a> { path: &'a str, identity: &'a str, facts: &'a BuildFacts, needs: bool, fingerprint: &'a str, inputs: &'a [PlanInput] }
+        let answer = |refusal: Option<&str>, plan: Option<Plan>| ProjectAction {
             result: json!({
                 "chatId": address.chat_id,
                 "projectId": address.project_id,
                 "worktreeId": address.worktree_id,
                 "workspaceIdentity": address.workspace_identity,
                 "refusal": refusal,
-                "workspacePath": plan.map(|(path, _, _, _)| path),
-                "packageManager": plan.map(|(_, facts, _, _)| facts.manager),
-                "lockfile": plan.is_some_and(|(_, facts, _, _)| facts.lockfile),
-                "buildScript": plan.map(|(_, facts, _, _)| shown(&facts.build_script)),
-                "buildHooks": plan.map(|(_, facts, _, _)| facts.hooks.iter().map(|(name, script)| json!({"name": name, "script": shown(script)})).collect::<Vec<_>>()),
-                "dependencies": plan.map(|(_, facts, _, _)| facts.dependencies.iter().take(DEPENDENCIES_SHOWN).cloned().collect::<Vec<_>>()),
-                "dependencyCount": plan.map(|(_, facts, _, _)| facts.dependencies.len()),
-                "yarnBerry": plan.is_some_and(|(_, facts, _, _)| facts.yarn_berry),
-                "outputDir": plan.map(|(_, facts, _, _)| facts.output_dir.as_str()),
-                "needsInstall": plan.is_some_and(|(_, _, needs, _)| needs),
-                "fingerprint": plan.map(|(_, _, _, fingerprint)| fingerprint),
+                "workspacePath": plan.as_ref().map(|plan| plan.path),
+                "folderIdentity": plan.as_ref().map(|plan| plan.identity),
+                "packageManager": plan.as_ref().map(|plan| plan.facts.manager),
+                "lockfile": plan.as_ref().is_some_and(|plan| plan.facts.lockfile),
+                "buildScript": plan.as_ref().map(|plan| shown(&plan.facts.build_script)),
+                "buildHooks": plan.as_ref().map(|plan| plan.facts.hooks.iter().map(|(name, script)| json!({"name": name, "script": shown(script)})).collect::<Vec<_>>()),
+                "dependencies": plan.as_ref().map(|plan| plan.facts.dependencies.iter().take(DEPENDENCIES_SHOWN).cloned().collect::<Vec<_>>()),
+                "dependencyCount": plan.as_ref().map(|plan| plan.facts.dependencies.len()),
+                "yarnBerry": plan.as_ref().is_some_and(|plan| plan.facts.yarn_berry),
+                "outputDir": plan.as_ref().map(|plan| plan.facts.output_dir.as_str()),
+                "needsInstall": plan.as_ref().is_some_and(|plan| plan.needs),
+                "inputs": plan.as_ref().map(|plan| plan.inputs.iter().map(|input| json!({"name": input.name, "sha256": input.sha256})).collect::<Vec<_>>()),
+                "fingerprint": plan.as_ref().map(|plan| plan.fingerprint),
             }),
             ..ProjectAction::default()
         };
@@ -257,19 +278,29 @@ impl ProjectManager {
             return Ok(answer(Some("unsupportedWorkspace"), None));
         }
         self.verify_snapshot_repository(&root, &active)?;
-        let package = match read_small_file(&root, "package.json", PACKAGE_JSON_MAX_BYTES) {
-            Ok(Some(bytes)) => bytes,
-            Ok(None) => return Ok(answer(Some("noPackage"), None)),
+        // Every input read once; everything below is made from these bytes.
+        let inputs = match read_inputs(&root) {
+            Ok(inputs) => inputs,
             Err(refusal) => return Ok(answer(Some(refusal), None)),
         };
-        let Ok(package) = serde_json::from_slice::<Value>(&package) else {
+        let bytes_of = |name: &str| inputs.iter().find(|input| input.name == name).map(|input| input.bytes.as_slice());
+        let Some(package) = bytes_of("package.json") else {
+            return Ok(answer(Some("noPackage"), None));
+        };
+        if package.len() as u64 > PACKAGE_JSON_MAX_BYTES {
+            return Ok(answer(Some("invalidPackage"), None));
+        }
+        let Ok(package) = serde_json::from_slice::<Value>(package) else {
             return Ok(answer(Some("invalidPackage"), None));
         };
-        let vite_config = VITE_CONFIGS
-            .iter()
-            .find_map(|name| read_small_file(&root, name, BUILD_CONFIG_MAX_BYTES).ok().flatten())
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
-        let facts = match build_facts(&package, &|name| regular_file(&root, name), vite_config.as_deref()) {
+        if unsupported_settings(&inputs) {
+            return Ok(answer(Some("unsupportedSettings"), None));
+        }
+        let vite_config = VITE_CONFIGS.iter().find_map(|name| bytes_of(name))
+            .filter(|bytes| bytes.len() as u64 <= BUILD_CONFIG_MAX_BYTES)
+            .map(|bytes| String::from_utf8_lossy(bytes).into_owned());
+        let present = |name: &str| bytes_of(name).is_some();
+        let facts = match build_facts(&package, &present, vite_config.as_deref()) {
             Ok(facts) => facts,
             Err(refusal) => return Ok(answer(Some(refusal), None)),
         };
@@ -295,17 +326,12 @@ impl ProjectManager {
         let Some(path) = active.worktree_path.to_str() else {
             return Ok(answer(Some("unsupportedWorkspace"), None));
         };
-        let mut digests = Vec::with_capacity(FINGERPRINT_FILES.len());
-        for name in FINGERPRINT_FILES {
-            match file_digest(&root, name) {
-                Ok(digest) => digests.push((*name, digest)),
-                Err(refusal) => return Ok(answer(Some(refusal), None)),
-            }
-        }
-        let identity = format!("{:?}", root_identity_for_plan(&root)?);
-        let fingerprint = plan_fingerprint(path, &identity, &digests);
-        let needs_install = open_real_child_dir(&root, "node_modules").is_err();
-        Ok(answer(None, Some((path, &facts, needs_install, &fingerprint))))
+        let (device, inode) = root_identity_for_plan(&root)?;
+        let identity = format!("{device}:{inode}");
+        let listed: Vec<(&str, &str)> = inputs.iter().map(|input| (input.name, input.sha256.as_str())).collect();
+        let fingerprint = plan_fingerprint(path, &identity, &listed);
+        let needs = open_real_child_dir(&root, "node_modules").is_err();
+        Ok(answer(None, Some(Plan { path, identity: &identity, facts: &facts, needs, fingerprint: &fingerprint, inputs: &inputs })))
     }
 }
 
@@ -320,7 +346,7 @@ impl ProjectManager {
 #[cfg(unix)]
 fn root_identity_for_plan(root: &Dir) -> Result<(u64, u64), ProjectFailure> { capability_directory_identity(root) }
 #[cfg(not(unix))]
-fn root_identity_for_plan(root: &Dir) -> Result<String, ProjectFailure> {
+fn root_identity_for_plan(root: &Dir) -> Result<(u64, u64), ProjectFailure> {
     let _ = root;
     Err(ProjectFailure::recovery("build preview is unavailable on this platform"))
 }
@@ -384,12 +410,33 @@ mod tests {
 
     #[test]
     fn the_fingerprint_changes_with_any_input_or_the_folder() {
-        let files = |lock: Option<&str>| vec![("package.json", Some("a".to_string())), ("package-lock.json", lock.map(str::to_string))];
-        let base = plan_fingerprint("/w/t1", "(1, 2)", &files(Some("b")));
-        assert_eq!(base, plan_fingerprint("/w/t1", "(1, 2)", &files(Some("b"))));
-        assert_ne!(base, plan_fingerprint("/w/t1", "(1, 2)", &files(Some("c"))), "a changed lockfile");
-        assert_ne!(base, plan_fingerprint("/w/t1", "(1, 2)", &files(None)), "a removed lockfile");
-        assert_ne!(base, plan_fingerprint("/w/t1", "(1, 3)", &files(Some("b"))), "another folder at the same path");
-        assert_ne!(base, plan_fingerprint("/w/t2", "(1, 2)", &files(Some("b"))), "another path");
+        let base = plan_fingerprint("/w/t1", "1:2", &[("package.json", "a"), ("package-lock.json", "b")]);
+        assert_eq!(base, plan_fingerprint("/w/t1", "1:2", &[("package.json", "a"), ("package-lock.json", "b")]));
+        assert_ne!(base, plan_fingerprint("/w/t1", "1:2", &[("package.json", "a"), ("package-lock.json", "c")]), "a changed lockfile");
+        assert_ne!(base, plan_fingerprint("/w/t1", "1:2", &[("package.json", "a")]), "a removed lockfile");
+        assert_ne!(base, plan_fingerprint("/w/t1", "1:3", &[("package.json", "a"), ("package-lock.json", "b")]), "another folder at the same path");
+        assert_ne!(base, plan_fingerprint("/w/t2", "1:2", &[("package.json", "a"), ("package-lock.json", "b")]), "another path");
+    }
+
+    fn input(name: &'static str, text: &str) -> PlanInput {
+        PlanInput { name, bytes: text.as_bytes().to_vec(), sha256: String::new() }
+    }
+
+    #[test]
+    fn settings_that_run_code_the_box_does_not_name_are_refused() {
+        assert!(!unsupported_settings(&[input(".npmrc", "registry=https://registry.npmjs.org/\nsave-exact=true\n")]));
+        assert!(!unsupported_settings(&[input(".yarnrc.yml", "nodeLinker: node-modules\n")]));
+        for (name, text) in [
+            (".pnpmfile.cjs", "module.exports = {}"),
+            (".yarnrc.yml", "yarnPath: .yarn/releases/yarn-4.cjs\n"),
+            (".yarnrc.yml", "plugins:\n  - path: x.cjs\n"),
+            (".yarnrc", "yarn-path \"./yarn.js\"\n"),
+            (".npmrc", "script-shell=/tmp/evil\n"),
+            (".npmrc", "node-options=--require /tmp/evil.js\n"),
+            (".npmrc", "ignore-scripts=false\n"),
+            ("pnpm-workspace.yaml", "pnpmfile: hooks.cjs\n"),
+        ] {
+            assert!(unsupported_settings(&[input(name, text)]), "{name}: {text}");
+        }
     }
 }

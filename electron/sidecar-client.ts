@@ -8,6 +8,7 @@ import { validateModelChoicesRequest, validateModelChoicesResult, type ModelChoi
 import { validateApprovalRequest, validateApprovalResult, type ApprovalRequest, type ApprovalResult } from "../src/m5/contracts/approval-v1.ts";
 import { validateLoginRequest, validateLoginStatus, type LoginRequest, type LoginStatus } from "../src/m5/contracts/provider-login-v1.ts";
 import { validateInstallRequest, validateInstallStatus, type InstallRequest, type InstallStatus } from "../src/m5/contracts/provider-install-v1.ts";
+import { validatePreviewBuildReserveRequestV1, validatePreviewBuildReserveResultV1, validatePreviewBuildReleaseRequestV1, validatePreviewBuildReleaseResultV1, type PreviewBuildReserveRequestV1, type PreviewBuildReserveResultV1, type PreviewBuildReleaseRequestV1, type PreviewBuildReleaseResultV1 } from "../src/m5/contracts/preview-v1.ts";
 import { PREVIEW_METHODS_V1, validatePreviewBuildPlanRequestV1, validatePreviewBuildPlanResultV1, type PreviewBuildPlanRequestV1, type PreviewBuildPlanResultV1, validatePreviewReadAssetRequestV1, validatePreviewReadAssetResultV1, validatePreviewResolveRequestV1, validatePreviewResolveResultV1, type PreviewReadAssetRequestV1, type PreviewReadAssetResultV1, type PreviewResolveRequestV1, type PreviewResolveResultV1 } from "../src/m5/contracts/preview-v1.ts";
 import { validateProjectCatalogRequest, validateProjectCatalogResult, type ProjectCatalogRequest, type ProjectCatalogResult } from "../src/m5/contracts/project-catalog-v1.ts";
 import type { ChildProcess, SpawnOptionsWithoutStdio } from "node:child_process";
@@ -690,6 +691,16 @@ export class SidecarClientV1 {
     if (!this.#ready?.capabilities.includes("preview.buildPlan")) return Promise.reject(new Error("preview build unavailable"));
     return this.#request("preview.buildPlan", { ...validatePreviewBuildPlanRequestV1(input) }) as Promise<PreviewBuildPlanResultV1>;
   }
+
+  previewBuildReserve(input: PreviewBuildReserveRequestV1): Promise<PreviewBuildReserveResultV1> {
+    if (!this.#ready?.capabilities.includes("preview.buildReserve")) return Promise.reject(new Error("preview build unavailable"));
+    return this.#request("preview.buildReserve", { ...validatePreviewBuildReserveRequestV1(input) }) as Promise<PreviewBuildReserveResultV1>;
+  }
+
+  previewBuildRelease(input: PreviewBuildReleaseRequestV1): Promise<PreviewBuildReleaseResultV1> {
+    if (!this.#ready?.capabilities.includes("preview.buildRelease")) return Promise.reject(new Error("preview build unavailable"));
+    return this.#request("preview.buildRelease", { ...validatePreviewBuildReleaseRequestV1(input) }) as Promise<PreviewBuildReleaseResultV1>;
+  }
   getAgentOutputHead(input: AgentRunBindingV1): Promise<OutputHead | null> {
     this.#requireAgentAdapter();
     if (!this.#ready?.capabilities.includes("agent.outputHead")) return Promise.reject(new Error("durable output query unavailable"));
@@ -1068,6 +1079,8 @@ export class SidecarClientV1 {
       case "preview.resolve": return validatePreviewResolveResultV1(response.result, validatePreviewResolveRequestV1(pending.params));
       case "preview.readAsset": return validatePreviewReadAssetResultV1(response.result, validatePreviewReadAssetRequestV1(pending.params));
       case "preview.buildPlan": return validatePreviewBuildPlanResultV1(response.result, validatePreviewBuildPlanRequestV1(pending.params));
+      case "preview.buildReserve": return validatePreviewBuildReserveResultV1(response.result);
+      case "preview.buildRelease": return validatePreviewBuildReleaseResultV1(response.result, validatePreviewBuildReleaseRequestV1(pending.params));
       case "project.open": return validateProjectIdentityV1(response.result);
       case "project.catalog": return validateProjectCatalogResult(response.result, validateProjectCatalogRequest(pending.params));
       case "project.getTree": {

@@ -9,11 +9,12 @@
  * folders (main reads no environment itself).
  */
 import { execFileSync, spawn } from "node:child_process";
-import { accessSync, constants, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { accessSync, constants, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { PreviewBuildManagerV1, type PreviewBuildSidecarV1, type PreviewProcessV1, type PreviewRunningRecordV1 } from "./preview-build.ts";
-import { findTool, newestNodeVersions, previewBuildConsentBox, previewBuildSandboxProfile, previewToolDirs, type PreviewBuildBoxV1 } from "./preview-build-policy.ts";
+import { findTool, newestNodeVersions, previewBuildCaches, previewBuildConsentBox, previewBuildHiddenPaths, previewBuildSandboxProfile, previewToolDirs, type PreviewBuildBoxV1 } from "./preview-build-policy.ts";
 
 export interface PreviewBuildHostOptionsV1 {
   enabled: boolean;
@@ -42,7 +43,24 @@ function fileIdentity(path: string): string {
   return `${real}|${stat.dev}|${stat.ino}|${stat.size}|${stat.ctimeMs}`;
 }
 
-export function findPreviewBuildTools(manager: "npm" | "pnpm" | "yarn"): { program: string; pathDirs: string[]; identity: string } | null {
+/** The person's own package manager settings (they apply to the job): which
+ * exist, and their bytes' hash for the tool identity (re-review B1). */
+const USER_CONFIGS = [".npmrc", ".yarnrc", ".yarnrc.yml", ".config/pnpm/rc", "Library/Preferences/pnpm/rc"];
+function userConfigs(home: string): { names: string[]; identity: string } {
+  const names: string[] = [];
+  const hashes: string[] = [];
+  for (const name of USER_CONFIGS) {
+    const path = join(home, name);
+    try {
+      const bytes = readFileSync(path);
+      names.push(`~/${name}`);
+      hashes.push(`${name}=${createHash("sha256").update(bytes).digest("hex")}`);
+    } catch { /* absent */ }
+  }
+  return { names, identity: hashes.join("|") };
+}
+
+export function findPreviewBuildTools(manager: "npm" | "pnpm" | "yarn"): { program: string; pathDirs: string[]; identity: string; userConfigs: string[] } | null {
   const home = homedir();
   let versions: string[] = [];
   try { versions = newestNodeVersions(readdirSync(join(home, ".nvm/versions/node"))); } catch { /* no nvm */ }
@@ -52,7 +70,9 @@ export function findPreviewBuildTools(manager: "npm" | "pnpm" | "yarn"): { progr
   const node = findTool("node", [dirname(program ?? "/"), ...dirs], isExecutableFile);
   if (!program || !node) return null;
   try {
-    return { program, pathDirs: [dirname(program), dirname(node), "/usr/bin", "/bin", "/usr/sbin", "/sbin"], identity: `${fileIdentity(program)}#${fileIdentity(node)}` };
+    const configs = userConfigs(home);
+    return { program, pathDirs: [dirname(program), dirname(node), "/usr/bin", "/bin", "/usr/sbin", "/sbin"],
+      identity: `${fileIdentity(program)}#${fileIdentity(node)}#${configs.identity}`, userConfigs: configs.names };
   } catch { return null; }
 }
 
@@ -90,6 +110,18 @@ export function outputWritten(workspace: string, output: string, since: number):
   } catch { return false; }
 }
 
+/** Each hidden place as named and, when it leads elsewhere (a link to a
+ * key folder), its real target too: the sandbox checks real paths
+ * (re-review B2). */
+export function hiddenWithTargets(paths: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const path of paths) {
+    out.push(path);
+    try { const real = realpathSync(path); if (real !== path) out.push(real); } catch { /* absent */ }
+  }
+  return [...new Set(out)];
+}
+
 export function createPreviewBuildManager(options: PreviewBuildHostOptionsV1): PreviewBuildManagerV1 {
   const runningFile = () => join(options.dataDirectory(), "preview-builds", "running.json");
   const manager = new PreviewBuildManagerV1({
@@ -101,13 +133,17 @@ export function createPreviewBuildManager(options: PreviewBuildHostOptionsV1): P
     isWorkspaceFolder: (path) => {
       try { return isAbsolute(path) && !lstatSync(path).isSymbolicLink() && statSync(path).isDirectory() && realpathSync(path) === path; } catch { return false; }
     },
-    confine: (step, workspace, program, args) => {
+    places: (_step, manager, yarnBerry) => {
+      const home = realpathSync(homedir());
+      return { caches: previewBuildCaches(manager, yarnBerry, home), hidden: hiddenWithTargets(previewBuildHiddenPaths(home, options.hiddenFolders())) };
+    },
+    // This job's own TMPDIR, inside the user's temporary folder (re-review B2).
+    makeTemp: () => mkdtempSync(join(realpathSync(tmpdir()), "elsecrew-build-")),
+    removeTemp: (path) => { if (/\/elsecrew-build-[^/]+$/.test(path)) rmSync(path, { recursive: true, force: true }); },
+    confine: (step, workspace, temp, places, program, args) => {
       if (process.platform !== "darwin" || !isExecutableFile(SANDBOX_EXEC)) return null;
       try {
-        const home = realpathSync(homedir());
-        const tempRoot = dirname(realpathSync(tmpdir()));
-        const hidden = options.hiddenFolders().map(folder => { try { return realpathSync(folder); } catch { return folder; } });
-        const profile = previewBuildSandboxProfile(step, { workspace, home, tempRoot, hidden });
+        const profile = previewBuildSandboxProfile(step, { workspace, temp, caches: places.caches, hidden: places.hidden });
         return { program: SANDBOX_EXEC, args: ["-p", profile, program, ...args] };
       } catch { return null; }
     },
@@ -122,10 +158,12 @@ export function createPreviewBuildManager(options: PreviewBuildHostOptionsV1): P
       writeFileSync(runningFile(), JSON.stringify(records), { mode: 0o600 });
     },
     loadRunning: () => {
+      if (!existsSync(runningFile())) return null;
       const parsed: unknown = JSON.parse(readFileSync(runningFile(), "utf8"));
       if (!Array.isArray(parsed)) return [];
       return parsed.filter((record): record is PreviewRunningRecordV1 => typeof record === "object" && record !== null && Array.isArray((record as PreviewRunningRecordV1).processes))
-        .map(record => ({ leader: Number(record.leader), processes: record.processes.filter(entry => Number.isSafeInteger(entry?.pid) && typeof entry?.started === "string") }));
+        .map(record => ({ leader: Number(record.leader), ...(typeof record.leaderStarted === "string" ? { leaderStarted: record.leaderStarted } : {}),
+          processes: record.processes.filter(entry => Number.isSafeInteger(entry?.pid) && typeof entry?.started === "string") }));
     },
     outputWritten,
     environment: process.env,

@@ -377,6 +377,14 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
       sidecarCalls.push("getSystemStatus");
       return { state: "ready" };
     }
+    async previewBuildReserve(input: { projectId: string; chatId: string }) {
+      sidecarCalls.push(`previewBuildReserve:${JSON.stringify(input)}`);
+      return { holdId: `pbh_${"1".repeat(32)}`, refusal: null };
+    }
+    async previewBuildRelease(input: { holdId: string }) {
+      sidecarCalls.push(`previewBuildRelease:${input.holdId}`);
+      return { holdId: input.holdId, released: true };
+    }
     async previewBuildPlan(input: { projectId: string; chatId: string }) {
       sidecarCalls.push(`previewBuildPlan:${JSON.stringify(input)}`);
       return { ...input, worktreeId: "worktree_1", workspaceIdentity: "workspace_1", ...fakePreviewBuild.plan };
@@ -558,17 +566,20 @@ const folderPick: { path: string | null } = { path: null };
 /** Build-then-preview: the real runner, this computer's parts faked. */
 const fakePreviewBuild = {
   plan: { refusal: null, workspacePath: "/Users/me/elsecrew/workspaces/app/task-1", packageManager: "npm", lockfile: true, buildScript: "vite build",
-    buildHooks: [], dependencies: ["react", "vite"], dependencyCount: 2, yarnBerry: false, outputDir: "dist", needsInstall: false, fingerprint: "a".repeat(64) } as Record<string, unknown>,
+    buildHooks: [], dependencies: ["react", "vite"], dependencyCount: 2, yarnBerry: false, outputDir: "dist", needsInstall: false, fingerprint: "a".repeat(64),
+    folderIdentity: "1:2", inputs: [{ name: "package.json", sha256: "b".repeat(64) }] } as Record<string, unknown>,
   spawns: [] as { program: string; args: string[]; cwd: unknown; env: Record<string, string>; detached: unknown }[],
   kills: [] as [number, string][],
   children: [] as (EventEmitter & { stdout: EventEmitter & { setEncoding(): void }; stderr: EventEmitter & { setEncoding(): void }; pid: number })[],
   create: (options: { enabled: boolean; sidecar(): never; ask(box: unknown): Promise<number>; korean(): boolean; log(label: string): void; hiddenFolders(): string[] }) => new PreviewBuildManagerV1({
     enabled: options.enabled, sidecar: options.sidecar,
     confirm: async consent => (await options.ask(previewBuildConsentBox(consent, options.korean()))) === 1,
-    findTools: () => ({ program: "/opt/homebrew/bin/npm", pathDirs: ["/opt/homebrew/bin", "/usr/bin", "/bin"], identity: "npm" }),
+    findTools: () => ({ program: "/opt/homebrew/bin/npm", pathDirs: ["/opt/homebrew/bin", "/usr/bin", "/bin"], identity: "npm", userConfigs: [] }),
     isWorkspaceFolder: () => true,
-    confine: (_step, _workspace, program, args) => ({ program: "/usr/bin/sandbox-exec", args: ["-p", "(profile)", program, ...args] }),
-    killProcess: () => undefined, processes: () => [], isAlive: () => false, saveRunning: () => undefined, loadRunning: () => [], outputWritten: () => true,
+    places: () => ({ caches: ["/Users/me/.npm/_cacache"], hidden: ["/Users/me/.ssh", ...options.hiddenFolders()] }),
+    makeTemp: () => "/tmp/elsecrew-build-test", removeTemp: () => undefined,
+    confine: (_step, _workspace, _temp, _places, program, args) => ({ program: "/usr/bin/sandbox-exec", args: ["-p", "(profile)", program, ...args] }),
+    killProcess: () => undefined, processes: () => [], isAlive: () => false, saveRunning: () => undefined, loadRunning: () => null, outputWritten: () => true,
     spawn: (program, args, spawnOptions) => {
       fakePreviewBuild.spawns.push({ program, args, cwd: spawnOptions.cwd, env: spawnOptions.env as Record<string, string>, detached: spawnOptions.detached });
       const stream = () => Object.assign(new EventEmitter(), { setEncoding() {}, destroy() {} });
@@ -1037,15 +1048,19 @@ test("build-then-preview: a build runs only after main's own box, in the folder 
     assert.equal((await handler(harness.currentEvent(), start) as { outcome: string }).outcome, "declined");
     assert.equal(fakePreviewBuild.spawns.length, 0);
     const box = boxes().at(-1)!;
-    for (const shown of ["실행할 명령: npm run build", "위치: /Users/me/elsecrew/workspaces/app/task-1", "프로그램: /opt/homebrew/bin/npm", "빌드 스크립트: vite build"]) assert.ok(box.includes(shown), shown);
+    for (const shown of ["실행할 명령: npm run build", "위치: /Users/me/elsecrew/workspaces/app/task-1 (폴더 1:2)", "프로그램: /opt/homebrew/bin/npm", "빌드 스크립트: vite build",
+      `확인한 파일: package.json (${"b".repeat(16)})`, "/app-data"]) assert.ok(box.includes(shown), shown);
     // "빌드" in main's box: the fixed command in the engine's folder, its own group, no secrets.
     externalLinkAnswer.value = 1;
     assert.equal((await handler(harness.currentEvent(), start) as { outcome: string }).outcome, "started");
     assert.equal(fakePreviewBuild.spawns.length, 1);
+    // The engine's write hold came first (PR #22 re-review).
+    assert.ok(harness.sidecarCalls.some(call => call.startsWith("previewBuildReserve:")));
     const spawned = fakePreviewBuild.spawns[0]!;
     assert.deepEqual([spawned.program, spawned.args, spawned.cwd, spawned.detached], ["/usr/bin/sandbox-exec", ["-p", "(profile)", "/opt/homebrew/bin/npm", "run", "build"], "/Users/me/elsecrew/workspaces/app/task-1", process.platform !== "win32"]);
     assert.deepEqual(Object.keys(spawned.env).filter(name => /KEY|TOKEN|ELSECREW/.test(name)), []);
     assert.equal(spawned.env.HOME, "/Users/me");
+    assert.equal(spawned.env.TMPDIR, "/tmp/elsecrew-build-test", "its own temporary folder");
     // One job per task: a second start while it runs is busy, without a box.
     const asked = boxes().length;
     assert.equal((await handler(harness.currentEvent(), start) as { outcome: string }).outcome, "busy");

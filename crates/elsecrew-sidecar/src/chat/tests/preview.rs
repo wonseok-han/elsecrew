@@ -358,7 +358,7 @@ fn build_plan_reads_the_task_package_and_requires_ignored_output() {
     let fingerprint = plan["fingerprint"].as_str().unwrap().to_string();
     assert_eq!(fingerprint.len(), 64);
     assert_eq!(build_plan(&mut fixture, &opened)["fingerprint"], json!(fingerprint), "stable while nothing changes");
-    for (file, text) in [(".npmrc", "script-shell=/bin/zsh\n"), ("package-lock.json", "{\"x\":1}"), ("vite.config.ts", "export default { build: { outDir: 'web' } } // changed")] {
+    for (file, text) in [(".npmrc", "save-exact=true\n"), ("package-lock.json", "{\"x\":1}"), ("vite.config.ts", "export default { build: { outDir: 'web' } } // changed")] {
         let before = build_plan(&mut fixture, &opened)["fingerprint"].clone();
         fs::write(root.join(file), text).unwrap();
         assert_ne!(build_plan(&mut fixture, &opened)["fingerprint"], before, "{file} changes the fingerprint");
@@ -375,12 +375,36 @@ fn build_plan_reads_the_task_package_and_requires_ignored_output() {
     fs::write(root.join(".gitignore"), "node_modules\nweb/\n").unwrap();
     assert_eq!(build_plan(&mut fixture, &opened)["refusal"], Value::Null);
 
-    // A package.json that is a link out of the workspace is not read.
+    // PR #22 re-review B1: what the box shows and what the fingerprint
+    // stands for are one reading: every input file there is, by name and hash.
+    let plan = build_plan(&mut fixture, &opened);
+    let names: Vec<_> = plan["inputs"].as_array().unwrap().iter().map(|input| input["name"].as_str().unwrap().to_owned()).collect();
+    assert_eq!(names, ["package.json", "package-lock.json", ".npmrc", "vite.config.ts"], "every input there is, nothing else");
+    for name in ["package.json", "package-lock.json", ".npmrc", "vite.config.ts"] {
+        let input = plan["inputs"].as_array().unwrap().iter().find(|input| input["name"] == name).unwrap_or_else(|| panic!("{name} listed"));
+        let bytes = fs::read(root.join(name)).unwrap();
+        assert_eq!(input["sha256"], json!(format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(&bytes))), "{name}: the hash is of the bytes there");
+    }
+    assert!(plan["folderIdentity"].as_str().unwrap().contains(':'));
+    // A settings file that would run code the box does not name: refused.
+    fs::write(root.join(".npmrc"), "script-shell=/bin/zsh\n").unwrap();
+    assert_eq!(build_plan(&mut fixture, &opened)["refusal"], json!("unsupportedSettings"));
+    fs::write(root.join(".npmrc"), "save-exact=true\n").unwrap();
+    // An input that is a link (to a file out of the workspace, or inside it) is refused, never taken as absent.
+    let outside = fixture._root.path().join("outside-lock.json");
+    fs::write(&outside, "{}").unwrap();
+    fs::remove_file(root.join("package-lock.json")).unwrap();
+    symlink(&outside, root.join("package-lock.json")).unwrap();
+    assert_eq!(build_plan(&mut fixture, &opened)["refusal"], json!("linkedInput"));
+    fs::remove_file(root.join("package-lock.json")).unwrap();
+    fs::create_dir(root.join(".yarnrc.yml")).unwrap();
+    assert_eq!(build_plan(&mut fixture, &opened)["refusal"], json!("linkedInput"), "a folder in a settings file's place");
+    fs::remove_dir(root.join(".yarnrc.yml")).unwrap();
     let outside = fixture._root.path().join("outside-package.json");
     fs::write(&outside, r#"{"scripts":{"build":"evil"}}"#).unwrap();
     fs::remove_file(root.join("package.json")).unwrap();
     symlink(&outside, root.join("package.json")).unwrap();
-    assert_eq!(build_plan(&mut fixture, &opened)["refusal"], json!("noPackage"));
+    assert_eq!(build_plan(&mut fixture, &opened)["refusal"], json!("linkedInput"));
 
     // An old standalone copy is not built here.
     let copy = workspace_of(&mut fixture, "build_plan_copy", Kind::Snapshot);

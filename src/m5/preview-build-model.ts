@@ -24,7 +24,7 @@ export function previewBuildBar(plan: PreviewBuildPlanViewV1 | null, job: Previe
     case null: break;
     case "dependenciesNotIgnored": case "outputNotIgnored": return { kind: "note", note: "notIgnored" };
     case "toolMissing": return { kind: "note", note: "toolMissing" };
-    case "unsupportedManager": case "unsafeOutput": case "invalidPackage": return { kind: "note", note: "unsupported" };
+    case "unsupportedManager": case "unsafeOutput": case "invalidPackage": case "linkedInput": case "unsupportedSettings": return { kind: "note", note: "unsupported" };
     // No package, no build script, an old copy, or no answer: nothing to offer.
     default: return { kind: "hidden" };
   }

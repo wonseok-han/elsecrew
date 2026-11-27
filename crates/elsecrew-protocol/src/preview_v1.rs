@@ -7,7 +7,7 @@
 
 /// Optional ready suffix, after `provider.install`, in this order.
 /// `preview.buildPlan` (2026-11-27) is read-only too: what a build needs.
-pub const PREVIEW_METHODS_V1: &[&str] = &["preview.resolve", "preview.readAsset", "preview.buildPlan"];
+pub const PREVIEW_METHODS_V1: &[&str] = &["preview.resolve", "preview.readAsset", "preview.buildPlan", "preview.buildReserve", "preview.buildRelease"];
 
 /// One file at most (the same bound as `file.read`).
 pub const PREVIEW_ASSET_MAX_BYTES_V1: u64 = 5 * 1024 * 1024;

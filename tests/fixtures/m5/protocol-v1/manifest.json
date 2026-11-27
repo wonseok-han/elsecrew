@@ -58,7 +58,9 @@
       "storage.status",
       "preview.resolve",
       "preview.readAsset",
-      "preview.buildPlan"
+      "preview.buildPlan",
+      "preview.buildReserve",
+      "preview.buildRelease"
     ],
     "events": [
       "system.ready",

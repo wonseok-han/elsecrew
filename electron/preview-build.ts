@@ -58,19 +58,34 @@ import {
 
 export interface PreviewBuildSidecarV1 {
   previewBuildPlan(input: { projectId: string; chatId: string }): Promise<PreviewBuildPlanResultV1>;
+  /** The engine's write hold on the task's workspace (PR #22 re-review). */
+  previewBuildReserve(input: { projectId: string; chatId: string }): Promise<{ holdId: string | null; refusal: "busy" | null }>;
+  previewBuildRelease(input: { holdId: string }): Promise<{ holdId: string; released: boolean }>;
+}
+
+/** Where a job may write and what it may never touch: shown in the box and
+ * the very lists its sandbox is made of (re-review B2). */
+export interface PreviewBuildPlacesV1 {
+  /** Package manager caches, exact folders. */
+  caches: string[];
+  /** Never read nor written: as named and, when they lead elsewhere, their real targets. */
+  hidden: string[];
 }
 
 /** A process seen as part of a job: its id and when it started (so a reused
  * id is never taken for it). */
 export interface PreviewProcessV1 { pid: number; ppid: number; pgid: number; started: string }
 /** A job's processes kept on disk while it runs, for the next app start. */
-export interface PreviewRunningRecordV1 { leader: number; processes: { pid: number; started: string }[] }
+export interface PreviewRunningRecordV1 { leader: number; leaderStarted?: string; processes: { pid: number; started: string }[] }
 
 export interface PreviewBuildToolsV1 {
   program: string;
   pathDirs: string[];
-  /** The program's and `node`'s real files (path, device, inode, size, change time). */
+  /** The program's and `node`'s real files (path, device, inode, size, change
+   * time) and the person's own package manager settings (their bytes). */
   identity: string;
+  /** The person's own package manager settings files that apply (shown). */
+  userConfigs: string[];
 }
 
 export interface PreviewBuildOptionsV1 {
@@ -82,8 +97,13 @@ export interface PreviewBuildOptionsV1 {
   findTools(manager: "npm" | "pnpm" | "yarn"): PreviewBuildToolsV1 | null;
   /** The folder is a real directory, reached without links. */
   isWorkspaceFolder(path: string): boolean;
+  /** The caches and hidden places for a step of this package manager. */
+  places(step: PreviewBuildStepV1, manager: "npm" | "pnpm" | "yarn", yarnBerry: boolean): PreviewBuildPlacesV1;
+  /** A new folder for this job only (its TMPDIR), and its removal. */
+  makeTemp(): string;
+  removeTemp(path: string): void;
   /** The sandboxed command for a step, or null when it cannot be confined. */
-  confine(step: PreviewBuildStepV1, workspace: string, program: string, args: string[]): { program: string; args: string[] } | null;
+  confine(step: PreviewBuildStepV1, workspace: string, temp: string, places: PreviewBuildPlacesV1, program: string, args: string[]): { program: string; args: string[] } | null;
   spawn(program: string, args: string[], options: SpawnOptions): ChildProcess;
   /** Signals a process group (POSIX `kill(-pgid)`). */
   killGroup(pid: number, signal: NodeJS.Signals): void;
@@ -95,7 +115,8 @@ export interface PreviewBuildOptionsV1 {
   isAlive(pid: number, started: string): boolean;
   /** Running jobs' processes on disk (best effort). */
   saveRunning(records: PreviewRunningRecordV1[]): void;
-  loadRunning(): PreviewRunningRecordV1[];
+  /** Null: no record at all. Throws: a record that cannot be read. */
+  loadRunning(): PreviewRunningRecordV1[] | null;
   /** `<workspace>/<output>/index.html` is a regular file (no links on the way) changed at or after `since`. */
   outputWritten(workspace: string, output: string, since: number): boolean;
   environment: Readonly<Record<string, string | undefined>>;
@@ -133,6 +154,10 @@ interface Job {
   /** The person asked to stop (or the time ran out) before it ended. */
   stopping: "cancelled" | "timedOut" | null;
   leftovers: number;
+  /** The engine's write hold, released once nothing of the job lives. */
+  hold: string | null;
+  /** This job's own TMPDIR. */
+  temp: string | null;
 }
 
 /** A start waiting for its plan or the box. */
@@ -147,6 +172,9 @@ export class PreviewBuildManagerV1 {
   #quitting = false;
   /** Quit preparation in progress: no new start until it is called off. */
   #suspended = false;
+  /** Processes an earlier app run left that could not be ended (re-review
+   * B3): kept on record, and no build starts while any lives. */
+  #orphans: PreviewRunningRecordV1[] = [];
 
   constructor(options: PreviewBuildOptionsV1) {
     this.#options = options;
@@ -165,17 +193,55 @@ export class PreviewBuildManagerV1 {
    * stopping them are ended, if they are still the same processes. */
   recoverLeftovers(): number {
     let ended = 0;
-    let records: PreviewRunningRecordV1[] = [];
-    try { records = this.#options.loadRunning(); } catch { records = []; }
-    for (const record of records) {
-      for (const process of record.processes) {
-        if (!this.#options.isAlive(process.pid, process.started)) continue;
-        try { this.#options.killProcess(process.pid, process.started, "SIGKILL"); ended++; } catch { /* gone */ }
-      }
+    let records: PreviewRunningRecordV1[] | null;
+    try { records = this.#options.loadRunning(); } catch {
+      // A record that cannot be read may name processes still alive: no
+      // build starts until it can be (re-review B3).
+      this.#orphans = [{ leader: 0, processes: [{ pid: 0, started: "unreadable" }] }];
+      this.#options.log("preview build record unreadable");
+      return 0;
     }
-    try { this.#options.saveRunning([]); } catch { /* best effort */ }
+    const survivors: PreviewRunningRecordV1[] = [];
+    for (const record of records ?? []) {
+      // The group too: members created after the last look have its number.
+      const members = this.#groupMembers(record.leader, record.leaderStarted ?? null);
+      const all = new Map(record.processes.map(entry => [entry.pid, entry.started]));
+      for (const member of members) all.set(member.pid, member.started);
+      const left: { pid: number; started: string }[] = [];
+      for (const [pid, started] of all) {
+        if (!this.#options.isAlive(pid, started)) continue;
+        try { this.#options.killProcess(pid, started, "SIGKILL"); } catch { /* checked below */ }
+        if (this.#options.isAlive(pid, started)) left.push({ pid, started }); else ended++;
+      }
+      if (left.length) survivors.push({ leader: record.leader, ...(record.leaderStarted ? { leaderStarted: record.leaderStarted } : {}), processes: left });
+    }
+    this.#orphans = survivors;
+    // What could not be ended stays on record (re-review B3).
+    try { this.#options.saveRunning(survivors); } catch { /* best effort */ }
     if (ended) this.#options.log(`preview build leftovers ended: ${ended}`);
+    if (survivors.length) this.#options.log(`preview build leftovers remain: ${survivors.reduce((sum, record) => sum + record.processes.length, 0)}`);
     return ended;
+  }
+
+  /** Processes in group `leader` that are this job's (re-review B3): when
+   * the number belongs to another process now (a reused id), none. */
+  #groupMembers(leader: number, leaderStarted: string | null): { pid: number; started: string }[] {
+    if (!Number.isSafeInteger(leader) || leader <= 1) return [];
+    let all: PreviewProcessV1[];
+    try { all = this.#options.processes(); } catch { return []; }
+    const owner = all.find(entry => entry.pid === leader);
+    if (owner && (leaderStarted === null || owner.started !== leaderStarted)) return owner.started === leaderStarted ? all.filter(entry => entry.pgid === leader) : [];
+    return all.filter(entry => entry.pgid === leader);
+  }
+
+  /** Orphans of an earlier run still alive (re-checked, record kept current). */
+  #orphansAlive(): boolean {
+    if (!this.#orphans.length) return false;
+    if (this.#orphans.some(record => record.processes.some(entry => entry.started === "unreadable"))) return true;
+    this.#orphans = this.#orphans.map(record => ({ ...record, processes: record.processes.filter(entry => this.#options.isAlive(entry.pid, entry.started)) }))
+      .filter(record => record.processes.length);
+    this.#saveRunning();
+    return this.#orphans.length > 0;
   }
 
   async request(request: PreviewBuildIpcRequestV1): Promise<PreviewBuildIpcResultV1> {
@@ -248,20 +314,28 @@ export class PreviewBuildManagerV1 {
     };
   }
 
-  #consent(step: PreviewBuildStepV1, plan: PreviewBuildPlanResultV1, tools: PreviewBuildToolsV1, changed: boolean): PreviewBuildConsentV1 {
+  /** Everything the box shows, made from one plan and one tool lookup
+   * (re-review B1): every input file and its hash (what the fingerprint
+   * stands for), the folder and its identity, the commands and scripts, the
+   * packages, the program, the person's settings files, and where the job
+   * may write and what it may never touch (the sandbox's own lists). */
+  #consent(step: PreviewBuildStepV1, shown: { plan: PreviewBuildPlanResultV1; tools: PreviewBuildToolsV1; places: PreviewBuildPlacesV1 }, changed: boolean): PreviewBuildConsentV1 {
+    const { plan, tools, places } = shown;
     return {
       step, changed, command: previewBuildCommandLine(plan.packageManager!, step, plan.lockfile, plan.yarnBerry), program: tools.program,
-      folder: plan.workspacePath!, buildScript: step === "build" ? plan.buildScript : null,
+      folder: plan.workspacePath!, folderIdentity: plan.folderIdentity ?? "", buildScript: step === "build" ? plan.buildScript : null,
       hooks: step === "build" ? plan.buildHooks ?? [] : [],
       dependencies: plan.dependencies ?? [], dependencyCount: plan.dependencyCount ?? 0,
+      inputs: plan.inputs ?? [], userConfigs: tools.userConfigs, caches: places.caches, hidden: places.hidden,
     };
   }
 
-  /** What the person saw is still what would run. */
-  #same(a: { plan: PreviewBuildPlanResultV1; tools: PreviewBuildToolsV1 }, b: { plan: PreviewBuildPlanResultV1; tools: PreviewBuildToolsV1 }): boolean {
-    return a.plan.fingerprint === b.plan.fingerprint && a.plan.workspacePath === b.plan.workspacePath
-      && a.plan.workspaceIdentity === b.plan.workspaceIdentity && a.plan.worktreeId === b.plan.worktreeId
-      && a.plan.needsInstall === b.plan.needsInstall && a.tools.identity === b.tools.identity && a.tools.program === b.tools.program;
+  /** What the person saw is still what would run: the same box, word for
+   * word (everything it shows), the same fingerprint and the same tools. */
+  #same(step: PreviewBuildStepV1, a: { plan: PreviewBuildPlanResultV1; tools: PreviewBuildToolsV1; places: PreviewBuildPlacesV1 }, b: { plan: PreviewBuildPlanResultV1; tools: PreviewBuildToolsV1; places: PreviewBuildPlacesV1 }): boolean {
+    return JSON.stringify(this.#consent(step, a, false)) === JSON.stringify(this.#consent(step, b, false))
+      && a.plan.fingerprint === b.plan.fingerprint && a.plan.workspaceIdentity === b.plan.workspaceIdentity && a.plan.worktreeId === b.plan.worktreeId
+      && a.plan.needsInstall === b.plan.needsInstall && a.tools.identity === b.tools.identity;
   }
 
   async #start(key: string, projectId: string, chatId: string, step: PreviewBuildStepV1): Promise<PreviewBuildIpcResultV1> {
@@ -274,7 +348,10 @@ export class PreviewBuildManagerV1 {
     if (earlier && earlier.leftovers > 0) {
       earlier.leftovers = [...earlier.seen].filter(([pid, started]) => this.#options.isAlive(pid, started)).length;
       if (earlier.leftovers > 0) return answer("leftovers");
+      this.#release(earlier);
+      this.#saveRunning();
     }
+    if (this.#orphansAlive()) return answer("leftovers");
     const pending: PendingStart = { aborted: false };
     this.#pending.set(key, pending);
     try {
@@ -285,30 +362,45 @@ export class PreviewBuildManagerV1 {
         if (step === "build" && plan.needsInstall) return null;
         const tools = this.#options.findTools(plan.packageManager);
         if (!tools || !this.#options.isWorkspaceFolder(plan.workspacePath)) return null;
-        return { plan, tools };
+        return { plan, tools, places: this.#options.places(step, plan.packageManager, plan.yarnBerry) };
       };
       let shown = await read();
       if (pending.aborted) return answer("cancelled");
       if (!shown) return answer("refused");
-      if (!(await this.#options.confirm(this.#consent(step, shown.plan, shown.tools, false)))) return answer(pending.aborted ? "cancelled" : "declined");
-      // Right before starting: the same folder, inputs and tools as shown
-      // (B1). What changed is shown again; nothing runs on the old yes.
-      for (let asked = 1; ; asked++) {
-        if (pending.aborted || this.#suspended || this.#quitting) return answer("cancelled");
-        const now = await read();
-        if (pending.aborted || this.#suspended || this.#quitting) return answer("cancelled");
-        if (!now) return answer("refused");
-        if (this.#same(shown, now)) { shown = now; break; }
-        if (asked >= 3) return answer("changed");
-        shown = now;
-        if (!(await this.#options.confirm(this.#consent(step, shown.plan, shown.tools, true)))) return answer(pending.aborted ? "cancelled" : "changed");
+      if (!(await this.#options.confirm(this.#consent(step, shown, false)))) return answer(pending.aborted ? "cancelled" : "declined");
+      // The engine's write hold first (re-review: the team and the build
+      // never write the workspace together), then, right before starting,
+      // the same box as shown (B1). What changed is shown again; nothing
+      // runs on the old yes.
+      if (pending.aborted || this.#suspended || this.#quitting) return answer("cancelled");
+      const sidecar = this.#options.sidecar();
+      let hold: string | null = null;
+      try { hold = sidecar ? (await sidecar.previewBuildReserve({ projectId, chatId })).holdId : null; } catch { hold = null; }
+      if (!hold) return answer("busy");
+      let handed = false;
+      try {
+        for (let asked = 1; ; asked++) {
+          if (pending.aborted || this.#suspended || this.#quitting) return answer("cancelled");
+          const now = await read();
+          if (pending.aborted || this.#suspended || this.#quitting) return answer("cancelled");
+          if (!now) return answer("refused");
+          if (this.#same(step, shown, now)) { shown = now; break; }
+          if (asked >= 3) return answer("changed");
+          shown = now;
+          if (!(await this.#options.confirm(this.#consent(step, shown, true)))) return answer(pending.aborted ? "cancelled" : "changed");
+        }
+        if (this.#jobs.get(key)?.state === "running" || this.#running() >= PREVIEW_BUILD_MAX_RUNNING) return answer("busy");
+        const args = previewBuildArgs(shown.plan.packageManager!, step, shown.plan.lockfile, shown.plan.yarnBerry);
+        let temp: string;
+        try { temp = this.#options.makeTemp(); } catch { return answer("refused"); }
+        const confined = this.#options.confine(step, shown.plan.workspacePath!, temp, shown.places, shown.tools.program, args);
+        if (!confined) { this.#options.removeTemp(temp); return answer("refused"); }
+        const base = this.#run(key, projectId, chatId, step, shown.tools, args, confined, shown.plan, hold, temp);
+        handed = true;
+        return answer("started", base);
+      } finally {
+        if (!handed) void this.#options.sidecar()?.previewBuildRelease({ holdId: hold }).catch(() => undefined);
       }
-      if (this.#jobs.get(key)?.state === "running" || this.#running() >= PREVIEW_BUILD_MAX_RUNNING) return answer("busy");
-      const args = previewBuildArgs(shown.plan.packageManager!, step, shown.plan.lockfile, shown.plan.yarnBerry);
-      const confined = this.#options.confine(step, shown.plan.workspacePath!, shown.tools.program, args);
-      if (!confined) return answer("refused");
-      const base = this.#run(key, projectId, chatId, step, shown.tools, args, confined, shown.plan);
-      return answer("started", base);
     } finally {
       if (this.#pending.get(key) === pending) this.#pending.delete(key);
     }
@@ -317,13 +409,13 @@ export class PreviewBuildManagerV1 {
   #running(): number { return [...this.#jobs.values()].filter(job => job.state === "running").length; }
 
   /** Starts the job; its first cursor (the command line). */
-  #run(key: string, projectId: string, chatId: string, step: PreviewBuildStepV1, tools: PreviewBuildToolsV1, args: string[], confined: { program: string; args: string[] }, plan: PreviewBuildPlanResultV1): number {
+  #run(key: string, projectId: string, chatId: string, step: PreviewBuildStepV1, tools: PreviewBuildToolsV1, args: string[], confined: { program: string; args: string[] }, plan: PreviewBuildPlanResultV1, hold: string, temp: string): number {
     const now = this.#options.now ?? Date.now;
     const previous = this.#jobs.get(key);
     const job: Job = {
       key, projectId, chatId, step, state: "running", lines: [], base: (previous?.base ?? 0) + (previous?.lines.length ?? 0),
       exitCode: null, startedAt: now(), endedAt: null, child: undefined, pid: undefined, seen: new Map(), leaderExited: false,
-      timers: [], tracker: undefined, output: null, stopping: null, leftovers: 0,
+      timers: [], tracker: undefined, output: null, stopping: null, leftovers: 0, hold, temp,
     };
     this.#jobs.set(key, job);
     this.#append(job, `$ ${[plan.packageManager, ...args].join(" ")}`);
@@ -331,7 +423,8 @@ export class PreviewBuildManagerV1 {
     try {
       child = this.#options.spawn(confined.program, confined.args, {
         cwd: plan.workspacePath!,
-        env: previewBuildEnvironment(this.#options.environment, tools.pathDirs),
+        // Its own temporary folder (re-review B2): the sandbox writes nowhere else outside the workspace and caches.
+        env: { ...previewBuildEnvironment(this.#options.environment, tools.pathDirs), TMPDIR: temp, TMP: temp, TEMP: temp },
         // Its own session and process group: ending it ends what it started.
         detached: process.platform !== "win32",
         stdio: ["ignore", "pipe", "pipe"],
@@ -426,13 +519,39 @@ export class PreviewBuildManagerV1 {
 
   #saveRunning(): void {
     const records = [...this.#jobs.values()].filter(job => job.state === "running" || job.leftovers > 0)
-      .map(job => ({ leader: job.pid ?? 0, processes: [...job.seen].map(([pid, started]) => ({ pid, started })) }));
-    try { this.#options.saveRunning(records); } catch { /* best effort */ }
+      .map(job => ({ leader: job.pid ?? 0, ...(job.pid !== undefined && job.seen.has(job.pid) ? { leaderStarted: job.seen.get(job.pid)! } : {}),
+        processes: [...job.seen].map(([pid, started]) => ({ pid, started })) }));
+    // Orphans of an earlier run stay on record until they are gone (re-review B3).
+    try { this.#options.saveRunning([...this.#orphans.filter(record => record.leader !== 0), ...records]); } catch { /* best effort */ }
+  }
+
+  /** The group number is still this job's (re-review B3): its leader is
+   * the same process, or gone (then only the job's own members carry it). */
+  #groupIsOurs(job: Job): boolean {
+    if (job.pid === undefined) return false;
+    let all: PreviewProcessV1[];
+    try { all = this.#options.processes(); } catch { return false; }
+    const owner = all.find(entry => entry.pid === job.pid);
+    return !owner || owner.started === job.seen.get(job.pid);
+  }
+
+  /** The engine's hold and the job's temporary folder go once nothing of it lives. */
+  #release(job: Job): void {
+    if (job.hold) {
+      const hold = job.hold;
+      job.hold = null;
+      void this.#options.sidecar()?.previewBuildRelease({ holdId: hold }).catch(() => undefined);
+    }
+    if (job.temp) {
+      const temp = job.temp;
+      job.temp = null;
+      try { this.#options.removeTemp(temp); } catch { /* best effort */ }
+    }
   }
 
   /** Signals the job's group and every process seen (still the same one). */
   #kill(job: Job, signal: NodeJS.Signals): void {
-    if (job.pid !== undefined) { try { this.#options.killGroup(job.pid, signal); } catch { /* gone */ } }
+    if (job.pid !== undefined && this.#groupIsOurs(job)) { try { this.#options.killGroup(job.pid, signal); } catch { /* gone */ } }
     for (const [pid, started] of job.seen) {
       if (pid === job.pid && signal !== "SIGKILL") continue;
       try { this.#options.killProcess(pid, started, signal); } catch { /* gone */ }
@@ -495,6 +614,9 @@ export class PreviewBuildManagerV1 {
       job.leftovers = [...job.seen].filter(([pid, started]) => this.#options.isAlive(pid, started)).length;
       if (job.leftovers > 0) this.#append(job, `끝나지 않은 프로그램 ${job.leftovers}개가 남아 있어요. 다시 빌드하기 전에 앱을 다시 시작해 주세요.`);
     }
+    // The workspace stays held (no team run, no save) while anything of the
+    // job may still write there (re-review: reservation).
+    if (job.leftovers === 0) this.#release(job);
     this.#saveRunning();
     this.#options.log(`preview ${job.step} ${job.state}`);
     try { this.#options.writeLog(previewBuildLogName(job.projectId, job.chatId), `${job.lines.join("\n")}\n`); } catch { /* best effort */ }
