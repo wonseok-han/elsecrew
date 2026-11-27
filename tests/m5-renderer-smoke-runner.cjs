@@ -680,6 +680,31 @@ app.whenReady().then(async () => {
     document.querySelector('[data-testid=right-panel-changes] .m5-change-row').click();
     await ${waitFor("document.querySelectorAll('.m5-diff-lines tbody tr').length === (document.querySelector('.m5-diff-split') ? 199 : 200)", "reopened diff")};
     if (!document.querySelector('.m5-diff-deleted') || !document.querySelector('.m5-diff-added')) throw new Error('missing distinct change rows');
+    // The plain-table comparison (a diff too large for Monaco's sides) keeps its per-line follow-up
+    // buttons; the native smoke checks Monaco's own view (PR #24 review I3).
+    {
+      const references = [...document.querySelectorAll('.m5-diff-lines .m5-diff-line-reference')];
+      const composer = document.querySelector('#m5-followup-text');
+      if (references.length === 0 || !composer) throw new Error('table comparison lost its per-line follow-up buttons');
+      const draft = composer.value;
+      const path = document.querySelector('.m5-diff-identity strong').textContent;
+      const label = references[0].getAttribute('aria-label').replace('을 후속 요청 초안에 추가', '');
+      if (!label || !path) throw new Error('line reference without its place');
+      references[0].click();
+      await ${waitFor("(document.querySelector('#m5-followup-text')?.value ?? '').includes('검토할 변경 위치: ' + path + ' — ' + label)", "per-line follow-up in the draft")};
+      const input = document.querySelector('#m5-followup-text');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, draft);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await ${waitFor("document.querySelector('#m5-followup-text').value === draft", "draft restored after the line reference")};
+      // Writing the follow-up may have moved to the story: open the comparison again.
+      if (document.querySelector('[data-testid=review-sheet]').hidden || !document.querySelector('.m5-diff-lines')) {
+        if (!document.querySelector('[data-testid=review-sheet]').hidden) document.querySelector('[data-testid=sheet-close]').click();
+        document.querySelector('[data-testid=right-tab-changes]')?.click();
+        await ${waitFor("document.querySelector('[data-testid=right-panel-changes] .m5-change-row')", "changes list back")};
+        document.querySelector('[data-testid=right-panel-changes] .m5-change-row').click();
+        await ${waitFor("document.querySelectorAll('.m5-diff-lines tbody tr').length === (document.querySelector('.m5-diff-split') ? 199 : 200)", "diff after the line reference")};
+      }
+    }
     if (document.querySelector('.m5-diff-header').getBoundingClientRect().height > 42) throw new Error('comparison header is too tall');
     document.querySelector('.m5-diff-options').open = true;
     const wrapToggle = document.querySelector('.m5-diff-wrap input');

@@ -2,6 +2,24 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #24 검토(차단 0·중요 3·경미 2) 반영 (`orca/ade-stab-b`)
+검토 `~/Documents/elsecrew-ade-stab-2026-11-27/REVIEW-pr24.md`(대상 ffe17d30). PR #25(안정화 A)와 `provider_login_io.rs`·`provider_login_process.rs`가 겹친다. 먼저 머지되는 쪽에 나중 쪽이 맞춘다.
+
+- **I1 경계 프레임**: 본문이 정확히 128KiB인 줄이 개행을 읽기 전에 자리를 기다렸다. 자리 없는 세션 읽기는 경계 **+1바이트**까지 읽는다. 자리는 개행 없이 경계를 넘었을 때(`pending > bound`)만 잡는다. 시험 `a_line_at_the_bound_needs_no_slot_and_one_byte_more_does`: 두 자리를 다 잡은 채 본문 128KiB−1·128KiB는 바로 받고, +1은 기다리며 버퍼는 경계+1이다. 자리 없는 연결의 버퍼 상한 단언도 +64KiB에서 +1로 좁혔다.
+- **I2 합산 지연**: 잠금 재질의를 복구 패스 하나의 공용 예산(100ms)으로 묶었다(`provider_login_process::settling`).
+  - `recover_run_holds`는 첫 훑기를 기다리지 않고 한다(`without_settling`). 바쁜 잠금만 모아 같은 예산 안에서 함께 다시 묻는다.
+  - 복구 요청·`release_bound_fence`는 run 잠금과 로그인 잠금 전체가 한 패스다.
+  - 패스 밖의 단독 판단(시험이 직접 부르는 복구, 소유자 정리의 잠금 읽기)은 자기 100ms를 쓴다. 즉시 바쁨으로 돌리면 시험이 같은 fork 복사 현상에 흔들렸다(`explicit_recovery_requires_closed_owner_and_valid_termination_record`, 로컬 1회).
+  - 시험 `a_recovery_pass_waits_once_however_many_runs_are_live`: 살아 있는 실행 6개에서 한 패스가 100~300ms다(예전 방식은 600ms 이상). 바깥 패스 안 두 번 호출도 300ms 미만이다.
+- **I3 diff 스모크**: `tests/m5-diff-followup-probe.cjs`가 Monaco가 실제로 그린 것을 본다.
+  - 나란히: `side-by-side` 클래스, 두 영역 각 200px 초과(실측 409/410).
+  - 한 화면: 클래스 없음, 원본 영역이 수정 영역의 1/4 미만(실측 39/780).
+  - 두 경우 모두: 원본 쪽 본문 `original`만, 수정 쪽 `edited in snapshot`+`original`, 추가 줄 표시(`.line-insert`/`.char-insert`) 있음.
+  - 표 대체 경로의 줄 단위 후속 요청은 렌더러 스모크가 다시 본다: 첫 줄 버튼 → 초안에 `검토할 변경 위치: <경로> — 이전 1줄`, 초안 복원.
+- **M1**: 잠금 시험은 고정 50ms 대신 자식이 부모의 신호를 받아야 exec한다. 큰 줄 시험은 고정 350/500ms 대신 첫 부분을 다 읽은 뒤 파일 신호로 나머지를 쓰게 하고, 실패가 자리 대기 한도를 채운 뒤인지 확인한다.
+- **M2**: `docs/procedures/m5-performance.md`의 project-ui 스모크 설명을 합치기 흐름으로 고쳤다. `ELSECREW_SMOKE_APPLY`로 복원을 주장하지 않는다.
+- **검증**: `cargo test --workspace` 1,338 통과·실패 0(1,162초), 영향 모듈(`provider_login_io`·`provider_login_process`·`provider_login_manager`·`a_sign_in_hold`) 3회 연속 74/74, `npm test` 1044/1044, 렌더러 마운트 스모크 69/69(표 경로 줄 단위 후속 요청 포함), 네이티브 기본·합치기+다시 불러오기 PASS(나란히 409/410, 한 화면 39/780). 최종 HEAD의 CI 결과는 PR #24 댓글.
+
 ### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — ADE 안정화 B: 불안정 시험 원인 수정·오래된 설치 응답·네이티브 스모크 L1·sidecar CI (`orca/ade-stab-b`, 기준 feature/ade 5012329e, PR #24)
 조정자 과제(안정화 B). 같은 시기 안정화 A가 엔진 실행 시작 구조를 바꾼다. 이 PR은 `orchestration_dispatch.rs`의 **시험 모듈**만 건드렸다(겹치면 그쪽 시험 두 곳).
 

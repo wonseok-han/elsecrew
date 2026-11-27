@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 /// progress (64 KiB), its parsed tree (string bytes up to the raw size, at most
 /// `PROVIDER_SESSION_LINE_MAX_VALUES` values) and a 128 KiB result, so about
 /// 24 MiB per slot at worst, 48 MiB for both. Every other connection holds at
-/// most the 128 KiB bound plus one read (192 KiB) before it must wait.
+/// most the 128 KiB bound plus one byte before it must wait.
 pub(crate) const LARGE_LINE_SLOTS: usize = 2;
 static LARGE_LINES_HELD: AtomicUsize = AtomicUsize::new(0);
 #[cfg(test)]
@@ -678,9 +678,12 @@ impl LoginIo {
                 return Err(refuse_line(self.session_lines.is_some(), "over the session line bound"));
             }
             // Past the observation bound a line needs one of the process-wide
-            // slots; without one, read nothing more until a slot is free.
+            // slots; without one, read nothing more until a slot is free. The
+            // bound is on the line's body: `bound` bytes and no newline yet
+            // may still be a normal line, so the slot is needed only once a
+            // byte past the bound arrived without its newline (PR #24 review I1).
             if self.session_lines.is_some()
-                && self.pending.len() >= PROVIDER_OBSERVATION_LINE_MAX_BYTES
+                && self.pending.len() > PROVIDER_OBSERVATION_LINE_MAX_BYTES
                 && self.large_line.is_none()
             {
                 match LargeLineSlot::try_take() {
@@ -702,13 +705,14 @@ impl LoginIo {
             // a few polls; other exchanges keep the small read.
             let mut chunk = [0u8; 64 * 1024];
             let mut size = if self.session_lines.is_some() { chunk.len() } else { 4096 };
-            // Without a slot a read never crosses the observation bound: the
-            // check above must see a line that reaches it. A short read (a
-            // busy machine) once left 120 KiB here, and the next 64 KiB read
+            // Without a slot a read stops one byte past the observation bound
+            // (enough to see the newline of a line exactly at the bound): the
+            // check above must see any longer line. A short read (a busy
+            // machine) once left 120 KiB here, and the next 64 KiB read
             // finished a 150 KiB line that was then parsed without a slot
             // (flaky `a_session_waiting_too_long_for_a_slot_fails_alone`).
-            if self.session_lines.is_some() && self.large_line.is_none() && self.pending.len() < PROVIDER_OBSERVATION_LINE_MAX_BYTES {
-                size = size.min(PROVIDER_OBSERVATION_LINE_MAX_BYTES - self.pending.len());
+            if self.session_lines.is_some() && self.large_line.is_none() && self.pending.len() <= PROVIDER_OBSERVATION_LINE_MAX_BYTES {
+                size = size.min(PROVIDER_OBSERVATION_LINE_MAX_BYTES + 1 - self.pending.len());
             }
             match self.output.read(&mut chunk[..size]) {
                 Ok(0) => return Err(failure()), // including partial-frame EOF
@@ -967,7 +971,7 @@ mod tests {
 
     /// Review I1: several sessions send large lines at the same time. At most
     /// `LARGE_LINE_SLOTS` connections in the process hold one; the others read
-    /// nothing past the observation bound plus one read until a slot is free,
+    /// nothing past the observation bound plus one byte until a slot is free,
     /// and every session still gets every line.
     #[test]
     fn concurrent_large_lines_share_the_process_wide_slots() {
@@ -992,7 +996,7 @@ mod tests {
                     frames[index] += 1;
                 }
                 if io.large_line.is_none() {
-                    assert!(io.pending.len() <= PROVIDER_OBSERVATION_LINE_MAX_BYTES + 64 * 1024,
+                    assert!(io.pending.len() <= PROVIDER_OBSERVATION_LINE_MAX_BYTES + 1,
                         "a connection without a slot buffered {} bytes", io.pending.len());
                 }
             }
@@ -1094,7 +1098,7 @@ mod tests {
             assert!(started.elapsed() < Duration::from_secs(5), "the waiter never gave up");
             match waiter.poll_observed(&cancel, &mut || Ok(())) {
                 Ok(None) => {
-                    assert!(waiter.pending.len() <= PROVIDER_OBSERVATION_LINE_MAX_BYTES + 64 * 1024);
+                    assert!(waiter.pending.len() <= PROVIDER_OBSERVATION_LINE_MAX_BYTES + 1);
                     std::thread::sleep(Duration::from_millis(5));
                 }
                 Ok(Some(_)) => panic!("the waiter got a line without a slot"),
@@ -1111,39 +1115,97 @@ mod tests {
         assert_eq!(LARGE_LINES_HELD.load(Ordering::Acquire), 0);
     }
 
+    /// Polls a session with both slots taken until its line arrives (Some),
+    /// or it waits for a slot past `settled` (None), or it fails (Err). While
+    /// it waits it never holds more than the bound plus one byte.
+    fn poll_without_slots(io: &mut LoginIo, settled: Duration) -> Result<Option<BoundedObservation>, (Duration, Duration)> {
+        let cancel = AtomicBool::new(false);
+        let started = Instant::now();
+        let mut waiting_since = None;
+        loop {
+            assert!(started.elapsed() < Duration::from_secs(20), "the session neither ended nor waited");
+            match io.poll_observed(&cancel, &mut || Ok(())) {
+                Ok(Some(line)) => return Ok(Some(line)),
+                Ok(None) => {
+                    assert!(io.large_line.is_none(), "a slot was taken while both were held");
+                    assert!(io.pending.len() <= PROVIDER_OBSERVATION_LINE_MAX_BYTES + 1, "read {} bytes without a slot", io.pending.len());
+                    if io.slot_wait.is_some() {
+                        let since = *waiting_since.get_or_insert_with(Instant::now);
+                        if since.elapsed() >= settled { return Ok(None); }
+                    }
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                Err(_) => return Err((started.elapsed(), waiting_since.map_or(Duration::ZERO, |since| since.elapsed()))),
+            }
+        }
+    }
+
+    /// PR #24 review I1: the bound is on a line's body. With both slots
+    /// taken, a body of exactly 128 KiB (and one byte less) arrives as a
+    /// normal line; one byte more waits for a slot.
+    #[test]
+    fn a_line_at_the_bound_needs_no_slot_and_one_byte_more_does() {
+        let _slots = LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let held: Vec<_> = (0..LARGE_LINE_SLOTS).map(|_| LargeLineSlot::try_take().unwrap()).collect();
+        for body in [PROVIDER_OBSERVATION_LINE_MAX_BYTES - 1, PROVIDER_OBSERVATION_LINE_MAX_BYTES, PROVIDER_OBSERVATION_LINE_MAX_BYTES + 1] {
+            let script = format!("head -c {body} /dev/zero | tr '\\0' A; printf '\\n'; read hold");
+            let mut child = fixture(Some(&script));
+            let mut io = LoginIo::attach(&mut child.0).unwrap();
+            io.admit_session_lines(OversizedLinePolicy::ClaudeStreamJson).unwrap();
+            io.set_large_line_limits(Duration::from_secs(30), Duration::from_secs(10), Duration::from_secs(30));
+            match poll_without_slots(&mut io, Duration::from_millis(300)) {
+                Ok(Some(line)) => {
+                    assert!(body <= PROVIDER_OBSERVATION_LINE_MAX_BYTES, "{body}: a line over the bound came without a slot");
+                    assert_eq!(line.byte_len(), body + 1, "{body}");
+                }
+                Ok(None) => {
+                    assert_eq!(body, PROVIDER_OBSERVATION_LINE_MAX_BYTES + 1, "{body}: a line within the bound waited for a slot");
+                    assert_eq!(io.pending.len(), PROVIDER_OBSERVATION_LINE_MAX_BYTES + 1);
+                }
+                Err(_) => panic!("{body}: the session failed"),
+            }
+        }
+        drop(held);
+        assert_eq!(LARGE_LINES_HELD.load(Ordering::Acquire), 0);
+    }
+
     /// ADE stabilization B: 120 KiB of a line arrive first, then the rest at
     /// once. A read that crossed the bound used to finish the line there and
-    /// hand it over without a slot; now the read stops at the bound, the
-    /// slot check sees the line, and with no slot free the line waits and
-    /// then fails alone.
+    /// hand it over without a slot; now the read stops past the bound, the
+    /// slot check sees the line, and with no slot free the line waits its
+    /// full wait and then fails alone. The provider writes the rest only
+    /// once the test drained the first part (no fixed delays, PR #24 M1).
     #[test]
     fn a_line_that_crosses_the_bound_in_one_read_still_needs_a_slot() {
         let _slots = LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let held: Vec<_> = (0..LARGE_LINE_SLOTS).map(|_| LargeLineSlot::try_take().unwrap()).collect();
         let cancel = AtomicBool::new(false);
-        let script = "printf '{\"type\":\"user\",\"pad\":\"'; head -c 122880 /dev/zero | tr '\\0' A; /bin/sleep 0.5; \
-                      head -c 30000 /dev/zero | tr '\\0' A; printf '\"}\\n'; read hold";
-        let mut child = fixture(Some(script));
+        let temp = tempfile::tempdir().unwrap();
+        let go = temp.path().join("go");
+        let script = format!(
+            "printf '{{\"type\":\"user\",\"pad\":\"'; head -c 122880 /dev/zero | tr '\\0' A; \
+             while [ ! -e '{}' ]; do /bin/sleep 0.01; done; \
+             head -c 30000 /dev/zero | tr '\\0' A; printf '\"}}\\n'; read hold",
+            go.display()
+        );
+        let mut child = fixture(Some(&script));
         let mut io = LoginIo::attach(&mut child.0).unwrap();
         io.admit_session_lines(OversizedLinePolicy::ClaudeStreamJson).unwrap();
-        io.set_large_line_limits(Duration::from_secs(30), Duration::from_secs(10), Duration::from_millis(300));
+        let wait = Duration::from_millis(300);
+        io.set_large_line_limits(Duration::from_secs(30), Duration::from_secs(10), wait);
+        let first = "{\"type\":\"user\",\"pad\":\"".len() + 122880;
         let started = Instant::now();
-        // Drain the first part completely while the provider pauses.
-        while started.elapsed() < Duration::from_millis(350) {
+        while io.pending.len() < first {
+            assert!(started.elapsed() < Duration::from_secs(20), "the first part never arrived");
             assert!(io.poll_observed(&cancel, &mut || Ok(())).unwrap().is_none());
-            std::thread::sleep(Duration::from_millis(5));
+            std::thread::sleep(Duration::from_millis(2));
         }
-        assert!(io.pending.len() > 120 * 1024 && io.pending.len() < PROVIDER_OBSERVATION_LINE_MAX_BYTES, "{}", io.pending.len());
-        loop {
-            assert!(started.elapsed() < Duration::from_secs(10), "the line never gave up");
-            match io.poll_observed(&cancel, &mut || Ok(())) {
-                Ok(None) => {
-                    assert!(io.pending.len() <= PROVIDER_OBSERVATION_LINE_MAX_BYTES, "read past the bound without a slot");
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                Ok(Some(_)) => panic!("a line over the bound was handed over without a slot"),
-                Err(_) => break,
-            }
+        assert_eq!(io.pending.len(), first);
+        std::fs::write(&go, b"").unwrap();
+        match poll_without_slots(&mut io, Duration::from_secs(60)) {
+            Ok(_) => panic!("a line over the bound was handed over without a slot"),
+            // It failed because its slot wait ran out, not for another reason.
+            Err((_, waited)) => assert!(waited >= wait, "failed after waiting {waited:?}"),
         }
         assert!(io.failed && io.large_line.is_none());
         drop(held);

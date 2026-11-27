@@ -431,12 +431,68 @@ fn existing_reservation_error(directory: &Dir, name: &str) -> SidecarError {
 }
 
 fn lock_exclusive(file: &File) -> Result<(), SidecarError> {
-    lock_exclusive_settled(file, LOCK_SETTLE)
+    let until = match SETTLE.get() {
+        // A single probe outside a recovery pass is a pass of its own.
+        Settle::Own => Some(std::time::Instant::now() + LOCK_SETTLE),
+        Settle::Until(until) => Some(until),
+        Settle::Immediate => None,
+    };
+    lock_exclusive_until(file, until)
 }
 
-/// How long a contended lock is asked again before its holder counts as a
-/// live owner.
-const LOCK_SETTLE: std::time::Duration = std::time::Duration::from_millis(100);
+/// How long one recovery pass asks contended locks again before their
+/// holders count as live owners. One budget for the whole pass, never one
+/// per lock (PR #24 review I2: per-lock waits added up with every live run).
+pub(crate) const LOCK_SETTLE: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// How a contended lock is answered on this thread.
+#[derive(Clone, Copy)]
+enum Settle {
+    /// Outside a recovery pass: this probe alone gets `LOCK_SETTLE`.
+    Own,
+    /// Inside a pass: until the pass's shared budget ends.
+    Until(std::time::Instant),
+    /// A pass's first sweep: busy at once; the pass asks again later.
+    Immediate,
+}
+
+thread_local! {
+    static SETTLE: std::cell::Cell<Settle> = const { std::cell::Cell::new(Settle::Own) };
+}
+
+/// Restores the outer setting, also on unwinding.
+struct SettleScope(Settle);
+impl Drop for SettleScope {
+    fn drop(&mut self) {
+        SETTLE.set(self.0);
+    }
+}
+
+/// Runs `work` as one recovery pass: its contended locks share one
+/// `LOCK_SETTLE` budget. A pass inside a pass keeps the outer budget.
+pub(crate) fn settling<T>(work: impl FnOnce() -> T) -> T {
+    let outer = SETTLE.get();
+    let _scope = SettleScope(outer);
+    if matches!(outer, Settle::Own) {
+        SETTLE.set(Settle::Until(std::time::Instant::now() + LOCK_SETTLE));
+    }
+    work()
+}
+
+/// The end of the current pass's settle budget, if a pass is running.
+pub(crate) fn settle_deadline() -> Option<std::time::Instant> {
+    match SETTLE.get() {
+        Settle::Until(until) => Some(until),
+        Settle::Own | Settle::Immediate => None,
+    }
+}
+
+/// Runs `work` with every contended lock answered at once (busy).
+pub(crate) fn without_settling<T>(work: impl FnOnce() -> T) -> T {
+    let _scope = SettleScope(SETTLE.get());
+    SETTLE.set(Settle::Immediate);
+    work()
+}
 
 /// A `flock` belongs to the open file, and a child this process is starting
 /// with fork-then-exec (any `pre_exec` launch: the gate, the Claude launcher,
@@ -445,9 +501,9 @@ const LOCK_SETTLE: std::time::Duration = std::time::Duration::from_millis(100);
 /// short window after the probe itself closed it, and the next probe of the
 /// same hold read that as a live owner (flaky `a_sign_in_hold_*` tests, ADE
 /// stabilization B). A real owner (a run, a check) holds its lock for the
-/// whole of its work, so a lock still contended after `settle` is busy.
-fn lock_exclusive_settled(file: &File, settle: std::time::Duration) -> Result<(), SidecarError> {
-    let deadline = std::time::Instant::now() + settle;
+/// whole of its work, so a lock still contended at `until` is busy; with no
+/// `until` it is busy at once.
+fn lock_exclusive_until(file: &File, until: Option<std::time::Instant>) -> Result<(), SidecarError> {
     loop {
         if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
             return Ok(());
@@ -458,7 +514,7 @@ fn lock_exclusive_settled(file: &File, settle: std::time::Duration) -> Result<()
         // A live owner holds it (a run, a check): busy, not a recovery case;
         // reporting recovery here left the profile looking fenced and
         // blocked quitting (review M37).
-        if std::time::Instant::now() >= deadline {
+        if until.is_none_or(|until| std::time::Instant::now() >= until) {
             return Err(busy());
         }
         std::thread::sleep(std::time::Duration::from_millis(2));
@@ -1827,58 +1883,104 @@ mod tests {
 
     /// ADE stabilization B: a child this process starts with fork-then-exec
     /// copies every open file, a probe's locked hold included, until its
-    /// exec. The next probe must not take that moment for a live owner; a
-    /// lock someone really keeps is still busy.
+    /// exec. The next probe in a recovery pass must not take that moment for
+    /// a live owner; a lock someone really keeps is still busy. No fixed
+    /// delays (PR #24 review M1): the child waits for the test's word.
     #[cfg(unix)]
     #[test]
     fn a_lock_copied_into_a_starting_child_is_not_a_live_owner() {
-        use std::io::Read;
+        use std::io::{Read, Write};
         use std::os::unix::process::CommandExt;
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("hold.pending");
         std::fs::write(&path, b"hold\n").unwrap();
         let open = || File::from_std(std::fs::File::open(&path).unwrap());
         let probe = open();
-        lock_exclusive(&probe).unwrap();
-        // The child signals once it is forked, then waits 50 ms before exec.
-        let (mut forked, signal) = std::os::unix::net::UnixStream::pair().unwrap();
-        let signal_fd = std::os::fd::AsRawFd::as_raw_fd(&signal);
+        lock_exclusive_until(&probe, Some(std::time::Instant::now() + std::time::Duration::from_secs(10))).unwrap();
+        // The child says when it is forked and execs only when told to.
+        let (mut test_end, child_end) = std::os::unix::net::UnixStream::pair().unwrap();
+        let child_fd = std::os::fd::AsRawFd::as_raw_fd(&child_end);
         let starter = std::thread::spawn(move || {
             let mut command = std::process::Command::new("/usr/bin/true");
             unsafe {
                 command.pre_exec(move || {
-                    libc::write(signal_fd, b"f".as_ptr().cast(), 1);
-                    libc::usleep(50_000);
+                    let mut word = [0u8; 1];
+                    libc::write(child_fd, b"f".as_ptr().cast(), 1);
+                    libc::read(child_fd, word.as_mut_ptr().cast(), 1);
                     Ok(())
                 });
             }
             let status = command.status().unwrap();
-            drop(signal);
+            drop(child_end);
             status
         });
         let mut byte = [0u8; 1];
-        forked.read_exact(&mut byte).unwrap();
+        test_end.read_exact(&mut byte).unwrap();
         // The probe is done; only the starting child's copy holds the lock now.
         drop(probe);
         let next = open();
         assert_eq!(
-            lock_exclusive_settled(&next, std::time::Duration::ZERO).err().map(|error| error.kind()),
+            lock_exclusive_until(&next, None).err().map(|error| error.kind()),
             Some("providerBusy"),
-            "the copied lock is real for a moment"
+            "the copied lock is real until the child's exec"
         );
+        test_end.write_all(b"g").unwrap();
         // Asked again, it is free once the child's exec closed its copy (a
-        // slow runner may take longer than the product's 100 ms to get there).
-        lock_exclusive_settled(&next, std::time::Duration::from_secs(10)).unwrap();
+        // generous bound: a slow runner may take longer than the product's
+        // 100 ms to get there).
+        lock_exclusive_until(&next, Some(std::time::Instant::now() + std::time::Duration::from_secs(10))).unwrap();
         assert!(starter.join().unwrap().success());
         drop(next);
-        // A lock that is kept stays busy.
+        // A lock that is kept stays busy, after the probe's own budget, and
+        // in a pass after the pass's budget. (Taking a lock here is asked
+        // again too: other tests in this process start children all the time.)
+        let take = |file: &File| lock_exclusive_until(file, Some(std::time::Instant::now() + std::time::Duration::from_secs(10)));
         let owner = open();
-        lock_exclusive(&owner).unwrap();
+        take(&owner).unwrap();
         let started = std::time::Instant::now();
         assert_eq!(lock_exclusive(&open()).err().map(|error| error.kind()), Some("providerBusy"));
         assert!(started.elapsed() >= LOCK_SETTLE);
+        // In one pass two contended locks share one budget; a first sweep
+        // does not wait at all.
+        let started = std::time::Instant::now();
+        settling(|| {
+            assert_eq!(lock_exclusive(&open()).err().map(|error| error.kind()), Some("providerBusy"));
+            assert_eq!(lock_exclusive(&open()).err().map(|error| error.kind()), Some("providerBusy"));
+        });
+        let took = started.elapsed();
+        assert!(took >= LOCK_SETTLE && took < LOCK_SETTLE * 2, "{took:?}");
+        let started = std::time::Instant::now();
+        without_settling(|| assert_eq!(lock_exclusive(&open()).err().map(|error| error.kind()), Some("providerBusy")));
+        assert!(started.elapsed() < LOCK_SETTLE, "{:?}", started.elapsed());
         drop(owner);
-        lock_exclusive(&open()).unwrap();
+        take(&open()).unwrap();
+    }
+
+    /// PR #24 review I2: a recovery pass asks every contended lock again
+    /// within one shared budget. Live runs do not each add their own wait.
+    #[test]
+    fn a_recovery_pass_waits_once_however_many_runs_are_live() {
+        let temp = tempfile::tempdir().unwrap();
+        let binding = profile(&temp);
+        let storage = crate::Storage::open(&temp.path().canonicalize().unwrap().join("elsecrew.sqlite3")).unwrap();
+        let live: Vec<_> = (0..6).map(|_| LoginProcess::reserve_shared(&binding).unwrap()).collect();
+        let holds = profile_run_holds(&binding).unwrap();
+        assert_eq!(holds.len(), 6);
+        let started = std::time::Instant::now();
+        crate::provider_login_manager::recover_run_holds(&binding, &storage, None).unwrap();
+        let took = started.elapsed();
+        // Six live holds asked again one by one took six budgets (600 ms).
+        assert!(took >= LOCK_SETTLE && took < LOCK_SETTLE * 3, "{took:?}");
+        // Every live run keeps its hold.
+        assert_eq!(profile_run_holds(&binding).unwrap(), holds);
+        // Also inside an outer pass (the sign-in recovery): one budget in all.
+        let started = std::time::Instant::now();
+        settling(|| {
+            crate::provider_login_manager::recover_run_holds(&binding, &storage, None).unwrap();
+            crate::provider_login_manager::recover_run_holds(&binding, &storage, None).unwrap();
+        });
+        assert!(started.elapsed() < LOCK_SETTLE * 3, "{:?}", started.elapsed());
+        drop(live);
     }
 
     #[test]
