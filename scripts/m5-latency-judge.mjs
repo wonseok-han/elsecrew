@@ -13,7 +13,7 @@
 // getChat answer within 1 s in every condition.
 //
 // `--starting` (ADE stabilization A, real accounts): two Claude Code and two
-// Codex runs start at once beside a working Claude run ("warm" alone is the
+// Codex runs start at once beside a working Codex run ("warm" alone is the
 // control). The screen sends file read, approval list and getChat every
 // second without waiting (open loop), so a hold of the engine counts as every
 // read sent during it (one timer at a time). The load must hold: two Claude

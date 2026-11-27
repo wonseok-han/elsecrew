@@ -1,6 +1,6 @@
 // Response time of the light reads while runs start (ADE stabilization A):
 // file read, approval list and getChat, measured from the screen while two
-// Claude Code and two Codex runs start at once, beside one Claude run that is
+// Claude Code and two Codex runs start at once, beside one Codex run that is
 // already working ("warm"). Before the fix a start held the engine's one loop
 // for 13–18 s and four starts held every request for over a minute.
 //
@@ -87,7 +87,9 @@ async function run(window) {
   const created = [];
   try {
     await wait(`Boolean(window.m5Projects && window.m5) && document.body.innerText.length > 0`, 'app ready');
-    await wait(`window.m5.getSystemStatus().then(s => s.state === 'ready' || s.state === 'shellReady')`, 'engine ready', 90_000);
+    // Until storage admission is done (a start without the last clean
+    // shutdown's seal checks the whole database first).
+    await wait(`window.m5.getSystemStatus().then(s => s.storageAdmission ? s.storageAdmission.state === 'ready' : s.state === 'ready')`, 'engine ready', 600_000);
     const connections = await page(`window.m5Projects.request({action:'getProviderConnections'}).then(r => r.connections)`);
     if (connections.codex !== true || connections['claude-code'] !== true) throw new Error('both agents must be connected in the app');
     const projects = {};
@@ -131,8 +133,11 @@ async function run(window) {
     })`;
     const start = chat => `${startFn}(${JSON.stringify(chat)})`;
 
-    // The warm run: one Claude run working while the others start.
-    const warm = await task('claude', 'Warm run: as your final answer, write the numbers from one to four thousand in English words, separated by commas. Do not delegate, do not read files.');
+    // The warm run: one Codex run working while the others start.
+    // Codex writes a long answer slowly (one to three hundred: about five
+    // minutes), so the warm run outlives the starts; a Claude run answered
+    // a long list in seconds (PR #25 review I5: the load must hold).
+    const warm = await task('codex', 'Warm run: as your final answer, write the numbers from one to three hundred in English words, separated by commas. Do not delegate, do not read files.');
     const warmStart = await page(start(warm));
     if (warmStart.error) throw new Error('warm start: ' + warmStart.error);
     const identity = Object.fromEntries(['chatId', 'taskId', 'projectId', 'worktreeId', 'workspaceIdentity', 'runId'].map(key => [key, warmStart.accepted[key]]));

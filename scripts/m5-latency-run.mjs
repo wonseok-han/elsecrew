@@ -12,7 +12,7 @@
 // exercised (PR #15 review B1·I1).
 //
 // --starting (ADE stabilization A) measures instead while runs start: two
-// Claude Code and two Codex runs at once beside a working Claude run, with
+// Claude Code and two Codex runs at once beside a working Codex run, with
 // REAL accounts and providers on the development app's own data (run only
 // when no other Elsecrew app uses it; five tiny paid prompts, each run
 // stopped once started; scripts/m5-latency-starting-probe.cjs). File read,
